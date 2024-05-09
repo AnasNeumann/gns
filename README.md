@@ -10,8 +10,21 @@ A small Graph Attention Network (GAT) to schedule jobs in a ETO manufacturing en
 
 ## Architecture of the project
 * `/FJS/` contains the code for the traditional Flexible Job Shop scheduling problem;
-    * `/FJS/instance_generator.py` the code to randomly generate instances and save them into `/FJS/instances/`;
-    * `/FJS/exact_solver.py` the code to solve the instances using [Google OR solver](https://developers.google.com/optimization);
+    * `/FJS/instance_generator.py [nb train instances] [nb test instances] [min jobs] [max jobs] [min resources] [max type of resources] [max resources by type] [max operations]` the code to randomly generate instances and save them into `/FJS/instances/train` and `/FJS/instances/train`;
+        * e.g. `python FJS/instance_generator.py 10 5 2 10 3 7 3 6`;
+    * `/FJS/exact_solver.py [type]` the code to solve the instances using [Google OR solver](https://developers.google.com/optimization);
+        * e.g. `python FJS/exact_solver.py test`;
     * `/FJS/gns.py` the code to solve the instances using a Graph Attention Network (GAT) and PPO. 
 * `/EPSIII/` contains the code for third version of the ETO Project Scheduling problem as published by [Neumann et al. (2023)](https://doi.org/10.1016/j.ijpe.2023.109077); 
 * `common.py` contains the common code used by several files.
+
+## Typical PKL file with a FJS instance 
+```python
+    FJS_instance = {
+        "resources": [0, 3, 2, 7], # e.g. 3 resources of type 1; 7 resources of type 3
+        "jobs": [  
+            [(0, 2), (3, 8), (1, 3)],  # e.g. operation 1 (of job 0) runs on resource type 3 with a processing time of 8 
+            [(0, 8), (2, 10), (1, 2)],  
+            [(0, 9), (2, 1)]  
+    ]}
+```
