@@ -16,7 +16,8 @@ A small Graph Attention Network (GAT) to schedule jobs in a ETO manufacturing en
     * `/FJS/exact_solver.py [type]` the code to solve the instances using [Google OR solver](https://developers.google.com/optimization);
         * e.g. `python FJS/exact_solver.py test`;
 
-    * `/FJS/gns.py` the code to solve the instances using a Graph Attention Network (GAT) and PPO. 
+    * `/FJS/gns_solver.py` the code to solve the instances using a Graph Attention Network (GAT) trained using PPO RL;
+
 * `/EPSIII/` contains the code for third version of the ETO Project Scheduling problem as published by [Neumann et al. (2023)](https://doi.org/10.1016/j.ijpe.2023.109077); 
 
 * `common.py` contains the common code used by several files.
