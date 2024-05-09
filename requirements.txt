@@ -5,4 +5,5 @@ plotly
 matplotlib
 torch
 torchvision
+torchaudio
 torch_geometric
