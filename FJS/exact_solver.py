@@ -24,87 +24,82 @@ for i in instances:
     print("=*= START A NEW INSTANCE =*=")
     print("============================")
     
-    # Load and display the instance
+    # Load data and display the instance
     print(i)
     jobs = i['jobs']
     resources_types = i['resources']
     num_jobs = len(jobs)
     num_resource_types = len(resources_types)
+    all_operations = {}
+    resources_by_type = {type_id: [] for type_id in range(num_resource_types)}
+    
+    resources_intervals = {type_id: [[] for _ in range(resources_types[type_id])] for type_id in range(num_resource_types)}
 
-    # Create variables
-    model = cp_model.CpModel()
-    all_tasks = {}
-    type_to_intervals = {type_id: [] for type_id in range(num_resource_types)}
-    all_resources_by_type = {type_id: [] for type_id in range(num_resource_types)}
-
-    # Create variables for resources of each type
+    # Flatten the resources
     for resource_type, count in enumerate(resources_types):
         for resource_id in range(count):
-            all_resources_by_type[resource_type].append(resource_id)
+            resources_by_type[resource_type].append(resource_id)
 
-    # Create a task (interval) for each operation of each job
+    # CREATE THE WHOLE MODEL
+    model = cp_model.CpModel()
     for job_id, job in enumerate(jobs):
-        for task_id, (resource_type, duration) in enumerate(job):
-            suffix = f'_{job_id}_{task_id}'
+        for operation_id, (resource_type, duration) in enumerate(job):
+            
+            # OPERATIONS VARIABLES: "start", "end", and "resource selection (select and resource)" variables for each operation
+            suffix = f'_{job_id}_{operation_id}'
             start_var = model.NewIntVar(0, sum(d for j in jobs for _, d in j), f'start{suffix}')
             end_var = model.NewIntVar(0, sum(d for j in jobs for _, d in j), f'end{suffix}')
-            chosen_resource = model.NewIntVar(0, len(all_resources_by_type[resource_type]) - 1, f'resource{suffix}')
-            resource_usage = [
-                model.NewBoolVar(f'use{suffix}_r{resource_id}')
-                for resource_id in all_resources_by_type[resource_type]
-            ]
+            chosen_resource = model.NewIntVar(0, len(resources_by_type[resource_type]) - 1, f'resource{suffix}')
+            resource_selection = [model.NewBoolVar(f'select{suffix}_r{resource_id}') for resource_id in resources_by_type[resource_type]]
 
-            # Create an interval variable for each resource that could be chosen
             intervals_for_resources = []
-            for resource_id in all_resources_by_type[resource_type]:
-                is_used = resource_usage[resource_id]
+            for resource_id in resources_by_type[resource_type]:
+                is_used = resource_selection[resource_id]
+                # INTERVAL VARIABLE: "interval" for each resource that could be chosen (optional is "is_used")!
                 interval_var = model.NewOptionalIntervalVar(start_var, duration, end_var, is_used, f'interval{suffix}_r{resource_id}')
                 intervals_for_resources.append(interval_var)
-
-                # Link resource choice to the Boolean variable
+                # FIRST CONSTRAINT: the boolean selection variable and the integer one (num of the type of resource) must be consistent
                 model.Add(chosen_resource == resource_id).OnlyEnforceIf(is_used)
+            resources_intervals[resource_type][resource_id].append(interval_var)
 
-            # Ensure exactly one resource is chosen
-            model.Add(sum(resource_usage) == 1)
+            # SECOND CONSTRAINT: exactly one and only one resource selected by operation
+            model.Add(sum(resource_selection) == 1)
 
-            # Store the created intervals to enforce the no overlap constraint
-            type_to_intervals[resource_type].extend(intervals_for_resources)
+            # Store all varaibles of an operation into "all_operations"
+            all_operations[(job_id, operation_id)] = (start_var, end_var, intervals_for_resources, chosen_resource)
 
-            # Map all tasks for later access
-            all_tasks[(job_id, task_id)] = (start_var, end_var, intervals_for_resources, chosen_resource)
+    # THIRD CONSTRAINT: no overlapp between intervals for each resources
+    for intervals_by_type in resources_intervals.values():
+        for intervals_by_resource in intervals_by_type:
+            model.AddNoOverlap(intervals_by_resource)
 
-    # Add constraints for no overlapping intervals on the same resource type
-    for resource_type, intervals in type_to_intervals.items():
-        model.AddNoOverlap(intervals)
-
-    # Add precedence constraints within each job
+    # FOURTH CONSTRAINT: precedence relationship (end before start)
     for job_id, job in enumerate(jobs):
-        for task_id in range(len(job) - 1):
-            model.Add(all_tasks[(job_id, task_id)][1] <= all_tasks[(job_id, task_id + 1)][0])
+        for operation_id in range(len(job) - 1):
+            model.Add(all_operations[(job_id, operation_id)][1] <= all_operations[(job_id, operation_id + 1)][0])
 
-    # Objective: minimize the makespan
+    # OBJECTIVE: minimize the makespan (as a new variable and fifth constraint)
     obj_var = model.NewIntVar(0, sum(d for j in jobs for _, d in j), 'makespan')
-    model.AddMaxEquality(obj_var, [end_var for _, end_var, _, _ in all_tasks.values()])
+    model.AddMaxEquality(obj_var, [end_var for _, end_var, _, _ in all_operations.values()])
     model.Minimize(obj_var)
 
-    # Create the solver and solve
+    # SOLVE: solve the model and display the results
     solver = cp_model.CpSolver()
     status = solver.Solve(model)
-
-    # Display the results
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
         print(f'Minimum makespan: {solver.Value(obj_var)}')
         solutions.append(solver.Value(obj_var))
         for job_id, job in enumerate(jobs):
             print(f'Job {job_id}:')
-            for task_id, (resource_type, duration) in enumerate(job):
-                start = solver.Value(all_tasks[(job_id, task_id)][0])
-                end = solver.Value(all_tasks[(job_id, task_id)][1])
-                chosen_resource = solver.Value(all_tasks[(job_id, task_id)][3])
-                print(f'  Task {task_id} (Resource Type {resource_type}, Chosen Resource {chosen_resource}, Duration {duration}): Start={start}, End={end}')
+            for operation_id, (resource_type, duration) in enumerate(job):
+                start = solver.Value(all_operations[(job_id, operation_id)][0])
+                end = solver.Value(all_operations[(job_id, operation_id)][1])
+                chosen_resource = solver.Value(all_operations[(job_id, operation_id)][3])
+                print(f'  Task {operation_id} (Resource Type {resource_type}, Chosen Resource {chosen_resource}, Duration {duration}): Start={start}, End={end}')
     else:
         print('No solution found.')
 
+# SAVE : the solution as a dataFrame in CSV
 solutions_df = pd.DataFrame({
     'index': range(0, len(solutions)),
     'values': solutions
