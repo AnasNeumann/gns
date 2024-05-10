@@ -2,6 +2,7 @@ from ortools.sat.python import cp_model
 import sys
 import os
 import pickle
+import pandas as pd
 
 # CONFIGURATION
 INSTANCES_TYPES = sys.argv[1] # train or test
@@ -17,44 +18,45 @@ for i in os.listdir(INSTANCES_PATH):
             instances.append(pickle.load(file))
 
 # SOLVE ALL INSTANCES ONE BY ONE
+solutions = []
 for i in instances:
     print("============================")
     print("=*= START A NEW INSTANCE =*=")
     print("============================")
     
-    # Display the instance
+    # Load and display the instance
     print(i)
+    jobs = i['jobs']
+    resources_types = i['resources']
+    num_jobs = len(jobs)
+    num_resource_types = len(resources_types)
 
     # Create variables
     model = cp_model.CpModel()
-    num_jobs = len(i['jobs'])
-    num_resource_types = len(i['resources'])
-    jobs_data = i['jobs']
-    resources = i['resources']
     all_tasks = {}
     type_to_intervals = {type_id: [] for type_id in range(num_resource_types)}
-    type_to_resources = {type_id: [] for type_id in range(num_resource_types)}
+    all_resources_by_type = {type_id: [] for type_id in range(num_resource_types)}
 
     # Create variables for resources of each type
-    for type_id, count in enumerate(resources):
+    for resource_type, count in enumerate(resources_types):
         for resource_id in range(count):
-            type_to_resources[type_id].append(resource_id)
+            all_resources_by_type[resource_type].append(resource_id)
 
     # Create a task (interval) for each operation of each job
-    for job_id, job in enumerate(jobs_data):
+    for job_id, job in enumerate(jobs):
         for task_id, (resource_type, duration) in enumerate(job):
             suffix = f'_{job_id}_{task_id}'
-            start_var = model.NewIntVar(0, sum(d for j in jobs_data for _, d in j), f'start{suffix}')
-            end_var = model.NewIntVar(0, sum(d for j in jobs_data for _, d in j), f'end{suffix}')
-            chosen_resource = model.NewIntVar(0, len(type_to_resources[resource_type]) - 1, f'resource{suffix}')
+            start_var = model.NewIntVar(0, sum(d for j in jobs for _, d in j), f'start{suffix}')
+            end_var = model.NewIntVar(0, sum(d for j in jobs for _, d in j), f'end{suffix}')
+            chosen_resource = model.NewIntVar(0, len(all_resources_by_type[resource_type]) - 1, f'resource{suffix}')
             resource_usage = [
                 model.NewBoolVar(f'use{suffix}_r{resource_id}')
-                for resource_id in type_to_resources[resource_type]
+                for resource_id in all_resources_by_type[resource_type]
             ]
 
             # Create an interval variable for each resource that could be chosen
             intervals_for_resources = []
-            for resource_id in type_to_resources[resource_type]:
+            for resource_id in all_resources_by_type[resource_type]:
                 is_used = resource_usage[resource_id]
                 interval_var = model.NewOptionalIntervalVar(start_var, duration, end_var, is_used, f'interval{suffix}_r{resource_id}')
                 intervals_for_resources.append(interval_var)
@@ -76,12 +78,12 @@ for i in instances:
         model.AddNoOverlap(intervals)
 
     # Add precedence constraints within each job
-    for job_id, job in enumerate(jobs_data):
+    for job_id, job in enumerate(jobs):
         for task_id in range(len(job) - 1):
             model.Add(all_tasks[(job_id, task_id)][1] <= all_tasks[(job_id, task_id + 1)][0])
 
     # Objective: minimize the makespan
-    obj_var = model.NewIntVar(0, sum(d for j in jobs_data for _, d in j), 'makespan')
+    obj_var = model.NewIntVar(0, sum(d for j in jobs for _, d in j), 'makespan')
     model.AddMaxEquality(obj_var, [end_var for _, end_var, _, _ in all_tasks.values()])
     model.Minimize(obj_var)
 
@@ -92,7 +94,8 @@ for i in instances:
     # Display the results
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
         print(f'Minimum makespan: {solver.Value(obj_var)}')
-        for job_id, job in enumerate(jobs_data):
+        solutions.append(solver.Value(obj_var))
+        for job_id, job in enumerate(jobs):
             print(f'Job {job_id}:')
             for task_id, (resource_type, duration) in enumerate(job):
                 start = solver.Value(all_tasks[(job_id, task_id)][0])
@@ -102,8 +105,11 @@ for i in instances:
     else:
         print('No solution found.')
 
-
-
+solutions_df = pd.DataFrame({
+    'index': range(0, len(solutions)),
+    'values': solutions
+})
+solutions_df.to_csv(INSTANCES_PATH+'/optimal.csv', index=False)
 print("====================")
 print("=*= END OF FILE! =*=")
 print("====================")
