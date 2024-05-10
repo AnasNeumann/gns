@@ -47,15 +47,29 @@ for i in instances:
             start_var = model.NewIntVar(0, sum(d for j in jobs_data for _, d in j), f'start{suffix}')
             end_var = model.NewIntVar(0, sum(d for j in jobs_data for _, d in j), f'end{suffix}')
             chosen_resource = model.NewIntVar(0, len(type_to_resources[resource_type]) - 1, f'resource{suffix}')
-            interval_var = model.NewIntervalVar(start_var, duration, end_var, f'interval{suffix}')
+            resource_usage = [
+                model.NewBoolVar(f'use{suffix}_r{resource_id}')
+                for resource_id in type_to_resources[resource_type]
+            ]
 
-            all_tasks[(job_id, task_id)] = (start_var, end_var, interval_var, chosen_resource)
-
-            # Add to the appropriate resource type's intervals
+            # Create an interval variable for each resource that could be chosen
+            intervals_for_resources = []
             for resource_id in type_to_resources[resource_type]:
-                # Only consider this resource if it's chosen by this operation
-                model.Add(chosen_resource == resource_id).OnlyEnforceIf(interval_var)
-                type_to_intervals[resource_type].append(interval_var)
+                is_used = resource_usage[resource_id]
+                interval_var = model.NewOptionalIntervalVar(start_var, duration, end_var, is_used, f'interval{suffix}_r{resource_id}')
+                intervals_for_resources.append(interval_var)
+
+                # Link resource choice to the Boolean variable
+                model.Add(chosen_resource == resource_id).OnlyEnforceIf(is_used)
+
+            # Ensure exactly one resource is chosen
+            model.Add(sum(resource_usage) == 1)
+
+            # Store the created intervals to enforce the no overlap constraint
+            type_to_intervals[resource_type].extend(intervals_for_resources)
+
+            # Map all tasks for later access
+            all_tasks[(job_id, task_id)] = (start_var, end_var, intervals_for_resources, chosen_resource)
 
     # Add constraints for no overlapping intervals on the same resource type
     for resource_type, intervals in type_to_intervals.items():
