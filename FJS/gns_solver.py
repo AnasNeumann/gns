@@ -1,4 +1,6 @@
 import torch
+from torch_geometric.nn import GATConv
+import torch.nn.functional as F
 from torch_geometric.data import Data, HeteroData
 from common import load_instances, OP_STRUCT
 
@@ -11,16 +13,16 @@ INITIAL_MAKESPAN = 0
 OPERATION_FEATURES = {"status": 0, "remaining_neighboring_resources": 1, "duration": 2, "start": 3, "remaining_neighboring_ops": 4, "current_job_completion": 5, "position": 6}
 RESOURCE_FEATURES = {"available_time": 0, "remaining_neighboring_ops": 1, "past_utilization_rate": 2, "remaining_load_percentage": 3}
 
-# TODO WE WILL HAVE TO CHANGE NEIGHBOORING OPERATIONS AND RESSOURCES COMPUTATION/METHOD WHEN SCHEDULED!!
-# TODO FUNCTION TO BUILD THE SOLUTION
-# TODO FINISH THE compute_remaining_load function
+# TODO 1. FUNCTION TO SEARCH FOR POSSIBLE OPERATION TO SCHEDULE 
+# TODO 2. WHEN AN OPERATION IS SCHEDULED UPDATE CURRENT END + REMAINING LOAD, NEIGHBORS, etc. OF OPERATION AND SELECTED RESOURCE
+# TODO 3. FUNCTION TO COMPUTE THE ESTIMATED MAKESPAN
 
 #====================================================================================================================
 # =*= FONCTIONS TO BUILD AND UPDATE THE RAW GRAPH =*=
 #====================================================================================================================
 
 # Compute the global load before having the graph
-def compute_global_load(id, jobs):
+def compute_init_load(id, jobs):
     total_load = 0
     resource_load = 0
     for job in jobs:
@@ -29,15 +31,6 @@ def compute_global_load(id, jobs):
             if operation[OP_STRUCT["resource_type"]] == id:
                 resource_load += operation[OP_STRUCT["duration"]]
     return 0 if total_load<=0 else (resource_load*1.0)/total_load
-
-# TODO 
-def compute_remaining_load(graph, jobs, operations2graph):
-    total_remaining_load = 0
-    resource_remaining_load = 0
-    for job_id, job in enumerate(jobs):
-        for op_id, operation in enumerate(job):
-            print("hello")
-    return 0 
 
 # Get the job completion time in the current schedule
 def job_current_completion(graph, operations_idx):
@@ -120,7 +113,7 @@ def instance_to_graph(instance):
     resource_id = 0
     for type, quantity in enumerate(resources):
         res_of_type = []
-        load = compute_global_load(type, jobs)
+        load = compute_init_load(type, jobs)
         for _ in range(quantity):
             graph = add_node(graph, 'resource', torch.tensor([[INITIAL_MAKESPAN, ops_by_resource(type, jobs), INITIAL_MAKESPAN, load]]))
             res_of_type.append(resource_id)
@@ -172,6 +165,24 @@ def display_graph(graph):
 #====================================================================================================================
 # =*= GRAPH ATTENTION NEURAL NET ARCHITECTURE =*=
 #====================================================================================================================
+
+# Architecture of a model used both as policy network and value network
+class GATPPO(torch.nn.Module):
+    def __init__(self):
+        super(GATPPO, self).__init__()
+        self.conv1 = GATConv(in_channels=6, out_channels=16, heads=4)
+        self.conv2 = GATConv(in_channels=16*4, out_channels=32, heads=4, concat=False)
+        self.policy_head = torch.nn.Linear(32, number_of_resources)  # Policy output
+        self.value_head = torch.nn.Linear(32, 1)  # Value output
+
+    def forward(self, data):
+        x, edge_index = data.x, data.edge_index
+        x = F.relu(self.conv1(x, edge_index))
+        x = F.relu(self.conv2(x, edge_index))
+        policy_logits = self.policy_head(x)
+        value_estimate = self.value_head(x)
+        return F.log_softmax(policy_logits, dim=1), value_estimate
+
 
 #====================================================================================================================
 # =*= PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
