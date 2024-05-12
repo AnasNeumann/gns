@@ -2,6 +2,8 @@
 
 A small Graph Attention Network (GAT) to schedule jobs in a ETO manufacturing environement, trained with the Proxmimal Policy gradient Optimization (PPO) reinforcement learning algorithm.
 
+## THIS REPOSITORY IS STILL A WORK IN PROGRESS!!! NOT A FINAL PROJECT!
+
 ## Locally try the project
 1. `python -m venv ./venv`
 2. `source ./venv/bin/activate`

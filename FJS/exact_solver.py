@@ -1,21 +1,15 @@
 from ortools.sat.python import cp_model
 import sys
-import os
-import pickle
 import pandas as pd
+from common import load_instances
 
-# CONFIGURATION
+# CONFIGURATION AND LOAD INSTANCES
 INSTANCES_TYPES = sys.argv[1] # train or test
 INSTANCES_PATH = './FJS/instances/'+INSTANCES_TYPES
-
-# LOAD INSTANCES
-instances = []
-for i in os.listdir(INSTANCES_PATH):
-    if i.endswith('.pkl'):
-        file_path = os.path.join(INSTANCES_PATH, i)
-        print(f"Loading data from: {i}...")
-        with open(file_path, 'rb') as file:
-            instances.append(pickle.load(file))
+END_DATE = 1
+START_DATE = 0
+CHOSEN_RESOURCE = 3
+instances = load_instances(INSTANCES_PATH)
 
 # SOLVE ALL INSTANCES ONE BY ONE
 solutions = []
@@ -76,7 +70,7 @@ for i in instances:
     # FOURTH CONSTRAINT: precedence relationship (end before start)
     for job_id, job in enumerate(jobs):
         for operation_id in range(len(job) - 1):
-            model.Add(all_operations[(job_id, operation_id)][1] <= all_operations[(job_id, operation_id + 1)][0])
+            model.Add(all_operations[(job_id, operation_id)][END_DATE] <= all_operations[(job_id, operation_id + 1)][START_DATE])
 
     # OBJECTIVE: minimize the makespan (as a new variable and fifth constraint)
     obj_var = model.NewIntVar(0, sum(d for j in jobs for _, d in j), 'makespan')
@@ -92,9 +86,9 @@ for i in instances:
         for job_id, job in enumerate(jobs):
             print(f'Job {job_id}:')
             for operation_id, (resource_type, duration) in enumerate(job):
-                start = solver.Value(all_operations[(job_id, operation_id)][0])
-                end = solver.Value(all_operations[(job_id, operation_id)][1])
-                chosen_resource = solver.Value(all_operations[(job_id, operation_id)][3])
+                start = solver.Value(all_operations[(job_id, operation_id)][START_DATE])
+                end = solver.Value(all_operations[(job_id, operation_id)][END_DATE])
+                chosen_resource = solver.Value(all_operations[(job_id, operation_id)][CHOSEN_RESOURCE])
                 print(f'  Task {operation_id} (Resource Type {resource_type}, Chosen Resource {chosen_resource}, Duration {duration}): Start={start}, End={end}')
     else:
         print('No solution found.')
