@@ -13,7 +13,6 @@ RESOURCE_FEATURES = {"available": 0, "num_ops": 1, "utilization": 2} # TODO Need
 
 # TODO MAYBE WE WILL HAVE TO CHANGE NEIGHBOORING OPERATIONS AND RESSOURCES COMPUTATION/METHOD WHEN SCHEDULED!!
 # TODO ESTIMATED END TIME SEEMS OFF
-# TODO TO NUM OPS FOR A RESOURCE SEEMS OFF TOO!
 
 #====================================================================================================================
 # =*= FONCTIONS TO BUILD AND UPDATE THE RAW GRAPH =*=
@@ -34,7 +33,7 @@ def res_utilization(resource, current_time):
 
 # Get the number of operations that need a type of resources
 def ops_by_resource(type, jobs):
-    return len([(op for op in job if op[OP_STRUCT["resource_type"]]==type) for job in jobs])
+    return len([op for job in jobs for op in job if op[OP_STRUCT["resource_type"]]==type])
 
 # Get start and end dates of an operation
 def get_operation_dates(graph, op_id):
@@ -51,7 +50,7 @@ def estimate_start_time(graph, prec_operations_idx):
     if len(prec_operations_idx)==0:
         return 0
     else:
-        last_scheduled_pos = 0
+        last_scheduled_pos = -1
         max_end_time = 0
         for pos, prec_id, in enumerate(prec_operations_idx):
             if is_scheduled(graph, prec_id):
@@ -90,7 +89,7 @@ def instance_to_graph(instance):
     resource_node_index = []
     for type, quantity in enumerate(resources):
         for resource in range(quantity):
-            graph = add_node(graph, 'resource', torch.tensor([[INITIAL_MAKESPAN, ops_by_resource(type, jobs), res_utilization(resource, INITIAL_MAKESPAN)]], dtype=torch.int))
+            graph = add_node(graph, 'resource', torch.tensor([[INITIAL_MAKESPAN, ops_by_resource(type, jobs), res_utilization(resource, INITIAL_MAKESPAN)]]))
             resource_node_index.append(resource_id)
             resource_id += 1
     
@@ -100,7 +99,7 @@ def instance_to_graph(instance):
         first_op_id = op_id
         prec_operations_idx = []
         for operation in job:
-            graph = add_node(graph, 'operation', torch.tensor([[NOT_SCHEDULED, resources[operation[OP_STRUCT["resource_type"]]], operation[OP_STRUCT["duration"]], estimate_start_time(graph, prec_operations_idx), len(job), INITIAL_MAKESPAN]], dtype=torch.int))
+            graph = add_node(graph, 'operation', torch.tensor([[NOT_SCHEDULED, resources[operation[OP_STRUCT["resource_type"]]], operation[OP_STRUCT["duration"]], estimate_start_time(graph, prec_operations_idx), len(job), INITIAL_MAKESPAN]]))
             prec_operations_idx.append(op_id)
             if op_id > first_op_id: # III. Precedence edges (1st relation)
                 graph = add_edge(graph, 'operation', 'precedence', 'operation', torch.tensor([[op_id - 1], [op_id]], dtype=torch.long))
