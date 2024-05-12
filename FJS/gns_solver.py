@@ -8,11 +8,12 @@ TEST_INSTANCES_PATH = './FJS/instances/test/'
 NOT_SCHEDULED = 0
 SCHEDULED = 1
 INITIAL_MAKESPAN = 0
-OPERATION_FEATURES = {"status": 0, "num_resources": 1, "duration": 2, "start": 3, "num_ops": 4, "job_completion": 5} # TODO Need to add the link to the job?
+OPERATION_FEATURES = {"status": 0, "num_resources": 1, "duration": 2, "start": 3, "num_ops": 4, "job_completion": 5} # TODO 1. NEED TO DO THE POSITION AS A PERCENTAGE
 RESOURCE_FEATURES = {"available": 0, "num_ops": 1, "utilization": 2} # TODO Need to add the type?
 
-# TODO MAYBE WE WILL HAVE TO CHANGE NEIGHBOORING OPERATIONS AND RESSOURCES COMPUTATION/METHOD WHEN SCHEDULED!!
-# TODO ESTIMATED END TIME SEEMS OFF
+# TODO 2. MAYBE WE WILL HAVE TO CHANGE NEIGHBOORING OPERATIONS AND RESSOURCES COMPUTATION/METHOD WHEN SCHEDULED!!
+# TODO 3. NEED TO DO THE RESOURCE UTILIZATION METHOD
+# TODO 4?. NEED FOR GLOBAL INFORMATION: NBR RESOURCES, NBR JOBS, NBR OPERATIONS, etc.?
 
 #====================================================================================================================
 # =*= FONCTIONS TO BUILD AND UPDATE THE RAW GRAPH =*=
@@ -39,7 +40,7 @@ def ops_by_resource(type, jobs):
 def get_operation_dates(graph, op_id):
     start = OPERATION_FEATURES["start"]
     duration = OPERATION_FEATURES["duration"]
-    return graph['operation'].x[op_id,start], graph['operation'].x[op_id,duration], graph['operation'].x[op_id,start]+graph['operation'].x[op_id,duration]
+    return graph['operation'].x[op_id,start].item(), graph['operation'].x[op_id,duration].item(), graph['operation'].x[op_id,start].item()+graph['operation'].x[op_id,duration].item()
 
 # Check if an operation has been scheduled already
 def is_scheduled(graph, op_id):
@@ -80,43 +81,64 @@ def instance_to_graph(instance):
     graph = HeteroData()
     resources = instance['resources']
     jobs = instance['jobs']
-    zero_features = torch.zeros((1, 6))
-    graph['start'].x = zero_features
-    graph['end'].x = zero_features
+    zero_features = torch.zeros((1, 6), dtype=torch.int64)
+    graph = add_node(graph, 'operation', zero_features) # start node
+    operations2graph = [] 
+    resources_by_type = []
 
     # I. Resource nodes
     resource_id = 0
-    resource_node_index = []
     for type, quantity in enumerate(resources):
+        res_of_type = []
         for resource in range(quantity):
             graph = add_node(graph, 'resource', torch.tensor([[INITIAL_MAKESPAN, ops_by_resource(type, jobs), res_utilization(resource, INITIAL_MAKESPAN)]]))
-            resource_node_index.append(resource_id)
+            res_of_type.append(resource_id)
             resource_id += 1
+        resources_by_type.append(res_of_type)
     
     # II. Operation nodes, precedence, and start/end edges
-    op_id = 0
+    op_id = 1
     for job in jobs:
         first_op_id = op_id
         prec_operations_idx = []
+        ops2graph = []
         for operation in job:
             graph = add_node(graph, 'operation', torch.tensor([[NOT_SCHEDULED, resources[operation[OP_STRUCT["resource_type"]]], operation[OP_STRUCT["duration"]], estimate_start_time(graph, prec_operations_idx), len(job), INITIAL_MAKESPAN]]))
             prec_operations_idx.append(op_id)
+            ops2graph.append(op_id)
             if op_id > first_op_id: # III. Precedence edges (1st relation)
                 graph = add_edge(graph, 'operation', 'precedence', 'operation', torch.tensor([[op_id - 1], [op_id]], dtype=torch.long))
             op_id += 1
-        # IV. Precedence edges with dummy start and end nodes
-        graph = add_edge(graph, 'start', 'to', 'operation', torch.tensor([[0], [first_op_id]], dtype=torch.long))
-        graph = add_edge(graph, 'operation', 'to', 'end', torch.tensor([[op_id - 1], [0]], dtype=torch.long))
+        operations2graph.append(ops2graph)
+    
+    # IV. Precedence edges with dummy start and end nodes
+    graph = add_node(graph, 'operation', zero_features) # end node
+    op_id = 1
+    for job in jobs:
+        graph = add_edge(graph, 'start', 'to', 'operation', torch.tensor([[0], [op_id]], dtype=torch.long))
+        op_id += len(job)
+        graph = add_edge(graph, 'operation', 'to', 'end', torch.tensor([[op_id-1], [instance['size']+1]], dtype=torch.long))
 
     # V. Resource compatibility and use edges (2nd relation)
-    for op_id, (res_type, _) in enumerate(sum(jobs, [])):
-        compatible_resources = [idx for idx, r in enumerate(resources) if r == res_type]
-        for res_id in compatible_resources:
-            graph = add_edge(graph, 'operation', 'uses', 'resource', torch.tensor([[op_id], [res_id]], dtype=torch.long))
-    return graph
+    for job_id, job in enumerate(jobs):
+        for op_id, operation in enumerate(job):
+            op2graph_id = operations2graph[job_id][op_id]
+            for res2graph_id in resources_by_type[operation[OP_STRUCT["resource_type"]]]:
+                graph = add_edge(graph, 'operation', 'uses', 'resource', torch.tensor([[op2graph_id], [res2graph_id]], dtype=torch.long))            
+    return graph, operations2graph, resources_by_type
+
+# Display the details of the current graph
+def display_graph(graph):
+    print("Graph overview: " + str(graph))
+    print("Resources: " + str(graph['resource']))
+    print("Operations: " + str(graph['operation']))
+    print("Precedence relations: " + str(graph['operation', 'precedence', 'operation']))
+    print("Link with dummy start node: " + str(graph['start', 'to', 'operation']))
+    print("Link with dummy end node: " + str(graph['operation', 'to', 'end']))
+    print("Requirements: " + str(graph['operation', 'uses', 'resource']))
 
 #====================================================================================================================
-# =*= GRAPH NEURAL NETS ARCHITECTURE =*=
+# =*= GRAPH ATTENTION NEURAL NET ARCHITECTURE =*=
 #====================================================================================================================
 
 #====================================================================================================================
@@ -127,13 +149,8 @@ def instance_to_graph(instance):
 # =*= EXECUTE THE COMPLETE CODE =*=
 #====================================================================================================================
 
-# SOLVE ALL INSTANCES
 train_instances = load_instances(TRAIN_INSTANCES_PATH)
 test_instances = load_instances(TEST_INSTANCES_PATH)
 print(train_instances[0])
-graph = instance_to_graph(train_instances[0]) # test
-print(graph)
-print(graph['resource'])
-print(graph['operation'])
-
-# TODO CHECK ABOUT EDGES TOO AT THE END!
+graph,_,_ = instance_to_graph(train_instances[0])
+display_graph(graph)
