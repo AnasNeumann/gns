@@ -9,7 +9,7 @@ NOT_SCHEDULED = 0
 SCHEDULED = 1
 INITIAL_MAKESPAN = 0
 OPERATION_FEATURES = {"status": 0, "num_resources": 1, "duration": 2, "start": 3, "num_ops": 4, "job_completion": 5} # TODO 1. NEED TO DO THE POSITION AS A PERCENTAGE
-RESOURCE_FEATURES = {"available": 0, "num_ops": 1, "utilization": 2} # TODO Need to add the type?
+RESOURCE_FEATURES = {"available": 0, "num_ops": 1, "utilization": 2}
 
 # TODO 2. MAYBE WE WILL HAVE TO CHANGE NEIGHBOORING OPERATIONS AND RESSOURCES COMPUTATION/METHOD WHEN SCHEDULED!!
 # TODO 3. NEED TO DO THE RESOURCE UTILIZATION METHOD
@@ -30,7 +30,7 @@ def job_current_completion(graph, operations_idx):
 
 # Get the utilization rate of a specific resource
 def res_utilization(resource, current_time):
-    return 0 # TODO TODO TODO TODO
+    return 0
 
 # Get the number of operations that need a type of resources
 def ops_by_resource(type, jobs):
