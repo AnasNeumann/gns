@@ -28,14 +28,14 @@ A small Graph Attention Network (GAT) to schedule jobs in a ETO manufacturing en
 
 ## Typical PKL file with a FJS instance 
 ```python
-    FJS_instance = {
-        "size": 8 # total number of operations
-        "resources": [0, 3, 2, 7], # e.g. 3 resources of type 1; 7 resources of type 3
-        "jobs": [  
-            [(0, 2), (3, 8), (1, 3)],  # e.g. operation 1 (of job 0) runs on resource type 3 with a processing time of 8 
-            [(0, 8), (2, 10), (1, 2)],  
-            [(0, 9), (2, 1)]  
-    ]}
+FJS_instance = {
+    "size": 8 # total number of operations
+    "resources": [0, 3, 2, 7], # e.g. 3 resources of type 1; 7 resources of type 3
+    "jobs": [  
+        [(0, 2), (3, 8), (1, 3)],  # e.g. operation 1 (of job 0) runs on resource type 3 with a processing time of 8 
+        [(0, 8), (2, 10), (1, 2)],  
+        [(0, 9), (2, 1)]  
+]}
 ```
 
 ## Typical translation into a graph structure 
