@@ -3,6 +3,7 @@ from torch_geometric.nn import GATConv
 import torch.nn.functional as F
 from torch_geometric.data import Data, HeteroData
 from common import load_instances, OP_STRUCT
+from torch_geometric.utils import to_undirected
 
 # Configuration
 TRAIN_INSTANCES_PATH = './FJS/instances/train/'
@@ -73,7 +74,8 @@ def instance_to_graph(instance):
         for op_id, operation in enumerate(job):
             op2graph_id = operations2graph[job_id][op_id]
             for res2graph_id in resources_by_type[operation[OP_STRUCT["resource_type"]]]:
-                graph = add_edge(graph, 'operation', 'uses', 'resource', torch.tensor([[op2graph_id], [res2graph_id]], dtype=torch.long))            
+                graph = add_edge(graph, 'operation', 'uses', 'resource', torch.tensor([[op2graph_id], [res2graph_id]], dtype=torch.long))
+                graph = add_edge(graph, 'resource', 'execute', 'operation', torch.tensor([[res2graph_id], [op2graph_id]], dtype=torch.long))        
     return graph
 
 def display_graph(graph):
@@ -81,7 +83,8 @@ def display_graph(graph):
     print("Resources: " + str(graph['resource']))
     print("Operations: " + str(graph['operation']))
     print("Precedence_relations: " + str(graph['operation', 'precedence', 'operation']))
-    print("Requirements: " + str(graph['operation', 'uses', 'resource']))
+    print("Requirements operation->resource: " + str(graph['operation', 'uses', 'resource']))
+    print("Requirements resource->operation: " + str(graph['resource', 'execute', 'operation']))
 
 #====================================================================================================================
 # =*= II. GRAPH ATTENTION NEURAL NET ARCHITECTURE =*=
