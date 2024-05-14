@@ -161,3 +161,4 @@ cython_debug/
 
 documentation/
 documentation/**
+_old_code.py

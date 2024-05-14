@@ -8,192 +8,99 @@ from common import load_instances, OP_STRUCT
 TRAIN_INSTANCES_PATH = './FJS/instances/train/'
 TEST_INSTANCES_PATH = './FJS/instances/test/'
 NOT_SCHEDULED = 0
-SCHEDULED = 1
-INITIAL_MAKESPAN = 0
-OPERATION_FEATURES = {"status": 0, "remaining_neighboring_resources": 1, "duration": 2, "start": 3, "remaining_neighboring_ops": 4, "current_job_completion": 5, "position": 6}
-RESOURCE_FEATURES = {"available_time": 0, "remaining_neighboring_ops": 1, "past_utilization_rate": 2, "remaining_load_percentage": 3}
-
-# TODO 1. FUNCTION TO SEARCH FOR POSSIBLE OPERATION TO SCHEDULE 
-# TODO 2. WHEN AN OPERATION IS SCHEDULED UPDATE CURRENT END + REMAINING LOAD, NEIGHBORS, etc. OF OPERATION AND SELECTED RESOURCE
-# TODO 3. FUNCTION TO COMPUTE THE ESTIMATED MAKESPAN
+OPERATION_FEATURES = {"status": 0, "remaining_neighboring_resources": 1, "duration": 2, "start": 3, "job_unscheduled_ops": 4, "current_job_completion": 5}
+RESOURCE_FEATURES = {"available_time": 0, "remaining_neighboring_ops": 1, "past_utilization_rate": 2}
 
 #====================================================================================================================
-# =*= FONCTIONS TO BUILD AND UPDATE THE RAW GRAPH =*=
+# =*= I. FONCTIONS TO BUILD THE INITIAL GRAPH =*=
 #====================================================================================================================
 
-# Compute the global load before having the graph
-def compute_init_load(id, jobs):
-    total_load = 0
-    resource_load = 0
-    for job in jobs:
-        for operation in job:
-            total_load += operation[OP_STRUCT["duration"]]
-            if operation[OP_STRUCT["resource_type"]] == id:
-                resource_load += operation[OP_STRUCT["duration"]]
-    return 0 if total_load<=0 else (resource_load*1.0)/total_load
+def init_start_time(job, position):
+    return sum(o[OP_STRUCT["duration"]] for o in job[:position])
 
-# Get the job completion time in the current schedule
-def job_current_completion(graph, operations_idx):
-    completion = 0
-    for id in operations_idx:
-        if is_scheduled(graph, id):
-            _,_,end_time = get_operation_dates(graph, id)
-            completion = max(completion, end_time)
-    return completion
+def init_end_time(job, position):
+    return init_start_time(job, position) + job[position][OP_STRUCT["duration"]]
 
-# Get the utilization rate of a specific resource
-def res_utilization(graph, operations_idx):
-    completion = 0
-    utilized_time = 0
-    for id in operations_idx:
-        if is_scheduled(graph, id):
-            _,duration,end_time = get_operation_dates(graph, id)
-            completion = max(completion, end_time)
-            utilized_time += duration
-    return 0 if completion<=0 else (utilized_time*1.0)/completion
-
-# Get the number of operations that need a type of resources
-def ops_by_resource(type, jobs):
+def init_ops_by_resource(type, jobs):
     return len([op for job in jobs for op in job if op[OP_STRUCT["resource_type"]]==type])
 
-# Get start and end dates of an operation
-def get_operation_dates(graph, op_id):
-    start = OPERATION_FEATURES["start"]
-    duration = OPERATION_FEATURES["duration"]
-    return graph['operation'].x[op_id,start].item(), graph['operation'].x[op_id,duration].item(), graph['operation'].x[op_id,start].item()+graph['operation'].x[op_id,duration].item()
-
-# Check if an operation has been scheduled already
-def is_scheduled(graph, op_id):
-    return graph['operation'].x[op_id, OPERATION_FEATURES["status"]] == SCHEDULED
-
-# A function to estimate the earliest possible start time
-def estimate_start_time(graph, prec_operations_idx):
-    if len(prec_operations_idx)==0:
-        return 0
-    else:
-        last_scheduled_pos = -1
-        max_end_time = 0
-        for pos, prec_id, in enumerate(prec_operations_idx):
-            if is_scheduled(graph, prec_id):
-                _,_,pred_end_time = get_operation_dates(graph, prec_id)
-                max_end_time = pred_end_time
-                last_scheduled_pos = pos
-            else:
-                break
-        if(last_scheduled_pos < len(prec_operations_idx)-1):
-            for prec_id in prec_operations_idx[last_scheduled_pos+1:]:
-                _,duration,_ = get_operation_dates(graph, prec_id)
-                max_end_time = max_end_time + duration
-        return max_end_time
-
-# Add a new node in the graph
 def add_node(graph, type, features):
     graph[type].x = torch.cat([graph[type].x, features], dim=0) if type in graph.node_types else features
     return graph
 
-# Add a new edge in the graph
 def add_edge(graph, first, middle, last, features):
     graph[first, middle, last].edge_index = torch.cat([graph[first, middle, last].edge_index, features], dim=1) if (first, middle, last) in graph.edge_types else features
     return graph
 
-# Function to build the graph instance
 def instance_to_graph(instance):
     graph = HeteroData()
     resources = instance['resources']
     jobs = instance['jobs']
-    size = instance['size']
-    total_resources = instance['nb_res']
-    zero_features = torch.zeros((1, 7), dtype=torch.int64)
-    graph = add_node(graph, 'operation', zero_features) # start node
+    zero_features = torch.zeros((1, 6), dtype=torch.int64)
+    graph = add_node(graph, 'operation', zero_features)
     operations2graph = [] 
     resources_by_type = []
-    operations_of_resources = [[] for _ in range(total_resources)]
 
-    # I. Resource nodes
     resource_id = 0
     for type, quantity in enumerate(resources):
         res_of_type = []
-        load = compute_init_load(type, jobs)
         for _ in range(quantity):
-            graph = add_node(graph, 'resource', torch.tensor([[INITIAL_MAKESPAN, ops_by_resource(type, jobs), INITIAL_MAKESPAN, load]]))
+            graph = add_node(graph, 'resource', torch.tensor([[0, init_ops_by_resource(type, jobs), 0]]))
             res_of_type.append(resource_id)
             resource_id += 1
         resources_by_type.append(res_of_type)
     
-    # II. Operation nodes, precedence, and start/end edges
     op_id = 1
     for job in jobs:
         first_op_id = op_id
-        prec_operations_idx = []
         ops2graph = []
         for position, operation in enumerate(job):
-            graph = add_node(graph, 'operation', torch.tensor([[NOT_SCHEDULED, resources[operation[OP_STRUCT["resource_type"]]], operation[OP_STRUCT["duration"]], estimate_start_time(graph, prec_operations_idx), len(job), INITIAL_MAKESPAN, position]]))
-            prec_operations_idx.append(op_id)
+            duration = operation[OP_STRUCT["duration"]]
+            available_resources = resources[operation[OP_STRUCT["resource_type"]]]
+            graph = add_node(graph, 'operation', torch.tensor([[NOT_SCHEDULED, available_resources, duration, init_start_time(job, position), len(job), init_end_time(job, len(job)-1)]]))
             ops2graph.append(op_id)
-            if op_id > first_op_id: # III. Precedence edges (1st relation)
+            if op_id > first_op_id:
                 graph = add_edge(graph, 'operation', 'precedence', 'operation', torch.tensor([[op_id - 1], [op_id]], dtype=torch.long))
             op_id += 1
         operations2graph.append(ops2graph)
     
-    # IV. Precedence edges with dummy start and end nodes
-    graph = add_node(graph, 'operation', zero_features) # end node
-    op_id = 1
-    for job in jobs:
-        graph = add_edge(graph, 'start', 'to', 'operation', torch.tensor([[0], [op_id]], dtype=torch.long))
-        op_id += len(job)
-        graph = add_edge(graph, 'operation', 'to', 'end', torch.tensor([[op_id-1], [size+1]], dtype=torch.long))
-
-    # V. Resource compatibility and use edges (2nd relation)
+    graph = add_node(graph, 'operation', zero_features)
+    first_op = 1
     for job_id, job in enumerate(jobs):
+        graph = add_edge(graph, 'operation', 'precedence', 'operation', torch.tensor([[0], [first_op]], dtype=torch.long))
+        first_op += len(job)
+        graph = add_edge(graph, 'operation', 'precedence', 'operation', torch.tensor([[first_op-1], [instance['size']+1]], dtype=torch.long))
         for op_id, operation in enumerate(job):
             op2graph_id = operations2graph[job_id][op_id]
             for res2graph_id in resources_by_type[operation[OP_STRUCT["resource_type"]]]:
-                operations_of_resources[res2graph_id].append(op2graph_id)
                 graph = add_edge(graph, 'operation', 'uses', 'resource', torch.tensor([[op2graph_id], [res2graph_id]], dtype=torch.long))            
-    return graph, operations2graph, resources_by_type, operations_of_resources
+    return graph
 
-# Display the details of the current graph
 def display_graph(graph):
     print("Graph_overview: " + str(graph))
     print("Resources: " + str(graph['resource']))
     print("Operations: " + str(graph['operation']))
     print("Precedence_relations: " + str(graph['operation', 'precedence', 'operation']))
-    print("Link_with_dummy_start_node: " + str(graph['start', 'to', 'operation']))
-    print("Link_with_dummy_end_node: " + str(graph['operation', 'to', 'end']))
     print("Requirements: " + str(graph['operation', 'uses', 'resource']))
 
 #====================================================================================================================
-# =*= GRAPH ATTENTION NEURAL NET ARCHITECTURE =*=
-#====================================================================================================================
-
-# Architecture of a model used both as policy network and value network
-class GATPPO(torch.nn.Module):
-    def __init__(self):
-        super(GATPPO, self).__init__()
-        self.conv1 = GATConv(in_channels=6, out_channels=16, heads=4)
-        self.conv2 = GATConv(in_channels=16*4, out_channels=32, heads=4, concat=False)
-        self.policy_head = torch.nn.Linear(32, number_of_resources)  # Policy output
-        self.value_head = torch.nn.Linear(32, 1)  # Value output
-
-    def forward(self, data):
-        x, edge_index = data.x, data.edge_index
-        x = F.relu(self.conv1(x, edge_index))
-        x = F.relu(self.conv2(x, edge_index))
-        policy_logits = self.policy_head(x)
-        value_estimate = self.value_head(x)
-        return F.log_softmax(policy_logits, dim=1), value_estimate
-
-
-#====================================================================================================================
-# =*= PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
+# =*= II. GRAPH ATTENTION NEURAL NET ARCHITECTURE =*=
 #====================================================================================================================
 
 #====================================================================================================================
-# =*= EXECUTE THE COMPLETE CODE =*=
+# =*= III. FUNCTION TO USE THE SCHEDULING GNN AND UPDATE THE GRAPH =*=
+#====================================================================================================================
+
+#====================================================================================================================
+# =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
+#====================================================================================================================
+
+#====================================================================================================================
+# =*= V. EXECUTE THE COMPLETE CODE =*=
 #====================================================================================================================
 
 train_instances = load_instances(TRAIN_INSTANCES_PATH)
 test_instances = load_instances(TEST_INSTANCES_PATH)
 print(train_instances[0])
-graph,_,_,_ = instance_to_graph(train_instances[0])
+graph = instance_to_graph(train_instances[0])
 display_graph(graph)
