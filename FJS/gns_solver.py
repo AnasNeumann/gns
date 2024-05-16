@@ -97,8 +97,8 @@ class ResourceAttentionEmbeddingLayer(MessagePassing):
         super(ResourceAttentionEmbeddingLayer, self).__init__(aggr='none', node_dim=0)
         self.num_heads = num_heads
         self.hidden_dim = GAT_CONF["embedding_dims"]
-        self.resource_transform = Lin(resource_features_dim, self.hidden_dim * num_heads)
-        self.operation_transform = Lin(operation_features_dim, self.hidden_dim * num_heads)
+        self.resource_transform = Lin(resource_features_dim, self.hidden_dim)
+        self.operation_transform = Lin(operation_features_dim, self.hidden_dim)
         self.att_resource_self = Parameter(torch.Tensor(1, num_heads, 2 * self.hidden_dim))
         self.att_resource_operation = Parameter(torch.Tensor(1, num_heads, 2 * self.hidden_dim))
         self.leaky_relu = torch.nn.LeakyReLU(negative_slope=0.2)  # LeakyReLU activation
@@ -109,10 +109,10 @@ class ResourceAttentionEmbeddingLayer(MessagePassing):
         torch.nn.init.xavier_uniform_(self.att_resource_operation)
 
     def forward(self, resources, operations, requirement_edges):
-        resources = self.resource_transform(resources).view(-1, self.num_heads, self.hidden_dim)
-        operations = self.operation_transform(operations).view(-1, self.num_heads, self.hidden_dim)
+        resources = self.repeat(1, self.num_heads).resource_transform(resources).view(-1, self.num_heads, self.hidden_dim)
+        operations = self.repeat(1, self.num_heads).operation_transform(operations).view(-1, self.num_heads, self.hidden_dim)
         self_attention = self.leaky_relu((resources * resources).sum(dim=-1))
-        cross_attention = self.propagate(requirement_edges, operations=operations, resources=resources)
+        cross_attention = self.propagate(requirement_edges, x=operations, v=resources)
         alpha = self.softmax(torch.cat([self_attention.unsqueeze(-1), cross_attention], dim=-1), index=requirement_edges[0])
         normalized_self_coef, normalized_operations_coef = alpha.split([1, alpha.size(-1) - 1], dim=-1)
         v_prime = torch.nn.functional.elu((normalized_self_coef * resources).sum(dim=-2) + (normalized_operations_coef * cross_attention).sum(dim=-2))
