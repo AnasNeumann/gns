@@ -3,6 +3,8 @@ from torch_geometric.data import HeteroData
 from torch_geometric.nn import MessagePassing
 from common import load_instances, OP_STRUCT
 from torch.nn import Sequential as Seq, Linear as Lin, ELU
+from torch_geometric.utils import to_dense_adj
+import torch.nn.functional as F
 
 # Configuration
 TRAIN_INSTANCES_PATH = './FJS/instances/train/'
@@ -76,8 +78,7 @@ def instance_to_graph(instance):
         for op_id, operation in enumerate(job):
             op2graph_id = operations2graph[job_id][op_id]
             for res2graph_id in resources_by_type[operation[OP_STRUCT["resource_type"]]]:
-                graph = add_edge(graph, 'operation', 'uses', 'resource', torch.tensor([[op2graph_id], [res2graph_id]], dtype=torch.long))
-                graph = add_edge(graph, 'resource', 'execute', 'operation', torch.tensor([[res2graph_id], [op2graph_id]], dtype=torch.long))        
+                graph = add_edge(graph, 'operation', 'uses', 'resource', torch.tensor([[op2graph_id], [res2graph_id]], dtype=torch.long))       
     return graph
 
 def display_graph(graph):
@@ -86,7 +87,6 @@ def display_graph(graph):
     print("Operations: " + str(graph['operation']))
     print("Precedence_relations: " + str(graph['operation', 'precedence', 'operation']))
     print("Requirements operation->resource: " + str(graph['operation', 'uses', 'resource']))
-    print("Requirements resource->operation: " + str(graph['resource', 'execute', 'operation']))
 
 #====================================================================================================================
 # =*= II. GRAPH ATTENTION NEURAL NET ARCHITECTURE: TWO-STAGE EMBEDDING + ACTOR-CRITIC HEADS =*=
@@ -94,7 +94,7 @@ def display_graph(graph):
 
 class OperationEmbeddingLayer(MessagePassing):
     def __init__(self, in_channels, out_channels):
-        super(OperationEmbeddingLayer, self).__init__()
+        super(OperationEmbeddingLayer, self).__init__(aggr='none')
         hidden_channels = GAT_CONF["MLP_size"]
         self.mlp_combined = Seq(
             Lin(out_channels, hidden_channels), ELU(),
@@ -122,30 +122,23 @@ class OperationEmbeddingLayer(MessagePassing):
             Lin(hidden_channels, out_channels)
         )
 
-    def forward(self, x_op, x_machine, edge_index_op, edge_index_machine_op):
-        # Aggregate machine embeddings
-        aggregated_machine_embeddings = self.aggregate_machine_embeddings(x_machine, edge_index_machine_op, x_op.size(0))
-        
-        # Propagate operation features
-        x_op_embedded = self.propagate(edge_index_op, x_op=x_op, agg_machine_emb=aggregated_machine_embeddings)
-        
-        return x_op_embedded
+    def forward(self, operations, resources, precedence_edges, requirement_edges):
+        adj_ops = to_dense_adj(precedence_edges)[0]
+        agg_machine_embeddings = to_dense_adj(requirement_edges)[0].matmul(v)
+        predecessors = torch.zeros_like(operations)
+        successors = torch.zeros_like(operations)
+        for i in range(operations.shape[0]):
+            preds = adj_ops[:,i].nonzero()
+            succs = adj_ops[i].nonzero()
+            if preds.shape[0] > 0: 
+                predecessors[i] = self.mlp_predecessor(operations[preds].mean(dim=0))
+            if succs.shape[0] > 0:
+                successors[i] = self.mlp_successor(operations[succs].mean(dim=0))
+        x_prime = self.mlp_combined(F.elu(torch.cat([predecessors, successors, self.mlp_resources(agg_machine_embeddings, self.mlp_same(operations))], dim=-1)))
+        return x_prime
 
-    def message(self, x_j, x_i, agg_machine_emb_i):
-        # Combine features of the previous, current, and next operations with aggregated machine embeddings
-        x_op_next = torch.cat([self.mlp_theta_1(x_j), self.mlp_theta_2(x_i)], dim=-1)
-        x_op_prev = torch.cat([self.mlp_theta_0(agg_machine_emb_i), x_op_next], dim=-1)
-        
-        return self.mlp_theta_3(x_op_prev) + self.mlp_theta_4(x_i)
-
-    def aggregate_machine_embeddings(self, x_machine, edge_index_machine_op, num_op_nodes):
-        # Aggregate machine embeddings for each operation
-        aggregated_embeddings = torch.zeros(num_op_nodes, x_machine.size(1), device=x_machine.device)
-        for op_idx in range(num_op_nodes):
-            connected_machines = edge_index_machine_op[1][edge_index_machine_op[0] == op_idx]
-            if connected_machines.numel() > 0:
-                aggregated_embeddings[op_idx] = x_machine[connected_machines].sum(dim=0)
-        return aggregated_embeddings
+    def message(self, x_j):
+        return x_j
     
 class ResourceEmbeddingLayer(MessagePassing):
     def __init__(self, in_channels, out_channels):
@@ -178,13 +171,11 @@ class HeterogeneousGAT(torch.nn.Module):
     def forward(self, graph):
         operations, resources = graph['operation'].x, graph['resource'].x
         precedence_edges = graph['operation', 'precedence', 'operation'].edge_index
-        requirement_edges = graph['operation', 'uses', 'resource'].edge_index
-        for layer in self.resource_layers:
-            res_embedding = layer(resources, requirement_edges)
-        graph['resource'].x = res_embedding
-        for layer in self.operation_layers:
-            op_embedding = layer(operations, precedence_edges)
-        graph['operation'].x = op_embedding
+        requirement_for_op_edges = graph['operation', 'uses', 'resource'].edge_index
+        requirement_for_res_edges = graph['resource', 'execute', 'operation'].edge_index
+        for l in range(GAT_CONF["gnn_layers"]):
+            graph['resource'].x = self.resource_layers[l](resources, requirement_for_res_edges)
+            graph['operation'].x  = self.operation_layers[l](operations, resources, precedence_edges, requirement_for_op_edges)
         return graph
 
 #====================================================================================================================
