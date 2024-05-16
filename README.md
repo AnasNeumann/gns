@@ -68,6 +68,4 @@ Precedence_relations: {'edge_index': tensor([[ 1,  2,  3,  4,  5,  7,  8,  9,  0
         [ 2,  3,  4,  5,  6,  8,  9, 10,  1, 11,  7, 11]])}
 Requirements operation->resource: {'edge_index': tensor([[ 1,  2,  2,  3,  3,  4,  5,  5,  6,  6,  7,  8,  8,  9,  9, 10],
         [ 0,  3,  4,  3,  4,  0,  1,  2,  3,  4,  0,  1,  2,  3,  4,  0]])}
-Requirements resource->operation: {'edge_index': tensor([[ 0,  3,  4,  3,  4,  0,  1,  2,  3,  4,  0,  1,  2,  3,  4,  0],
-        [ 1,  2,  2,  3,  3,  4,  5,  5,  6,  6,  7,  8,  8,  9,  9, 10]])}
 ```

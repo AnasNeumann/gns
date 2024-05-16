@@ -127,14 +127,15 @@ class OperationEmbeddingLayer(MessagePassing):
         agg_machine_embeddings = to_dense_adj(requirement_edges)[0].matmul(v)
         predecessors = torch.zeros_like(operations)
         successors = torch.zeros_like(operations)
-        for i in range(operations.shape[0]):
+        for i in range(1, operations.shape[0] - 1):
             preds = adj_ops[:,i].nonzero()
             succs = adj_ops[i].nonzero()
             if preds.shape[0] > 0: 
                 predecessors[i] = self.mlp_predecessor(operations[preds].mean(dim=0))
             if succs.shape[0] > 0:
                 successors[i] = self.mlp_successor(operations[succs].mean(dim=0))
-        x_prime = self.mlp_combined(F.elu(torch.cat([predecessors, successors, self.mlp_resources(agg_machine_embeddings, self.mlp_same(operations))], dim=-1)))
+        x_prime = operations.clone()
+        x_prime[1:-1] = self.mlp_combined(F.elu(torch.cat([predecessors, successors, self.mlp_resources(agg_machine_embeddings[1:-1]), self.mlp_same(operations[1:-1])], dim=-1)))
         return x_prime
 
     def message(self, x_j):
