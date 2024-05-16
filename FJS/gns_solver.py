@@ -2,7 +2,7 @@ import torch
 from torch_geometric.data import HeteroData
 from torch_geometric.nn import MessagePassing
 from common import load_instances, OP_STRUCT
-from torch.nn import Sequential as Seq, Linear as Lin, ELU
+from torch.nn import Sequential as Seq, Linear as Lin, ELU, Parameter
 from torch_geometric.utils import to_dense_adj
 import torch.nn.functional as F
 
@@ -12,7 +12,7 @@ TEST_INSTANCES_PATH = './FJS/instances/test/'
 NOT_SCHEDULED = 0
 OP_FEATURES = {"status": 0, "remaining_neighboring_resources": 1, "duration": 2, "start": 3, "job_unscheduled_ops": 4, "current_job_completion": 5}
 RES_FEATURES = {"available_time": 0, "remaining_neighboring_ops": 1, "past_utilization_rate": 2}
-GAT_CONF = {"gnn_layers": 2, "embedding_dims": 8, "MLP_size": 128, "heads": {"layers": 2, "init_dims": 64}}
+GAT_CONF = {"gnn_layers": 2, "embedding_dims": 8, "MLP_size": 128, "attention_heads":3, "heads": {"layers": 2, "init_dims": 64}}
 PPO_CONF = {"train_iterations": 1000, "opt_iterations": 3, "batch_size": 20, "clip_ratio": 0.2, "policy_loss": 1, "value_loss": 0.5, "entropy": 0.01, "discount_factor": 1.0}
 OPT_CONF = {"learning_rate": 2e-4}
 
@@ -92,39 +92,72 @@ def display_graph(graph):
 # =*= II. GRAPH ATTENTION NEURAL NET ARCHITECTURE: TWO-STAGE EMBEDDING + ACTOR-CRITIC HEADS =*=
 #====================================================================================================================
 
+class ResourceAttentionEmbeddingLayer(MessagePassing):
+    def __init__(self, resource_features_dim, operation_features_dim, num_heads=GAT_CONF["attention_heads"]):
+        super(ResourceAttentionEmbeddingLayer, self).__init__(aggr='none', node_dim=0)
+        self.num_heads = num_heads
+        self.hidden_dim = GAT_CONF["embedding_dims"]
+        self.resource_transform = Lin(resource_features_dim, self.hidden_dim * num_heads)
+        self.operation_transform = Lin(operation_features_dim, self.hidden_dim * num_heads)
+        self.att_resource_self = Parameter(torch.Tensor(1, num_heads, 2 * self.hidden_dim))
+        self.att_resource_operation = Parameter(torch.Tensor(1, num_heads, 2 * self.hidden_dim))
+        self.leaky_relu = torch.nn.LeakyReLU(negative_slope=0.2)  # LeakyReLU activation
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        torch.nn.init.xavier_uniform_(self.att_resource_self)
+        torch.nn.init.xavier_uniform_(self.att_resource_operation)
+
+    def forward(self, resources, operations, requirement_edges):
+        resources = self.resource_transform(resources).view(-1, self.num_heads, self.hidden_dim)
+        operations = self.operation_transform(operations).view(-1, self.num_heads, self.hidden_dim)
+        self_attention = self.leaky_relu((resources * resources).sum(dim=-1))
+        cross_attention = self.propagate(requirement_edges, operations=operations, resources=resources)
+        alpha = self.softmax(torch.cat([self_attention.unsqueeze(-1), cross_attention], dim=-1), index=requirement_edges[0])
+        normalized_self_coef, normalized_operations_coef = alpha.split([1, alpha.size(-1) - 1], dim=-1)
+        v_prime = torch.nn.functional.elu((normalized_self_coef * resources).sum(dim=-2) + (normalized_operations_coef * cross_attention).sum(dim=-2))
+        return v_prime
+
+    def message(self, x_j, v_i):
+        att = self.leaky_relu((self.att_resource_operation * torch.cat([v_i, x_j], dim=-1)).sum(dim=-1))
+        return att.unsqueeze(-1) * x_j
+
+    def update(self, aggr_out):
+        return aggr_out
+    
 class OperationEmbeddingLayer(MessagePassing):
     def __init__(self, in_channels, out_channels):
         super(OperationEmbeddingLayer, self).__init__(aggr='none')
-        hidden_channels = GAT_CONF["MLP_size"]
+        self.hidden_channels = GAT_CONF["MLP_size"]
         self.mlp_combined = Seq(
-            Lin(out_channels, hidden_channels), ELU(),
-            Lin(hidden_channels, hidden_channels), ELU(),
-            Lin(hidden_channels, out_channels)
+            Lin(out_channels, self.hidden_channels), ELU(),
+            Lin(self.hidden_channels, self.hidden_channels), ELU(),
+            Lin(self.hidden_channels, out_channels)
         )
         self.mlp_predecessor = Seq(
-            Lin(in_channels, hidden_channels), ELU(),
-            Lin(hidden_channels, hidden_channels), ELU(),
-            Lin(hidden_channels, out_channels)
+            Lin(in_channels, self.hidden_channels), ELU(),
+            Lin(self.hidden_channels, self.hidden_channels), ELU(),
+            Lin(self.hidden_channels, out_channels)
         )
         self.mlp_successor = Seq(
-            Lin(in_channels, hidden_channels), ELU(),
-            Lin(hidden_channels, hidden_channels), ELU(),
-            Lin(hidden_channels, out_channels)
+            Lin(in_channels, self.hidden_channels), ELU(),
+            Lin(self.hidden_channels, self.hidden_channels), ELU(),
+            Lin(self.hidden_channels, out_channels)
         )
         self.mlp_resources = Seq(
-            Lin(out_channels, hidden_channels), ELU(),
-            Lin(hidden_channels, hidden_channels), ELU(),
-            Lin(hidden_channels, out_channels)
+            Lin(out_channels, self.hidden_channels), ELU(),
+            Lin(self.hidden_channels, self.hidden_channels), ELU(),
+            Lin(self.hidden_channels, out_channels)
         )
         self.mlp_same = Seq(
-            Lin(in_channels, hidden_channels), ELU(),
-            Lin(hidden_channels, hidden_channels), ELU(),
-            Lin(hidden_channels, out_channels)
+            Lin(in_channels, self.hidden_channels), ELU(),
+            Lin(self.hidden_channels, self.hidden_channels), ELU(),
+            Lin(self.hidden_channels, out_channels)
         )
 
     def forward(self, operations, resources, precedence_edges, requirement_edges):
         adj_ops = to_dense_adj(precedence_edges)[0]
-        agg_machine_embeddings = to_dense_adj(requirement_edges)[0].matmul(v)
+        agg_machine_embeddings = to_dense_adj(requirement_edges)[0].matmul(resources)
         predecessors = torch.zeros_like(operations)
         successors = torch.zeros_like(operations)
         for i in range(1, operations.shape[0] - 1):
@@ -141,29 +174,14 @@ class OperationEmbeddingLayer(MessagePassing):
     def message(self, x_j):
         return x_j
     
-class ResourceEmbeddingLayer(MessagePassing):
-    def __init__(self, in_channels, out_channels):
-        super(ResourceEmbeddingLayer, self).__init__(aggr='mean')
-        self.lin = torch.nn.Linear(in_channels, out_channels)
-
-    def forward(self, x, edge_index):
-        x = self.lin(x)
-        return self.propagate(edge_index, x=x)
-
-    def message(self, x_j):
-        return x_j
-
-    def update(self, aggr_out):
-        return aggr_out
-    
 class HeterogeneousGAT(torch.nn.Module):
     def __init__(self):
         super(HeterogeneousGAT, self).__init__()
         embedding_size = GAT_CONF["embedding_dims"]
         self.resource_layers = torch.nn.ModuleList()
-        self.resource_layers.append(ResourceEmbeddingLayer(len(RES_FEATURES), embedding_size))
+        self.resource_layers.append(ResourceAttentionEmbeddingLayer(len(RES_FEATURES), embedding_size))
         for _ in range(1, range(GAT_CONF["gnn_layers"])):
-            self.resource_layers.append(ResourceEmbeddingLayer(embedding_size, embedding_size))
+            self.resource_layers.append(ResourceAttentionEmbeddingLayer(embedding_size, embedding_size))
         self.operation_layers = torch.nn.ModuleList()
         self.resource_layers.append(OperationEmbeddingLayer(len(OP_FEATURES), embedding_size))
         for _ in range(1, range(GAT_CONF["gnn_layers"])):
