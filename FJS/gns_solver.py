@@ -180,11 +180,11 @@ class HeterogeneousGAT(torch.nn.Module):
         embedding_size = GAT_CONF["embedding_dims"]
         self.resource_layers = torch.nn.ModuleList()
         self.resource_layers.append(ResourceAttentionEmbeddingLayer(len(RES_FEATURES), embedding_size))
-        for _ in range(1, range(GAT_CONF["gnn_layers"])):
+        for _ in range(GAT_CONF["gnn_layers"]):
             self.resource_layers.append(ResourceAttentionEmbeddingLayer(embedding_size, embedding_size))
         self.operation_layers = torch.nn.ModuleList()
         self.resource_layers.append(OperationEmbeddingLayer(len(OP_FEATURES), embedding_size))
-        for _ in range(1, range(GAT_CONF["gnn_layers"])):
+        for _ in range(GAT_CONF["gnn_layers"]):
             self.resource_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size))
         actor_critic_dim = GAT_CONF["actor_critic_dim"]
         self.actor_mlp = Seq(
