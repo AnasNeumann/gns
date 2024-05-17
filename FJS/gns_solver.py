@@ -127,7 +127,7 @@ class ResourceAttentionEmbeddingLayer(MessagePassing):
     
 class OperationEmbeddingLayer(MessagePassing):
     def __init__(self, in_channels, out_channels):
-        super(OperationEmbeddingLayer, self).__init__(aggr='none')
+        super(OperationEmbeddingLayer, self).__init__()
         self.hidden_channels = GAT_CONF["MLP_size"]
         self.mlp_combined = Seq(
             Lin(out_channels, self.hidden_channels), ELU(),
@@ -175,7 +175,7 @@ class OperationEmbeddingLayer(MessagePassing):
         return x_j
     
 class HeterogeneousGAT(torch.nn.Module):
-    def __init__(self, possible_decisions=1):
+    def __init__(self):
         super(HeterogeneousGAT, self).__init__()
         embedding_size = GAT_CONF["embedding_dims"]
         self.resource_layers = torch.nn.ModuleList()
@@ -190,7 +190,7 @@ class HeterogeneousGAT(torch.nn.Module):
         self.actor_mlp = Seq(
             Lin(embedding_size * 4, actor_critic_dim), Tanh(),
             Lin(actor_critic_dim, actor_critic_dim), Tanh(),
-            Lin(actor_critic_dim, possible_decisions)
+            Lin(actor_critic_dim, 1)
         )
         self.critic_mlp = Seq(
             Lin(embedding_size * 2, actor_critic_dim), Tanh(),
@@ -238,7 +238,7 @@ test_instances = load_instances(TEST_INSTANCES_PATH)
 print(train_instances[0])
 graph = instance_to_graph(train_instances[0])
 display_graph(graph)
-model = HeterogeneousGAT(1)
+model = HeterogeneousGAT()
 print(model)
 
 #torch.save(model.state_dict(), 'GNS.pth')
