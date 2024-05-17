@@ -1,6 +1,6 @@
 import torch
 from torch_geometric.data import HeteroData
-from torch_geometric.nn import MessagePassing
+from torch_geometric.nn import MessagePassing, global_mean_pool
 from common import load_instances, OP_STRUCT
 from torch.nn import Sequential as Seq, Linear as Lin, ELU, Parameter
 from torch_geometric.utils import to_dense_adj
@@ -12,7 +12,7 @@ TEST_INSTANCES_PATH = './FJS/instances/test/'
 NOT_SCHEDULED = 0
 OP_FEATURES = {"status": 0, "remaining_neighboring_resources": 1, "duration": 2, "start": 3, "job_unscheduled_ops": 4, "current_job_completion": 5}
 RES_FEATURES = {"available_time": 0, "remaining_neighboring_ops": 1, "past_utilization_rate": 2}
-GAT_CONF = {"gnn_layers": 2, "embedding_dims": 8, "MLP_size": 128, "attention_heads":3, "heads": {"layers": 2, "init_dims": 64}}
+GAT_CONF = {"gnn_layers": 2, "embedding_dims": 8, "MLP_size": 128, "attention_heads":3, "actor_critic_dim": 64}
 PPO_CONF = {"train_iterations": 1000, "opt_iterations": 3, "batch_size": 20, "clip_ratio": 0.2, "policy_loss": 1, "value_loss": 0.5, "entropy": 0.01, "discount_factor": 1.0}
 OPT_CONF = {"learning_rate": 2e-4}
 
@@ -94,7 +94,7 @@ def display_graph(graph):
 
 class ResourceAttentionEmbeddingLayer(MessagePassing):
     def __init__(self, resource_features_dim, operation_features_dim, num_heads=GAT_CONF["attention_heads"]):
-        super(ResourceAttentionEmbeddingLayer, self).__init__(aggr='none', node_dim=0)
+        super(ResourceAttentionEmbeddingLayer, self).__init__(aggr='add', node_dim=0)
         self.num_heads = num_heads
         self.hidden_dim = GAT_CONF["embedding_dims"]
         self.resource_transform = Lin(resource_features_dim, self.hidden_dim)
@@ -175,7 +175,7 @@ class OperationEmbeddingLayer(MessagePassing):
         return x_j
     
 class HeterogeneousGAT(torch.nn.Module):
-    def __init__(self):
+    def __init__(self, possible_decisions=1):
         super(HeterogeneousGAT, self).__init__()
         embedding_size = GAT_CONF["embedding_dims"]
         self.resource_layers = torch.nn.ModuleList()
@@ -186,6 +186,21 @@ class HeterogeneousGAT(torch.nn.Module):
         self.resource_layers.append(OperationEmbeddingLayer(len(OP_FEATURES), embedding_size))
         for _ in range(1, range(GAT_CONF["gnn_layers"])):
             self.resource_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size))
+        actor_critic_dim = GAT_CONF["actor_critic_dim"]
+        self.actor_mlp = Seq(
+            Lin(actor_critic_dim * 4, actor_critic_dim),
+            torch.nn.Tanh(),
+            Lin(actor_critic_dim, actor_critic_dim),
+            torch.nn.Tanh(),
+            Lin(actor_critic_dim, possible_decisions)
+        )
+        self.critic_mlp = Seq(
+            Lin(actor_critic_dim * 2, actor_critic_dim),
+            torch.nn.Tanh(),
+            Lin(actor_critic_dim, actor_critic_dim), 
+            torch.nn.Tanh(), 
+            Lin(actor_critic_dim, 1)
+        )
 
     def forward(self, graph):
         operations, resources = graph['operation'].x, graph['resource'].x
@@ -195,7 +210,17 @@ class HeterogeneousGAT(torch.nn.Module):
         for l in range(GAT_CONF["gnn_layers"]):
             graph['resource'].x = self.resource_layers[l](resources, requirement_for_res_edges)
             graph['operation'].x  = self.operation_layers[l](operations, resources, precedence_edges, requirement_for_op_edges)
-        return graph
+        pooled_operations = global_mean_pool(operations, torch.zeros(operations.shape[0], dtype=torch.long)) # Assuming a single graph
+        pooled_resources = global_mean_pool(resources, torch.zeros(resources.shape[0], dtype=torch.long))
+        graph_state = torch.cat([pooled_operations, pooled_resources], dim=-1)
+        state_value = self.critic_mlp(graph_state)
+        action_logits = torch.empty(operations.shape[0], resources.shape[0])
+        for i in range(operations.shape[0]):
+            op_embedding = operations[i].repeat(resources.shape[0], 1)  # Repeat for each resource
+            action_input = torch.cat([op_embedding, resources, graph_state.repeat(resources.shape[0], 1)], dim=-1)
+            action_logits[i] = self.actor_mlp(action_input).squeeze()
+        action_probs = F.softmax(action_logits, dim=-1)
+        return action_probs, state_value
 
 #====================================================================================================================
 # =*= III. FUNCTION TO USE THE SCHEDULING GNN AND UPDATE THE GRAPH =*=
