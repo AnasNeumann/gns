@@ -203,18 +203,22 @@ class HeterogeneousGAT(torch.nn.Module):
         precedence_edges = graph['operation', 'precedence', 'operation'].edge_index
         requirement_edges = graph['operation', 'uses', 'resource'].edge_index
         for l in range(GAT_CONF["gnn_layers"]):
-            graph['resource'].x = self.resource_layers[l](resources, requirement_edges)
-            graph['operation'].x  = self.operation_layers[l](operations, resources, precedence_edges, requirement_edges)
-        pooled_operations = global_mean_pool(operations, torch.zeros(operations.shape[0], dtype=torch.long)) # Assuming a single graph
+            resources = self.resource_layers[l](resources, requirement_edges)
+            operations  = self.operation_layers[l](operations, resources, precedence_edges, requirement_edges)
+        pooled_operations = global_mean_pool(operations, torch.zeros(operations.shape[0], dtype=torch.long))
         pooled_resources = global_mean_pool(resources, torch.zeros(resources.shape[0], dtype=torch.long))
         graph_state = torch.cat([pooled_operations, pooled_resources], dim=-1)
         state_value = self.critic_mlp(graph_state)
-        action_logits = torch.empty(operations.shape[0], resources.shape[0])
-        for i in range(operations.shape[0]):
-            op_embedding = operations[i].repeat(resources.shape[0], 1)  # Repeat for each resource
-            action_input = torch.cat([op_embedding, resources, graph_state.repeat(resources.shape[0], 1)], dim=-1)
-            action_logits[i] = self.actor_mlp(action_input).squeeze()
-        action_probs = F.softmax(action_logits, dim=-1)
+        action_logits = []
+        for i, op_embedding in enumerate(operations):
+            # TODO add two additional constraints: op availability and res availability!
+            feasible_resource_indices = requirement_edges[1][requirement_edges[0] == i]
+            feasible_resources = resources[feasible_resource_indices]
+            for resource_embedding in feasible_resources:
+                action_input = torch.cat([op_embedding, resource_embedding, graph_state], dim=-1)
+                action_logits.append(self.actor_mlp(action_input))
+        action_logits = torch.stack(action_logits)
+        action_probs = F.softmax(action_logits, dim=0)
         return action_probs, state_value
 
 #====================================================================================================================
