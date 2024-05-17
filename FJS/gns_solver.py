@@ -125,6 +125,23 @@ class ResourceAttentionEmbeddingLayer(MessagePassing):
     def update(self, aggr_out):
         return aggr_out
     
+    def __repr__(self):
+        details = f"ResourceAttentionEmbeddingLayer(\n"
+        details += f"    num_heads={self.num_heads}, hidden_dim={self.hidden_dim},\n"
+        details += f"    resource_transform=Linear(in_features={self.resource_transform.in_features}, out_features={self.resource_transform.out_features}),\n"
+        details += f"    operation_transform=Linear(in_features={self.operation_transform.in_features}, out_features={self.operation_transform.out_features}),\n"
+        details += f"    att_resource_self=Parameter(shape={self.att_resource_self.shape}),\n"
+        details += f"    att_resource_operation=Parameter(shape={self.att_resource_operation.shape}),\n"
+        details += "\n    Forward Pass:\n"
+        details += "        1. Transform resource and operation features (linear).\n"
+        details += "        2. Compute self-attention for resources and apply LeakyReLU.\n"
+        details += "        3. Propagate messages from operations to resources (cross-attention).\n"
+        details += "        4. Normalize attention coefficients using softmax.\n"
+        details += "        5. Aggregate information based on attention coefficients (weighted sum).\n"
+        details += "        6. Apply ELU activation to produce final embeddings.\n"
+        details += ")"
+        return details
+    
 class OperationEmbeddingLayer(MessagePassing):
     def __init__(self, in_channels, out_channels):
         super(OperationEmbeddingLayer, self).__init__()
@@ -174,18 +191,55 @@ class OperationEmbeddingLayer(MessagePassing):
     def message(self, x_j):
         return x_j
     
+    def __repr__(self):
+        details = f"OperationEmbeddingLayer(\n"
+        details += f"    hidden_channels={self.hidden_channels},\n"
+        details += f"    mlp_combined=Seq(\n"
+        for layer in self.mlp_combined:
+            details += f"        {layer},\n"
+        details += "    ),\n"
+        details += f"    mlp_predecessor=Seq(\n"
+        for layer in self.mlp_predecessor:
+            details += f"        {layer},\n"
+        details += "    ),\n"
+        details += f"    mlp_successor=Seq(\n"
+        for layer in self.mlp_predecessor:
+            details += f"        {layer},\n"
+        details += "    ),\n"
+        details += f"    mlp_predecessor=Seq(\n"
+        for layer in self.mlp_successor:
+            details += f"        {layer},\n"
+        details += "    ),\n"
+        details += f"    mlp_resources=Seq(\n"
+        for layer in self.mlp_resources:
+            details += f"        {layer},\n"
+        details += "    ),\n"
+        details += f"    mlp_same=Seq(\n"
+        for layer in self.mlp_same:
+            details += f"        {layer},\n"
+        details += "    ),\n"
+        details += "\n    Forward Pass:\n"
+        details += "        1. Compute adjacency matrix for precedence relations.\n"
+        details += "        2. Aggregate resource embeddings based on requirement edges.\n"
+        details += "        3. Iterate through operations:\n"
+        details += "            - Compute mean embeddings for predecessors and successors.\n"
+        details += "            - Apply MLPs to predecessors, successors, resources, and self-embeddings.\n"
+        details += "        4. Combine embeddings using `mlp_combined`.\n"
+        details += "        5. Update operation embeddings using the combined result.\n"
+        details += ")"
+        return details
+    
 class HeterogeneousGAT(torch.nn.Module):
     def __init__(self):
         super(HeterogeneousGAT, self).__init__()
         embedding_size = GAT_CONF["embedding_dims"]
         self.resource_layers = torch.nn.ModuleList()
-        self.resource_layers.append(ResourceAttentionEmbeddingLayer(len(RES_FEATURES), embedding_size))
-        for _ in range(GAT_CONF["gnn_layers"]):
-            self.resource_layers.append(ResourceAttentionEmbeddingLayer(embedding_size, embedding_size))
         self.operation_layers = torch.nn.ModuleList()
-        self.resource_layers.append(OperationEmbeddingLayer(len(OP_FEATURES), embedding_size))
-        for _ in range(GAT_CONF["gnn_layers"]):
-            self.resource_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size))
+        self.resource_layers.append(ResourceAttentionEmbeddingLayer(len(RES_FEATURES), len(OP_FEATURES)))
+        self.operation_layers.append(OperationEmbeddingLayer(len(OP_FEATURES), embedding_size))
+        for _ in range(GAT_CONF["gnn_layers"]-1):
+            self.resource_layers.append(ResourceAttentionEmbeddingLayer(embedding_size, embedding_size))
+            self.operation_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size))
         actor_critic_dim = GAT_CONF["actor_critic_dim"]
         self.actor_mlp = Seq(
             Lin(embedding_size * 4, actor_critic_dim), Tanh(),
