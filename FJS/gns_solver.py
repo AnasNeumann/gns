@@ -2,7 +2,7 @@ import torch
 from torch_geometric.data import HeteroData
 from torch_geometric.nn import MessagePassing, global_mean_pool
 from common import load_instances, OP_STRUCT
-from torch.nn import Sequential as Seq, Linear as Lin, ELU, Parameter
+from torch.nn import Sequential as Seq, Linear as Lin, ELU, Tanh, Parameter
 from torch_geometric.utils import to_dense_adj
 import torch.nn.functional as F
 
@@ -12,7 +12,7 @@ TEST_INSTANCES_PATH = './FJS/instances/test/'
 NOT_SCHEDULED = 0
 OP_FEATURES = {"status": 0, "remaining_neighboring_resources": 1, "duration": 2, "start": 3, "job_unscheduled_ops": 4, "current_job_completion": 5}
 RES_FEATURES = {"available_time": 0, "remaining_neighboring_ops": 1, "past_utilization_rate": 2}
-GAT_CONF = {"gnn_layers": 2, "embedding_dims": 8, "MLP_size": 128, "attention_heads":3, "actor_critic_dim": 64}
+GAT_CONF = {"gnn_layers": 2, "embedding_dims": 8, "MLP_size": 128, "attention_heads": 3, "actor_critic_dim": 64}
 PPO_CONF = {"train_iterations": 1000, "opt_iterations": 3, "batch_size": 20, "clip_ratio": 0.2, "policy_loss": 1, "value_loss": 0.5, "entropy": 0.01, "discount_factor": 1.0}
 OPT_CONF = {"learning_rate": 2e-4}
 
@@ -188,17 +188,13 @@ class HeterogeneousGAT(torch.nn.Module):
             self.resource_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size))
         actor_critic_dim = GAT_CONF["actor_critic_dim"]
         self.actor_mlp = Seq(
-            Lin(actor_critic_dim * 4, actor_critic_dim),
-            torch.nn.Tanh(),
-            Lin(actor_critic_dim, actor_critic_dim),
-            torch.nn.Tanh(),
+            Lin(embedding_size * 4, actor_critic_dim), Tanh(),
+            Lin(actor_critic_dim, actor_critic_dim), Tanh(),
             Lin(actor_critic_dim, possible_decisions)
         )
         self.critic_mlp = Seq(
-            Lin(actor_critic_dim * 2, actor_critic_dim),
-            torch.nn.Tanh(),
-            Lin(actor_critic_dim, actor_critic_dim), 
-            torch.nn.Tanh(), 
+            Lin(embedding_size * 2, actor_critic_dim), Tanh(),
+            Lin(actor_critic_dim, actor_critic_dim), Tanh(), 
             Lin(actor_critic_dim, 1)
         )
 
