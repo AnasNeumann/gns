@@ -252,8 +252,8 @@ class HeterogeneousGAT(torch.nn.Module):
             Lin(actor_critic_dim, 1)
         )
 
-    def forward(self, graph):
-        operations, resources = graph['operation'].x, graph['resource'].x
+    def forward(self, graph, t):
+        operations, resources = graph['operation'].x.clone(), graph['resource'].x.clone()
         precedence_edges = graph['operation', 'precedence', 'operation'].edge_index
         requirement_edges = graph['operation', 'uses', 'resource'].edge_index
         for l in range(GAT_CONF["gnn_layers"]):
@@ -265,12 +265,13 @@ class HeterogeneousGAT(torch.nn.Module):
         state_value = self.critic_mlp(graph_state)
         action_logits = []
         for i, op_embedding in enumerate(operations):
-            # TODO add two additional constraints: op availability and res availability!
-            feasible_resource_indices = requirement_edges[1][requirement_edges[0] == i]
-            feasible_resources = resources[feasible_resource_indices]
-            for resource_embedding in feasible_resources:
-                action_input = torch.cat([op_embedding, resource_embedding, graph_state], dim=-1)
-                action_logits.append(self.actor_mlp(action_input))
+            if to_schedule(graph, i):
+                feasible_resource_indices = requirement_edges[1][requirement_edges[0] == i]
+                for idx in feasible_resource_indices:
+                    if is_available(graph, idx, t):
+                        resource_embedding = resources[idx]
+                        action_input = torch.cat([op_embedding, resource_embedding, graph_state], dim=-1)
+                        action_logits.append(self.actor_mlp(action_input))
         action_logits = torch.stack(action_logits)
         action_probs = F.softmax(action_logits, dim=0)
         return action_probs, state_value
@@ -278,6 +279,26 @@ class HeterogeneousGAT(torch.nn.Module):
 #====================================================================================================================
 # =*= III. FUNCTION TO USE THE SCHEDULING GNN AND UPDATE THE GRAPH =*=
 #====================================================================================================================
+
+def is_available(graph, idx, time):
+    return graph['resource'].x[idx][RES_FEATURES["available_time"]]<= time
+
+def scheduled(operation):
+    return operation[OP_FEATURES["status"]] != NOT_SCHEDULED
+
+def predecessor(graph, idx):
+    edges = graph['operation', 'precedence', 'operation'].edge_index
+    target_edges = (edges[1] == idx).nonzero().view(-1)
+    if target_edges.numel() > 0:
+        return edges[0, target_edges[0]].item() 
+    else:
+        return None
+
+def to_schedule(graph, idx):
+    op = graph['operation'].x[idx]
+    pred_idx = predecessor(graph, idx)
+    pred = graph['operation'].x[pred_idx]
+    return (not scheduled(op)) and (pred_idx==0 or scheduled(pred))
 
 #====================================================================================================================
 # =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
