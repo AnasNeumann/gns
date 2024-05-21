@@ -5,6 +5,7 @@ from common import load_instances, OP_STRUCT
 from torch.nn import Sequential as Seq, Linear as Lin, ELU, Tanh, Parameter
 from torch_geometric.utils import to_dense_adj
 import torch.nn.functional as F
+import copy
 
 # Configuration
 TRAIN_INSTANCES_PATH = './FJS/instances/train/'
@@ -197,8 +198,8 @@ class HeterogeneousGAT(torch.nn.Module):
             Lin(actor_critic_dim, 1)
         )
 
-    def forward(self, graph, t):
-        operations, resources = graph['operation'].x.clone(), graph['resource'].x.clone()
+    def forward(self, graph, actions, t):
+        operations, resources = graph['operation'].x, graph['resource'].x
         precedence_edges = graph['operation', 'precedence', 'operation'].edge_index
         requirement_edges = graph['operation', 'uses', 'resource'].edge_index
         for l in range(GAT_CONF["gnn_layers"]):
@@ -209,14 +210,10 @@ class HeterogeneousGAT(torch.nn.Module):
         graph_state = torch.cat([pooled_operations, pooled_resources], dim=-1)
         state_value = self.critic_mlp(graph_state)
         action_logits = []
-        for i, op_embedding in enumerate(operations):
-            if to_schedule(graph, i):
-                feasible_resource_indices = requirement_edges[1][requirement_edges[0] == i]
-                for idx in feasible_resource_indices:
-                    if is_available(graph, idx, t):
-                        resource_embedding = resources[idx]
-                        action_input = torch.cat([op_embedding, resource_embedding, graph_state], dim=-1)
-                        action_logits.append(self.actor_mlp(action_input))
+        for op_idx, res_idx in actions:
+            print("action: "+str(op_idx)+"/"+str(res_idx))
+            action_input = torch.cat([operations[op_idx], resources[res_idx], graph_state], dim=-1)
+            action_logits.append(self.actor_mlp(action_input))
         action_logits = torch.stack(action_logits)
         action_probs = F.softmax(action_logits, dim=0)
         return action_probs, state_value
@@ -225,8 +222,8 @@ class HeterogeneousGAT(torch.nn.Module):
 # =*= III. FUNCTION TO USE THE SCHEDULING GNN AND UPDATE THE GRAPH =*=
 #====================================================================================================================
 
-def is_available(graph, idx, time):
-    return graph['resource'].x[idx][RES_FEATURES["available_time"]]<= time
+def is_available(graph, res_idx, time):
+    return graph['resource'].x[res_idx][RES_FEATURES["available_time"]].item() <= time
 
 def scheduled(operation):
     return operation[OP_FEATURES["status"]] != NOT_SCHEDULED
@@ -242,8 +239,17 @@ def predecessor(graph, idx):
 def to_schedule(graph, idx):
     op = graph['operation'].x[idx]
     pred_idx = predecessor(graph, idx)
-    pred = graph['operation'].x[pred_idx]
-    return (not scheduled(op)) and (pred_idx==0 or scheduled(pred))
+    return (not scheduled(op)) and (pred_idx==None or pred_idx==0 or scheduled(graph['operation'].x[pred_idx]).item())
+
+def possible_actions(graph, t):
+    actions = []
+    requirement_edges = graph['operation', 'uses', 'resource'].edge_index
+    for op_idx, _ in enumerate(graph['operation'].x):
+        if to_schedule(graph, op_idx):
+            for res_idx in requirement_edges[1][requirement_edges[0] == op_idx]:
+                if is_available(graph, res_idx, t):
+                    actions.append((op_idx, res_idx.item()))
+    return actions
 
 # TODO Une fonction qui ordonnance les jobs les uns après les autres
 # Créer une liste des combinaisons possibles comme dans le GNN pour comparer
@@ -271,7 +277,9 @@ display_graph(graph)
 model = HeterogeneousGAT()
 print(model)
 CURRENT_TIME = 0
-action_probs, state_value = model(graph, CURRENT_TIME)
+actions = possible_actions(graph, CURRENT_TIME)
+print(actions)
+action_probs, state_value = model(copy.deepcopy(graph), actions, CURRENT_TIME)
 print("State value: "+str(state_value))
 print(action_probs)
 #torch.save(model.state_dict(), 'GNS.pth')
