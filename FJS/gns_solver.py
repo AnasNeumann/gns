@@ -111,26 +111,20 @@ class ResourceAttentionEmbeddingLayer(MessagePassing):
 
     def forward(self, resources, operations, requirement_edges):
         resources = self.resource_transform(resources) 
+        operations = self.operation_transform(operations)
+        ops_by_edges = operations[requirement_edges[0]]
+        res_by_edges = resources[requirement_edges[1]]
         self_attention = self.leaky_relu(torch.matmul(torch.cat([resources, resources], dim=-1), self.att_self_coef))
-        cross_attention = self.propagate(requirement_edges, x=operations, v=resources, res_embeddings=resources)
+        cross_attention = self.leaky_relu(torch.matmul(torch.cat([res_by_edges, ops_by_edges], dim=-1), self.att_coef))
         normalizer = F.softmax(torch.cat([self_attention, cross_attention], dim=0), dim=0)
         norm_self_attention = normalizer[:self_attention.size(0)]
         norm_cross_attention = normalizer[self_attention.size(0):]
-        related_ops = self.operation_transform(operations[requirement_edges[0]])
-        weighted_related_ops = norm_cross_attention * related_ops
-        sum_related_ops = torch.zeros_like(resources)
-        sum_related_ops.index_add_(0, requirement_edges[1], weighted_related_ops)
-        embedding = F.elu(norm_self_attention * resources + sum_related_ops)
+        weighted_ops_by_edges = norm_cross_attention * ops_by_edges
+        sum_ops_by_edges = torch.zeros_like(resources)
+        sum_ops_by_edges.index_add_(0, requirement_edges[1], weighted_ops_by_edges)
+        embedding = F.elu(norm_self_attention * resources + sum_ops_by_edges)
         return embedding
 
-    def message(self, x_j, v_i, res_embeddings, index):
-        operation = self.operation_transform(x_j)
-        att = self.leaky_relu(torch.matmul(torch.cat([res_embeddings[index], operation], dim=-1), self.att_coef))
-        return att
-
-    def update(self, aggr_out):
-        return aggr_out
-    
 class OperationEmbeddingLayer(MessagePassing):
     def __init__(self, in_channels, out_channels):
         super(OperationEmbeddingLayer, self).__init__()
@@ -163,18 +157,19 @@ class OperationEmbeddingLayer(MessagePassing):
 
     def forward(self, operations, resources, precedence_edges, requirement_edges):
         adj_ops = to_dense_adj(precedence_edges)[0]
-        agg_machine_embeddings = to_dense_adj(requirement_edges)[0].matmul(resources)
+        ops_idx_by_edges = requirement_edges[0]
+        res_embeddings_by_edges = resources[requirement_edges[1]]
+        agg_machine_embeddings = torch.zeros((operations.size(0), resources.size(1)))
+        for i, op_idx in enumerate(ops_idx_by_edges):
+            agg_machine_embeddings[op_idx] += res_embeddings_by_edges[i]
         predecessors = torch.zeros_like(operations)
         successors = torch.zeros_like(operations)
         for i in range(1, operations.shape[0] - 1):
-            predecessors[i] = self.mlp_predecessor(operations[adj_ops[:,i].nonzero()].mean(dim=0))
-            successors[i] = self.mlp_successor(operations[adj_ops[i].nonzero()].mean(dim=0))
+            predecessors[i] = self.mlp_predecessor(operations[adj_ops.nonzero()].mean(dim=0))
+            successors[i] = self.mlp_successor(operations[adj_ops.nonzero()].mean(dim=0))
         embedding = operations.clone()
         embedding[1:-1] = self.mlp_combined(F.elu(torch.cat([predecessors[1:-1], successors[1:-1], self.mlp_resources(agg_machine_embeddings[1:-1]), self.mlp_same(operations[1:-1])], dim=-1)))
         return embedding
-
-    def message(self, x_j):
-        return x_j
     
 class HeterogeneousGAT(torch.nn.Module):
     def __init__(self):
