@@ -250,6 +250,18 @@ def possible_actions(graph, t):
                     actions.append((op_idx, res_idx.item()))
     return actions
 
+def solve(instance):
+    graph = instance_to_graph(instance)
+    model = HeterogeneousGAT()
+    CURRENT_TIME = 0
+    SOLVED = False
+    while not SOLVED:
+        actions = possible_actions(graph, CURRENT_TIME)
+        print(actions)
+        action_probs = model(copy.deepcopy(graph), actions, CURRENT_TIME)
+        print(action_probs)
+        SOLVED = True
+
 # TODO Une fonction qui ordonnance les jobs les uns après les autres
 # Créer une liste des combinaisons possibles comme dans le GNN pour comparer
 # Update is_schedule, start_time, remaining_neighboring_resources for one operation only but job_unscheduled_ops and current_job_completion for all job operations
@@ -271,16 +283,8 @@ def possible_actions(graph, t):
 train_instances = load_instances(TRAIN_INSTANCES_PATH)
 test_instances = load_instances(TEST_INSTANCES_PATH)
 print(train_instances[0])
-graph = instance_to_graph(train_instances[0])
-display_graph(graph)
-model = HeterogeneousGAT()
-print(model)
-CURRENT_TIME = 0
-actions = possible_actions(graph, CURRENT_TIME)
-print(actions)
-action_probs, state_value = model(copy.deepcopy(graph), actions, CURRENT_TIME)
-print("State value: "+str(state_value))
-print(action_probs)
+solve(train_instances[0])
+
 #torch.save(model.state_dict(), 'GNS.pth')
 #model_loaded = HeterogeneousGAT(1)
 #model_loaded.load_state_dict(torch.load('GNS.pth'))
