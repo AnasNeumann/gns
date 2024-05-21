@@ -129,8 +129,9 @@ class OperationEmbeddingLayer(MessagePassing):
     def __init__(self, in_channels, out_channels):
         super(OperationEmbeddingLayer, self).__init__()
         self.hidden_channels = GAT_CONF["MLP_size"]
+        self.embedding_size = out_channels
         self.mlp_combined = Seq(
-            Lin(out_channels, self.hidden_channels), ELU(),
+            Lin(4 * out_channels, self.hidden_channels), ELU(),
             Lin(self.hidden_channels, self.hidden_channels), ELU(),
             Lin(self.hidden_channels, out_channels)
         )
@@ -162,13 +163,15 @@ class OperationEmbeddingLayer(MessagePassing):
         agg_machine_embeddings = torch.zeros((operations.size(0), resources.size(1)))
         for i, op_idx in enumerate(ops_idx_by_edges):
             agg_machine_embeddings[op_idx] += res_embeddings_by_edges[i]
-        predecessors = torch.zeros_like(operations)
-        successors = torch.zeros_like(operations)
+        predecessors = torch.zeros((operations.shape[0], self.embedding_size))
+        successors = torch.zeros((operations.shape[0], self.embedding_size))
         for i in range(1, operations.shape[0] - 1):
-            predecessors[i] = self.mlp_predecessor(operations[adj_ops.nonzero()].mean(dim=0))
-            successors[i] = self.mlp_successor(operations[adj_ops.nonzero()].mean(dim=0))
-        embedding = operations.clone()
-        embedding[1:-1] = self.mlp_combined(F.elu(torch.cat([predecessors[1:-1], successors[1:-1], self.mlp_resources(agg_machine_embeddings[1:-1]), self.mlp_same(operations[1:-1])], dim=-1)))
+            predecessors[i] = self.mlp_predecessor(operations[adj_ops[:,i].nonzero()].mean(dim=0))
+            successors[i] = self.mlp_successor(operations[adj_ops[i].nonzero()].mean(dim=0))
+        same_embeddings = self.mlp_same(operations[1:-1])
+        agg_machine_embeddings = self.mlp_resources(agg_machine_embeddings[1:-1])
+        embedding = torch.zeros((operations.shape[0], self.embedding_size))
+        embedding[1:-1] = self.mlp_combined(torch.cat([predecessors[1:-1], successors[1:-1], agg_machine_embeddings, same_embeddings], dim=-1))
         return embedding
     
 class HeterogeneousGAT(torch.nn.Module):
@@ -250,6 +253,7 @@ def to_schedule(graph, idx):
 # [Maybe] update past_utilization_rate for all resources
 # Update the final Makespan
 # Update current time "t" based on available resources and operations!
+# Add feature normalization 
 
 #====================================================================================================================
 # =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
