@@ -250,17 +250,9 @@ def possible_actions(graph, t):
                     actions.append((op_idx, res_idx.item()))
     return actions
 
-def solve(instance):
-    graph = instance_to_graph(instance)
-    model = HeterogeneousGAT()
-    CURRENT_TIME = 0
-    SOLVED = False
-    while not SOLVED:
-        actions = possible_actions(graph, CURRENT_TIME)
-        print(actions)
-        action_probs = model(copy.deepcopy(graph), actions, CURRENT_TIME)
-        print(action_probs)
-        SOLVED = True
+#====================================================================================================================
+# =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
+#====================================================================================================================
 
 # TODO Une fonction qui ordonnance les jobs les uns après les autres
 # Créer une liste des combinaisons possibles comme dans le GNN pour comparer
@@ -272,9 +264,17 @@ def solve(instance):
 # Update current time "t" based on available resources and operations!
 # Add feature normalization 
 
-#====================================================================================================================
-# =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
-#====================================================================================================================
+def solve(instance, train=False):
+    graph = instance_to_graph(instance)
+    model = HeterogeneousGAT()
+    CURRENT_TIME = 0
+    SOLVED = False
+    while not SOLVED:
+        actions = possible_actions(graph, CURRENT_TIME)
+        print(actions)
+        action_probs = model(copy.deepcopy(graph), actions, CURRENT_TIME)
+        print(action_probs)
+        SOLVED = True
 
 #====================================================================================================================
 # =*= V. EXECUTE THE COMPLETE CODE =*=
