@@ -50,7 +50,7 @@ def instance_to_graph(instance):
     for type, quantity in enumerate(resources):
         res_of_type = []
         for _ in range(quantity):
-            graph = add_node(graph, 'resource', torch.tensor([[0, init_ops_by_resource(type, jobs), 0]]))
+            graph = add_node(graph, 'resource', torch.tensor([[0, init_ops_by_resource(type, jobs), 0]], dtype=torch.float))
             res_of_type.append(resource_id)
             resource_id += 1
         resources_by_type.append(res_of_type)
@@ -62,7 +62,7 @@ def instance_to_graph(instance):
         for position, operation in enumerate(job):
             duration = operation[OP_STRUCT["duration"]]
             available_resources = resources[operation[OP_STRUCT["resource_type"]]]
-            graph = add_node(graph, 'operation', torch.tensor([[NOT_SCHEDULED, available_resources, duration, init_start_time(job, position), len(job), init_end_time(job, len(job)-1)]]))
+            graph = add_node(graph, 'operation', torch.tensor([[NOT_SCHEDULED, available_resources, duration, init_start_time(job, position), len(job), init_end_time(job, len(job)-1)]], dtype=torch.float))
             ops2graph.append(op_id)
             if op_id > first_op_id:
                 graph = add_edge(graph, 'operation', 'precedence', 'operation', torch.tensor([[op_id - 1], [op_id]], dtype=torch.long))
@@ -104,10 +104,10 @@ class ResourceAttentionEmbeddingLayer(MessagePassing):
         self.reset_parameters()
 
     def reset_parameters(self):
-        torch.nn.init.xavier_uniform_(self.resource_transform, gain=1.414)
-        torch.nn.init.xavier_uniform_(self.operation_transform, gain=1.414)
-        torch.nn.init.xavier_uniform_(self.att_coef, gain=1.414)
-        torch.nn.init.xavier_uniform_(self.att_self_coef, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.resource_transform.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.operation_transform.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.att_coef.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.att_self_coef.data, gain=1.414)
 
     def forward(self, resources, operations, requirement_edges):
         resources = self.resource_transform(resources) 
