@@ -207,11 +207,10 @@ class HeterogeneousGAT(torch.nn.Module):
             operations  = self.operation_layers[l](operations, resources, precedence_edges, requirement_edges)
         pooled_operations = global_mean_pool(operations, torch.zeros(operations.shape[0], dtype=torch.long))
         pooled_resources = global_mean_pool(resources, torch.zeros(resources.shape[0], dtype=torch.long))
-        graph_state = torch.cat([pooled_operations, pooled_resources], dim=-1)
+        graph_state = torch.cat([pooled_operations, pooled_resources], dim=-1)[0]
         state_value = self.critic_mlp(graph_state)
         action_logits = []
         for op_idx, res_idx in actions:
-            print("action: "+str(op_idx)+"/"+str(res_idx))
             action_input = torch.cat([operations[op_idx], resources[res_idx], graph_state], dim=-1)
             action_logits.append(self.actor_mlp(action_input))
         action_logits = torch.stack(action_logits)
