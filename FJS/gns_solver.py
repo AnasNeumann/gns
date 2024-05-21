@@ -12,7 +12,7 @@ TEST_INSTANCES_PATH = './FJS/instances/test/'
 NOT_SCHEDULED = 0
 OP_FEATURES = {"status": 0, "remaining_neighboring_resources": 1, "duration": 2, "start": 3, "job_unscheduled_ops": 4, "current_job_completion": 5}
 RES_FEATURES = {"available_time": 0, "remaining_neighboring_ops": 1, "past_utilization_rate": 2}
-GAT_CONF = {"gnn_layers": 2, "embedding_dims": 8, "MLP_size": 128, "attention_heads": 3, "actor_critic_dim": 64}
+GAT_CONF = {"gnn_layers": 2, "embedding_dims": 8, "MLP_size": 128, "actor_critic_dim": 64}
 PPO_CONF = {"train_iterations": 1000, "opt_iterations": 3, "batch_size": 20, "clip_ratio": 0.2, "policy_loss": 1, "value_loss": 0.5, "entropy": 0.01, "discount_factor": 1.0}
 OPT_CONF = {"learning_rate": 2e-4}
 
@@ -93,54 +93,43 @@ def display_graph(graph):
 #====================================================================================================================
 
 class ResourceAttentionEmbeddingLayer(MessagePassing):
-    def __init__(self, resource_features_dim, operation_features_dim, num_heads=GAT_CONF["attention_heads"]):
-        super(ResourceAttentionEmbeddingLayer, self).__init__(aggr='add', node_dim=0)
-        self.num_heads = num_heads
+    def __init__(self, resource_features_dim, operation_features_dim):
+        super(ResourceAttentionEmbeddingLayer, self).__init__()
         self.hidden_dim = GAT_CONF["embedding_dims"]
-        self.resource_transform = Lin(resource_features_dim, self.hidden_dim)
-        self.operation_transform = Lin(operation_features_dim, self.hidden_dim)
-        self.att_resource_self = Parameter(torch.Tensor(1, num_heads, 2 * self.hidden_dim))
-        self.att_resource_operation = Parameter(torch.Tensor(1, num_heads, 2 * self.hidden_dim))
-        self.leaky_relu = torch.nn.LeakyReLU(negative_slope=0.2)  # LeakyReLU activation
+        self.resource_transform = Lin(resource_features_dim, self.hidden_dim, bias=False)
+        self.att_self_coef = Parameter(torch.zeros(size=(2 * self.hidden_dim, 1)))
+        self.operation_transform = Lin(operation_features_dim, self.hidden_dim, bias=False)
+        self.att_coef = Parameter(torch.zeros(size=(2 * self.hidden_dim, 1)))
+        self.leaky_relu = torch.nn.LeakyReLU(negative_slope=0.2)
         self.reset_parameters()
 
     def reset_parameters(self):
-        torch.nn.init.xavier_uniform_(self.att_resource_self)
-        torch.nn.init.xavier_uniform_(self.att_resource_operation)
+        torch.nn.init.xavier_uniform_(self.resource_transform, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.operation_transform, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.att_coef, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.att_self_coef, gain=1.414)
 
     def forward(self, resources, operations, requirement_edges):
-        resources = self.repeat(1, self.num_heads).resource_transform(resources).view(-1, self.num_heads, self.hidden_dim)
-        operations = self.repeat(1, self.num_heads).operation_transform(operations).view(-1, self.num_heads, self.hidden_dim)
-        self_attention = self.leaky_relu((resources * resources).sum(dim=-1))
-        cross_attention = self.propagate(requirement_edges, x=operations, v=resources)
-        alpha = self.softmax(torch.cat([self_attention.unsqueeze(-1), cross_attention], dim=-1), index=requirement_edges[0])
-        normalized_self_coef, normalized_operations_coef = alpha.split([1, alpha.size(-1) - 1], dim=-1)
-        v_prime = torch.nn.functional.elu((normalized_self_coef * resources).sum(dim=-2) + (normalized_operations_coef * cross_attention).sum(dim=-2))
-        return v_prime
+        resources = self.resource_transform(resources) 
+        self_attention = self.leaky_relu(torch.matmul(torch.cat([resources, resources], dim=-1), self.att_self_coef))
+        cross_attention = self.propagate(requirement_edges, x=operations, v=resources, res_embeddings=resources)
+        normalizer = F.softmax(torch.cat([self_attention, cross_attention], dim=0), dim=0)
+        norm_self_attention = normalizer[:self_attention.size(0)]
+        norm_cross_attention = normalizer[self_attention.size(0):]
+        related_ops = self.operation_transform(operations[requirement_edges[0]])
+        weighted_related_ops = norm_cross_attention * related_ops
+        sum_related_ops = torch.zeros_like(resources)
+        sum_related_ops.index_add_(0, requirement_edges[1], weighted_related_ops)
+        embedding = F.elu(norm_self_attention * resources + sum_related_ops)
+        return embedding
 
-    def message(self, x_j, v_i):
-        att = self.leaky_relu((self.att_resource_operation * torch.cat([v_i, x_j], dim=-1)).sum(dim=-1))
-        return att.unsqueeze(-1) * x_j
+    def message(self, x_j, v_i, res_embeddings, index):
+        operation = self.operation_transform(x_j)
+        att = self.leaky_relu(torch.matmul(torch.cat([res_embeddings[index], operation], dim=-1), self.att_coef))
+        return att
 
     def update(self, aggr_out):
         return aggr_out
-    
-    def __repr__(self):
-        details = f"ResourceAttentionEmbeddingLayer(\n"
-        details += f"    num_heads={self.num_heads}, hidden_dim={self.hidden_dim},\n"
-        details += f"    resource_transform=Linear(in_features={self.resource_transform.in_features}, out_features={self.resource_transform.out_features}),\n"
-        details += f"    operation_transform=Linear(in_features={self.operation_transform.in_features}, out_features={self.operation_transform.out_features}),\n"
-        details += f"    att_resource_self=Parameter(shape={self.att_resource_self.shape}),\n"
-        details += f"    att_resource_operation=Parameter(shape={self.att_resource_operation.shape}),\n"
-        details += "\n    Forward Pass:\n"
-        details += "        1. Transform resource and operation features (linear).\n"
-        details += "        2. Compute self-attention for resources and apply LeakyReLU.\n"
-        details += "        3. Propagate messages from operations to resources (cross-attention).\n"
-        details += "        4. Normalize attention coefficients using softmax.\n"
-        details += "        5. Aggregate information based on attention coefficients (weighted sum).\n"
-        details += "        6. Apply ELU activation to produce final embeddings.\n"
-        details += ")"
-        return details
     
 class OperationEmbeddingLayer(MessagePassing):
     def __init__(self, in_channels, out_channels):
@@ -178,56 +167,14 @@ class OperationEmbeddingLayer(MessagePassing):
         predecessors = torch.zeros_like(operations)
         successors = torch.zeros_like(operations)
         for i in range(1, operations.shape[0] - 1):
-            preds = adj_ops[:,i].nonzero()
-            succs = adj_ops[i].nonzero()
-            if preds.shape[0] > 0: 
-                predecessors[i] = self.mlp_predecessor(operations[preds].mean(dim=0))
-            if succs.shape[0] > 0:
-                successors[i] = self.mlp_successor(operations[succs].mean(dim=0))
-        x_prime = operations.clone()
-        x_prime[1:-1] = self.mlp_combined(F.elu(torch.cat([predecessors, successors, self.mlp_resources(agg_machine_embeddings[1:-1]), self.mlp_same(operations[1:-1])], dim=-1)))
-        return x_prime
+            predecessors[i] = self.mlp_predecessor(operations[adj_ops[:,i].nonzero()].mean(dim=0))
+            successors[i] = self.mlp_successor(operations[adj_ops[i].nonzero()].mean(dim=0))
+        embedding = operations.clone()
+        embedding[1:-1] = self.mlp_combined(F.elu(torch.cat([predecessors[1:-1], successors[1:-1], self.mlp_resources(agg_machine_embeddings[1:-1]), self.mlp_same(operations[1:-1])], dim=-1)))
+        return embedding
 
     def message(self, x_j):
         return x_j
-    
-    def __repr__(self):
-        details = f"OperationEmbeddingLayer(\n"
-        details += f"    hidden_channels={self.hidden_channels},\n"
-        details += f"    mlp_combined=Seq(\n"
-        for layer in self.mlp_combined:
-            details += f"        {layer},\n"
-        details += "    ),\n"
-        details += f"    mlp_predecessor=Seq(\n"
-        for layer in self.mlp_predecessor:
-            details += f"        {layer},\n"
-        details += "    ),\n"
-        details += f"    mlp_successor=Seq(\n"
-        for layer in self.mlp_predecessor:
-            details += f"        {layer},\n"
-        details += "    ),\n"
-        details += f"    mlp_predecessor=Seq(\n"
-        for layer in self.mlp_successor:
-            details += f"        {layer},\n"
-        details += "    ),\n"
-        details += f"    mlp_resources=Seq(\n"
-        for layer in self.mlp_resources:
-            details += f"        {layer},\n"
-        details += "    ),\n"
-        details += f"    mlp_same=Seq(\n"
-        for layer in self.mlp_same:
-            details += f"        {layer},\n"
-        details += "    ),\n"
-        details += "\n    Forward Pass:\n"
-        details += "        1. Compute adjacency matrix for precedence relations.\n"
-        details += "        2. Aggregate resource embeddings based on requirement edges.\n"
-        details += "        3. Iterate through operations:\n"
-        details += "            - Compute mean embeddings for predecessors and successors.\n"
-        details += "            - Apply MLPs to predecessors, successors, resources, and self-embeddings.\n"
-        details += "        4. Combine embeddings using `mlp_combined`.\n"
-        details += "        5. Update operation embeddings using the combined result.\n"
-        details += ")"
-        return details
     
 class HeterogeneousGAT(torch.nn.Module):
     def __init__(self):
@@ -257,7 +204,7 @@ class HeterogeneousGAT(torch.nn.Module):
         precedence_edges = graph['operation', 'precedence', 'operation'].edge_index
         requirement_edges = graph['operation', 'uses', 'resource'].edge_index
         for l in range(GAT_CONF["gnn_layers"]):
-            resources = self.resource_layers[l](resources, requirement_edges)
+            resources = self.resource_layers[l](resources, operations, requirement_edges)
             operations  = self.operation_layers[l](operations, resources, precedence_edges, requirement_edges)
         pooled_operations = global_mean_pool(operations, torch.zeros(operations.shape[0], dtype=torch.long))
         pooled_resources = global_mean_pool(resources, torch.zeros(resources.shape[0], dtype=torch.long))
@@ -300,6 +247,15 @@ def to_schedule(graph, idx):
     pred = graph['operation'].x[pred_idx]
     return (not scheduled(op)) and (pred_idx==0 or scheduled(pred))
 
+# TODO Une fonction qui ordonnance les jobs les uns après les autres
+# Créer une liste des combinaisons possibles comme dans le GNN pour comparer
+# Update is_schedule, start_time, remaining_neighboring_resources for one operation only but job_unscheduled_ops and current_job_completion for all job operations
+# Update available_time and past_utilization_rate for the selected resource
+# Update remaining_neighboring_ops for the not selected resources
+# [Maybe] update past_utilization_rate for all resources
+# Update the final Makespan
+# Update current time "t" based on available resources and operations!
+
 #====================================================================================================================
 # =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
 #====================================================================================================================
@@ -315,7 +271,10 @@ graph = instance_to_graph(train_instances[0])
 display_graph(graph)
 model = HeterogeneousGAT()
 print(model)
-
+CURRENT_TIME = 0
+action_probs, state_value = model(graph, CURRENT_TIME)
+print("State value: "+str(state_value))
+print(action_probs)
 #torch.save(model.state_dict(), 'GNS.pth')
 #model_loaded = HeterogeneousGAT(1)
 #model_loaded.load_state_dict(torch.load('GNS.pth'))
