@@ -236,7 +236,7 @@ def scheduled(operation):
 
 def succ_one(edges, idx):
     target_edges = (edges[0] == idx).nonzero().view(-1)
-    return edges[1, target_edges[1]].item() if target_edges.numel() > 0 else None
+    return edges[1, target_edges[0]].item() if target_edges.numel() > 0 else None
     
 def pred_one(edges, idx):
     target_edges = (edges[1] == idx).nonzero().view(-1)
@@ -322,7 +322,8 @@ def possible_actions(graph, t):
     return actions
 
 def policy(output, greedy=True):
-    return torch.argmax(output[0]).item() if greedy else torch.multinomial(output[0], 1).item(), output[1].item()
+    probabilities = output[0].view(-1)
+    return torch.argmax(probabilities).item() if greedy else torch.multinomial(probabilities, 1).item(), output[1].item()
 
 def solve(instance, train=False):
     graph, graph2instance, makespan = instance_to_graph(instance)
@@ -355,7 +356,7 @@ def solve(instance, train=False):
             for op in preds + succs:
                 update_op(graph, op, [("job_unscheduled_ops", job_unscheduled_ops), ("current_job_completion", end_job)])
             update_op(graph, op_idx, [("status", SCHEDULED), ("remaining_neighboring_resources", 1), ("start", time), ("job_unscheduled_ops", job_unscheduled_ops), ("current_job_completion", end_job)])
-            sequences[res_idx].append(graph2instance[op_idx])
+            sequences[res_idx].append(graph2instance[op_idx - 1])
             utilization[res_idx] = utilization[res_idx] + duration
             makespan = max(makespan, end_job)
 
