@@ -11,6 +11,7 @@ import copy
 TRAIN_INSTANCES_PATH = './FJS/instances/train/'
 TEST_INSTANCES_PATH = './FJS/instances/test/'
 NOT_SCHEDULED = 0
+SCHEDULED = 1
 OP_FEATURES = {"status": 0, "remaining_neighboring_resources": 1, "duration": 2, "start": 3, "job_unscheduled_ops": 4, "current_job_completion": 5}
 RES_FEATURES = {"available_time": 0, "remaining_neighboring_ops": 1, "past_utilization_rate": 2}
 GAT_CONF = {"gnn_layers": 2, "embedding_dims": 8, "MLP_size": 128, "actor_critic_dim": 64}
@@ -46,6 +47,7 @@ def instance_to_graph(instance):
     graph = add_node(graph, 'operation', zero_features)
     operations2graph = [] 
     resources_by_type = []
+    graph2instance = []
 
     resource_id = 0
     for type, quantity in enumerate(resources):
@@ -57,19 +59,24 @@ def instance_to_graph(instance):
         resources_by_type.append(res_of_type)
     
     op_id = 1
-    for job in jobs:
+    lower_makespan = 0
+    for job_id, job in enumerate(jobs):
         first_op_id = op_id
         ops2graph = []
+        end_job = init_end_time(job, len(job)-1)
+        lower_makespan = max(lower_makespan, end_job)
+        unscheduled_ops = len(job)
         for position, operation in enumerate(job):
             duration = operation[OP_STRUCT["duration"]]
             available_resources = resources[operation[OP_STRUCT["resource_type"]]]
-            graph = add_node(graph, 'operation', torch.tensor([[NOT_SCHEDULED, available_resources, duration, init_start_time(job, position), len(job), init_end_time(job, len(job)-1)]], dtype=torch.float))
+            graph = add_node(graph, 'operation', torch.tensor([[NOT_SCHEDULED, available_resources, duration, init_start_time(job, position), unscheduled_ops, end_job]], dtype=torch.float))
             ops2graph.append(op_id)
+            graph2instance.append((job_id, position))
             if op_id > first_op_id:
                 graph = add_edge(graph, 'operation', 'precedence', 'operation', torch.tensor([[op_id - 1], [op_id]], dtype=torch.long))
             op_id += 1
-        operations2graph.append(ops2graph)
-    
+        operations2graph.append(ops2graph)  
+
     graph = add_node(graph, 'operation', zero_features)
     first_op = 1
     for job_id, job in enumerate(jobs):
@@ -80,7 +87,7 @@ def instance_to_graph(instance):
             op2graph_id = operations2graph[job_id][op_id]
             for res2graph_id in resources_by_type[operation[OP_STRUCT["resource_type"]]]:
                 graph = add_edge(graph, 'operation', 'uses', 'resource', torch.tensor([[op2graph_id], [res2graph_id]], dtype=torch.long))       
-    return graph
+    return graph, graph2instance, lower_makespan
 
 def display_graph(graph):
     print("Graph_overview: " + str(graph))
@@ -225,56 +232,160 @@ def is_available(graph, res_idx, time):
     return graph['resource'].x[res_idx][RES_FEATURES["available_time"]].item() <= time
 
 def scheduled(operation):
-    return operation[OP_FEATURES["status"]] != NOT_SCHEDULED
+    return operation[OP_FEATURES["status"]] == SCHEDULED
+
+def succ_one(edges, idx):
+    target_edges = (edges[0] == idx).nonzero().view(-1)
+    return edges[1, target_edges[1]].item() if target_edges.numel() > 0 else None
+    
+def pred_one(edges, idx):
+    target_edges = (edges[1] == idx).nonzero().view(-1)
+    return edges[0, target_edges[0]].item() if target_edges.numel() > 0 else None
 
 def predecessor(graph, idx):
     edges = graph['operation', 'precedence', 'operation'].edge_index
-    target_edges = (edges[1] == idx).nonzero().view(-1)
-    if target_edges.numel() > 0:
-        return edges[0, target_edges[0]].item() 
-    else:
-        return None
+    return pred_one(edges, idx)
 
-def to_schedule(graph, idx):
+def successors(graph, idx):
+    succs = []
+    edges = graph['operation', 'precedence', 'operation'].edge_index
+    max = graph['operation'].x.shape[0] - 1
+    end = False
+    while not end:
+        succ_idx = succ_one(edges, idx)
+        if succ_idx==None or succ_idx>=max:
+            end = True
+        else:
+            succs.append(succ_idx)
+            idx = succ_idx
+    return succs
+
+def predecessors(graph, idx):
+    preds = []
+    edges = graph['operation', 'precedence', 'operation'].edge_index
+    end = False
+    while not end:
+        pred_idx = pred_one(edges, idx)
+        if pred_idx==None or pred_idx==0:
+            end = True
+        else:
+            preds.append(pred_idx)
+            idx = pred_idx
+    return preds
+
+def prune_requirements(graph, op_idx, res_idx):
+    edge_type = ('operation', 'uses', 'resource')
+    edges = graph[edge_type].edge_index
+    mask = ~((edges[0] == op_idx) & (edges[1] == res_idx))
+    graph[edge_type].edge_index = edges[:, mask]
+
+def end_op(graph, idx):
+    return op_val(graph, idx, 'start') + op_val(graph, idx, 'duration')
+
+def to_schedule(graph, idx, t):
     op = graph['operation'].x[idx]
     pred_idx = predecessor(graph, idx)
-    return (not scheduled(op)) and (pred_idx==None or pred_idx==0 or scheduled(graph['operation'].x[pred_idx]).item())
+    return (not scheduled(op)) and (pred_idx==None or pred_idx==0 or (scheduled(graph['operation'].x[pred_idx]) and t>=end_op(graph,pred_idx)))
 
-def possible_actions(graph, t):
-    actions = []
-    requirement_edges = graph['operation', 'uses', 'resource'].edge_index
-    for op_idx, _ in enumerate(graph['operation'].x):
-        if to_schedule(graph, op_idx):
-            for res_idx in requirement_edges[1][requirement_edges[0] == op_idx]:
-                if is_available(graph, res_idx, t):
-                    actions.append((op_idx, res_idx.item()))
-    return actions
+def get_val(graph, type, idx, f_dic, feature):
+    return graph[type].x[idx][f_dic[feature]].item()
+
+def op_val(graph, idx, feature):
+    return get_val(graph, 'operation', idx, OP_FEATURES, feature)
+
+def res_val(graph, idx, feature):
+    return get_val(graph, 'resource', idx, RES_FEATURES, feature)
+    
+def update_val(graph, type, idx, f_dic, feature, value):
+    graph[type].x[idx][f_dic[feature]] = value
+
+def update_op(graph, op_idx, updates):
+    for feature, value in updates:
+        update_val(graph, 'operation', op_idx, OP_FEATURES, feature, value)
+
+def update_res(graph, res_idx, updates):
+    for feature, value in updates:
+        update_val(graph, 'resource', res_idx, RES_FEATURES, feature, value)
 
 #====================================================================================================================
 # =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
 #====================================================================================================================
 
-# TODO Une fonction qui ordonnance les jobs les uns après les autres
-# Créer une liste des combinaisons possibles comme dans le GNN pour comparer
-# Update is_schedule, start_time, remaining_neighboring_resources for one operation only but job_unscheduled_ops and current_job_completion for all job operations
-# Update available_time and past_utilization_rate for the selected resource
-# Update remaining_neighboring_ops for the not selected resources
-# [Maybe] update past_utilization_rate for all resources
-# Update the final Makespan
-# Update current time "t" based on available resources and operations!
-# Add feature normalization 
+def possible_actions(graph, t):
+    actions = []
+    requirement_edges = graph['operation', 'uses', 'resource'].edge_index
+    for op_idx, _ in enumerate(graph['operation'].x):
+        if to_schedule(graph, op_idx, t):
+            for res_idx in requirement_edges[1][requirement_edges[0] == op_idx]:
+                if is_available(graph, res_idx, t):
+                    actions.append((op_idx, res_idx.item()))
+    return actions
+
+def policy(output, greedy=True):
+    return torch.argmax(output[0]).item() if greedy else torch.multinomial(output[0], 1).item(), output[1].item()
 
 def solve(instance, train=False):
-    graph = instance_to_graph(instance)
+    graph, graph2instance, makespan = instance_to_graph(instance)
+    sequences = [[] for _ in graph['resource'].x]
+    utilization = [0 for _ in graph['resource'].x]
+    nb_operations_to_schedule = graph['operation'].x.shape[0] - 2
     model = HeterogeneousGAT()
-    CURRENT_TIME = 0
-    SOLVED = False
-    while not SOLVED:
-        actions = possible_actions(graph, CURRENT_TIME)
-        print(actions)
-        action_probs = model(copy.deepcopy(graph), actions, CURRENT_TIME)
-        print(action_probs)
-        SOLVED = True
+    time = 0
+    error = False
+    requirements = graph['operation', 'uses', 'resource'].edge_index
+    while nb_operations_to_schedule > 0 and not error:
+        print("Time t = "+str(time)+"...")
+        actions = possible_actions(graph, time)
+        if(len(actions)>0):
+            output = model(copy.deepcopy(graph), actions, time)
+            action,_ = policy(output, greedy=train)
+            op_idx, res_idx = actions[action]
+            print("Scheduling operation: "+str(op_idx)+" on resource: "+str(res_idx))
+
+            # 1. Update all operations of the selected job
+            job_unscheduled_ops = op_val(graph, op_idx, "job_unscheduled_ops") - 1
+            succs = successors(graph, op_idx)
+            duration = op_val(graph, op_idx, "duration")
+            end_job = time + duration
+            update_res(graph, res_idx, [('available_time', end_job)])
+            for succ in succs:
+                update_op(graph, succ, [("start", end_job)])
+                end_job = end_job + op_val(graph, succ, "duration")
+            preds = predecessors(graph, op_idx)
+            for op in preds + succs:
+                update_op(graph, op, [("job_unscheduled_ops", job_unscheduled_ops), ("current_job_completion", end_job)])
+            update_op(graph, op_idx, [("status", SCHEDULED), ("remaining_neighboring_resources", 1), ("start", time), ("job_unscheduled_ops", job_unscheduled_ops), ("current_job_completion", end_job)])
+            sequences[res_idx].append(graph2instance[op_idx])
+            utilization[res_idx] = utilization[res_idx] + duration
+            makespan = max(makespan, end_job)
+
+            # 2. Update resources that have not been selected
+            for other_res in requirements[1][requirements[0] == op_idx]:
+                if other_res != res_idx:
+                    remaining_neighboring_ops = res_val(graph, other_res, "remaining_neighboring_ops") - 1
+                    update_res(graph, other_res, [('remaining_neighboring_ops', remaining_neighboring_ops)])
+                    prune_requirements(graph, op_idx, other_res)
+            nb_operations_to_schedule = nb_operations_to_schedule - 1
+        else:
+            # 3. Update resource usage and current time (based on next available machine and next free operation)
+            print("Searching for next time t...")
+            next = -1
+            for resoure in graph['resource'].x:
+                available = resoure[RES_FEATURES["available_time"]].item()
+                if available > time and (next < 0 or next > available):
+                    next = available
+            for operation in graph['operation'].x[1:-1]:
+                available = operation[OP_FEATURES["start"]].item()
+                if (not scheduled(operation)) and available > time and (next < 0 or next > available):
+                    next = available
+            if next > time:
+                time = next
+                for res_id, resoure in enumerate(graph['resource'].x):
+                   resoure[RES_FEATURES["past_utilization_rate"]] = utilization[res_id] / time
+            error = next < 0     
+    print("FINAL MAKESPAN: "+str(makespan))
+    print("Sequences: "+str(sequences))
+    print("Utilization: "+str(utilization))
 
 #====================================================================================================================
 # =*= V. EXECUTE THE COMPLETE CODE =*=
@@ -283,8 +394,4 @@ def solve(instance, train=False):
 train_instances = load_instances(TRAIN_INSTANCES_PATH)
 test_instances = load_instances(TEST_INSTANCES_PATH)
 print(train_instances[0])
-solve(train_instances[0])
-
-#torch.save(model.state_dict(), 'GNS.pth')
-#model_loaded = HeterogeneousGAT(1)
-#model_loaded.load_state_dict(torch.load('GNS.pth'))
+solve(train_instances[0], train=False)
