@@ -353,7 +353,7 @@ def policy(output, greedy=True):
     probabilities = output[0].view(-1)
     return torch.argmax(probabilities).item() if greedy else torch.multinomial(probabilities, 1).item(), output[1].item()
 
-def solve(instance, model, train=False):
+def solve(model, instance, train=False):
     graph, graph2instance, makespan = instance_to_graph(instance)
     sequences = [[] for _ in graph['resource'].x]
     utilization = [0 for _ in graph['resource'].x]
