@@ -441,9 +441,10 @@ def PPO_optimize(optimizer, loss):
     loss.backward()
     optimizer.step()
 
-def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'], validation_rate=PPO_CONF['validation_rate'], switch_batch=PPO_CONF['switch_batch'], validation_ratio=PPO_CONF['validation_ratio']):
+def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'], validation_rate=PPO_CONF['validation_rate'], switch_batch=PPO_CONF['switch_batch'], validation_ratio=PPO_CONF['validation_ratio'], epochs=PPO_CONF['opt_epochs']):
     model = HeterogeneousGAT()
     optimizer = torch.optim.Adam(model.parameters(), lr=OPT_CONF['learning_rate'])
+    model.train()
     random.shuffle(instances)
     num_val = int(len(instances) * validation_ratio)
     train_instances, val_instances = instances[num_val:], instances[:num_val]
@@ -463,14 +464,28 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
         all_log_probs = torch.cat(all_log_probs)
         all_actions = torch.cat(all_actions)
         advantages = torch.cat(advantages)
-        loss = PPO_loss(model, all_log_probs, all_actions, advantages, all_values, all_rewards)
-        PPO_optimize(optimizer, loss)
+        for _ in range(epochs):
+            loss = PPO_loss(model, all_log_probs, all_actions, advantages, all_values, all_rewards)
+            PPO_optimize(optimizer, loss)
         if iteration % validation_rate == 0:
             validate(model, val_instances)
     return model
 
 def validate(model, instances):
-    pass
+    model.eval()
+    total_rewards = 0
+    total_loss = 0
+    with torch.no_grad():
+        for instance in instances:
+            rewards, values, log_probs, actions = solve(model, instance)
+            loss = PPO_loss(model, log_probs, actions, generalized_advantage_estimate(rewards, values), values, rewards)
+            total_rewards += sum(rewards).item()
+            total_loss += loss.item()
+    num_instances = len(instances)
+    avg_reward = total_rewards / num_instances
+    avg_loss = total_loss / num_instances
+    print(f'Validation - Average Reward: {avg_reward:.4f}, Average Loss: {avg_loss:.4f}')
+    model.train()
 
 def test(model, instances, optimals):
     pass
