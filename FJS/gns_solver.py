@@ -6,17 +6,49 @@ from torch.nn import Sequential as Seq, Linear as Lin, ELU, Tanh, Parameter
 from torch_geometric.utils import to_dense_adj
 import torch.nn.functional as F
 import copy
+import pandas as pd 
+import random
 
 # Configuration
 TRAIN_INSTANCES_PATH = './FJS/instances/train/'
 TEST_INSTANCES_PATH = './FJS/instances/test/'
 NOT_SCHEDULED = 0
 SCHEDULED = 1
-OP_FEATURES = {"status": 0, "remaining_neighboring_resources": 1, "duration": 2, "start": 3, "job_unscheduled_ops": 4, "current_job_completion": 5}
-RES_FEATURES = {"available_time": 0, "remaining_neighboring_ops": 1, "past_utilization_rate": 2}
-GAT_CONF = {"gnn_layers": 2, "embedding_dims": 8, "MLP_size": 128, "actor_critic_dim": 64}
-PPO_CONF = {"train_iterations": 1000, "opt_iterations": 3, "batch_size": 20, "clip_ratio": 0.2, "policy_loss": 1, "value_loss": 0.5, "entropy": 0.01, "discount_factor": 1.0}
+OP_FEATURES = {
+    "status": 0, 
+    "remaining_neighboring_resources": 1, 
+    "duration": 2, 
+    "start": 3, 
+    "job_unscheduled_ops": 4, 
+    "current_job_completion": 5
+}
+RES_FEATURES = {
+    "available_time": 0, 
+    "remaining_neighboring_ops": 1, 
+    "past_utilization_rate": 2
+}
+GAT_CONF = {
+    "gnn_layers": 2, 
+    "embedding_dims": 8, 
+    "MLP_size": 128, 
+    "actor_critic_dim": 64
+}
+PPO_CONF = {
+    "validation_rate" : 10, 
+    "switch_batch": 20, 
+    "train_iterations": 1000, 
+    "opt_epochs": 3, 
+    "batch_size": 20, 
+    "clip_ratio": 0.2, 
+    "policy_loss": 1, 
+    "value_loss": 0.5, 
+    "entropy": 0.01, 
+    "discount_factor": 1.0,
+    "bias_variance_tradeoff": 1.0,
+    'validation_ratio': 0.1
+}
 OPT_CONF = {"learning_rate": 2e-4}
+SAMPLES = 100
 
 #====================================================================================================================
 # =*= I. FONCTIONS TO BUILD THE INITIAL GRAPH =*=
@@ -307,10 +339,6 @@ def update_res(graph, res_idx, updates):
     for feature, value in updates:
         update_val(graph, 'resource', res_idx, RES_FEATURES, feature, value)
 
-#====================================================================================================================
-# =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
-#====================================================================================================================
-
 def possible_actions(graph, t):
     actions = []
     requirement_edges = graph['operation', 'uses', 'resource'].edge_index
@@ -325,23 +353,20 @@ def policy(output, greedy=True):
     probabilities = output[0].view(-1)
     return torch.argmax(probabilities).item() if greedy else torch.multinomial(probabilities, 1).item(), output[1].item()
 
-def solve(instance, train=False):
+def solve(instance, model, train=False):
     graph, graph2instance, makespan = instance_to_graph(instance)
     sequences = [[] for _ in graph['resource'].x]
     utilization = [0 for _ in graph['resource'].x]
     nb_operations_to_schedule = graph['operation'].x.shape[0] - 2
-    model = HeterogeneousGAT()
     time = 0
     error = False
     requirements = graph['operation', 'uses', 'resource'].edge_index
     while nb_operations_to_schedule > 0 and not error:
-        print("Time t = "+str(time)+"...")
         actions = possible_actions(graph, time)
         if(len(actions)>0):
             output = model(copy.deepcopy(graph), actions, time)
-            action,_ = policy(output, greedy=train)
+            action,_ = policy(output, greedy=(not train))
             op_idx, res_idx = actions[action]
-            print("Scheduling operation: "+str(op_idx)+" on resource: "+str(res_idx))
 
             # 1. Update all operations of the selected job
             job_unscheduled_ops = op_val(graph, op_idx, "job_unscheduled_ops") - 1
@@ -369,7 +394,6 @@ def solve(instance, train=False):
             nb_operations_to_schedule = nb_operations_to_schedule - 1
         else:
             # 3. Update resource usage and current time (based on next available machine and next free operation)
-            print("Searching for next time t...")
             next = -1
             for resoure in graph['resource'].x:
                 available = resoure[RES_FEATURES["available_time"]].item()
@@ -384,9 +408,72 @@ def solve(instance, train=False):
                 for res_id, resoure in enumerate(graph['resource'].x):
                    resoure[RES_FEATURES["past_utilization_rate"]] = utilization[res_id] / time
             error = next < 0     
-    print("FINAL MAKESPAN: "+str(makespan))
+    print("Makespan: "+str(makespan))
     print("Sequences: "+str(sequences))
-    print("Utilization: "+str(utilization))
+    # TODO return: rewards, values, log_probs, and actions in training mode!
+
+#====================================================================================================================
+# =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
+#====================================================================================================================
+
+def sample_batches(instances, batch_size=PPO_CONF['batch_size']):
+    return random.sample(instances, batch_size)
+
+def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_factor'], lam=PPO_CONF['bias_variance_tradeoff']):
+    advantages = []
+    GAE = 0
+    for t in reversed(range(len(rewards))):
+        delta = rewards[t] + gamma * values[t + 1] - values[t]
+        GAE = delta + gamma * lam * GAE
+        advantages.insert(0, GAE)
+    return advantages
+
+def PPO_loss(gnn, old_log_probs, actions, advantages, values, rewards, clip_ratio=PPO_CONF['clip_ratio'], actor_w=PPO_CONF['policy_loss'], critic_w=PPO_CONF['value_loss'], entropy_w=PPO_CONF['entropy']):
+    log_probs = gnn.policy_network(actions)
+    ratio = torch.exp(log_probs - old_log_probs)
+    clipped_ratio = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio)
+    policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
+    value_loss = ((values - rewards) ** 2).mean()
+    return (actor_w*policy_loss) + (critic_w*value_loss) - (-log_probs.mean()*entropy_w)
+
+def PPO_optimize(optimizer, loss):
+    optimizer.zero_grad()
+    loss.backward()
+    optimizer.step()
+
+def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'], validation_rate=PPO_CONF['validation_rate'], switch_batch=PPO_CONF['switch_batch'], validation_ratio=PPO_CONF['validation_ratio']):
+    model = HeterogeneousGAT()
+    optimizer = torch.optim.Adam(model.parameters(), lr=OPT_CONF['learning_rate'])
+    random.shuffle(instances)
+    num_val = int(len(instances) * validation_ratio)
+    train_instances, val_instances = instances[num_val:], instances[:num_val]
+    for iteration in range(iterations):
+        if iteration % switch_batch == 0:
+            current_batch = sample_batches(train_instances, batch_size)
+        all_rewards, all_values, all_log_probs, all_actions = [], [], [], []
+        for instance in current_batch:
+            rewards, values, log_probs, actions = solve(model, instance)
+            all_rewards.append(rewards)
+            all_values.append(values)
+            all_log_probs.append(log_probs)
+            all_actions.append(actions)
+        advantages = [generalized_advantage_estimate(rewards, values) for rewards, values in zip(all_rewards, all_values)]
+        all_rewards = torch.cat(all_rewards)
+        all_values = torch.cat(all_values)
+        all_log_probs = torch.cat(all_log_probs)
+        all_actions = torch.cat(all_actions)
+        advantages = torch.cat(advantages)
+        loss = PPO_loss(model, all_log_probs, all_actions, advantages, all_values, all_rewards)
+        PPO_optimize(optimizer, loss)
+        if iteration % validation_rate == 0:
+            validate(model, val_instances)
+    return model
+
+def validate(model, instances):
+    pass
+
+def test(model, instances, optimals):
+    pass
 
 #====================================================================================================================
 # =*= V. EXECUTE THE COMPLETE CODE =*=
@@ -394,5 +481,6 @@ def solve(instance, train=False):
 
 train_instances = load_instances(TRAIN_INSTANCES_PATH)
 test_instances = load_instances(TEST_INSTANCES_PATH)
-print(train_instances[0])
-solve(train_instances[0], train=False)
+test_optimal = pd.read_csv(TEST_INSTANCES_PATH+'optimal.csv')
+model = PPO_train(train_instances)
+test(model, test_instances, test_optimal)
