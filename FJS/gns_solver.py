@@ -350,9 +350,8 @@ def possible_actions(graph, t):
                     actions.append((op_idx, res_idx.item()))
     return actions
 
-def policy(output, greedy=True):
-    probabilities = output[0].view(-1)
-    return torch.argmax(probabilities).item() if greedy else torch.multinomial(probabilities, 1).item(), output[1].item()
+def policy(probabilities, greedy=True):
+    return torch.argmax(probabilities.view(-1)).item() if greedy else torch.multinomial(probabilities.view(-1), 1).item()
 
 def solve(model, instance, train=False):
     graph, graph2instance, makespan = instance_to_graph(instance)
@@ -362,12 +361,20 @@ def solve(model, instance, train=False):
     time = 0
     error = False
     requirements = graph['operation', 'uses', 'resource'].edge_index
+    rewards = []
+    values = []
+    log_probs = []
+    actions_taken = []
     while nb_operations_to_schedule > 0 and not error:
         actions = possible_actions(graph, time)
         if(len(actions)>0):
-            output = model(copy.deepcopy(graph), actions, time)
-            action,_ = policy(output, greedy=(not train))
-            op_idx, res_idx = actions[action]
+            probabilities, state_value = model(copy.deepcopy(graph), actions, time)
+            action_idx = policy(probabilities, greedy=(not train))
+            values.append(state_value)
+            op_idx, res_idx = actions[action_idx]
+            print(probabilities[action_idx])
+            log_probs.append(torch.log(probabilities[action_idx]))
+            actions_taken.append((op_idx, res_idx))
 
             # 1. Update all operations of the selected job
             job_unscheduled_ops = op_val(graph, op_idx, "job_unscheduled_ops") - 1
@@ -384,8 +391,10 @@ def solve(model, instance, train=False):
             update_op(graph, op_idx, [("status", SCHEDULED), ("remaining_neighboring_resources", 1), ("start", time), ("job_unscheduled_ops", job_unscheduled_ops), ("current_job_completion", end_job)])
             sequences[res_idx].append(graph2instance[op_idx - 1])
             utilization[res_idx] = utilization[res_idx] + duration
-            makespan = max(makespan, end_job)
-
+            new_makespan = max(makespan, end_job)
+            rewards.append(makespan - new_makespan)
+            makespan = new_makespan
+            
             # 2. Update resources that have not been selected
             for other_res in requirements[1][requirements[0] == op_idx]:
                 if other_res != res_idx:
@@ -408,9 +417,10 @@ def solve(model, instance, train=False):
                 time = next
                 for res_id, resoure in enumerate(graph['resource'].x):
                    resoure[RES_FEATURES["past_utilization_rate"]] = utilization[res_id] / time
-            error = next < 0     
-    if not train:
-        # TODO return: makespan, sequences, rewards, values, log_probs, and actions in training mode!
+            error = next < 0  
+    if train:
+        return rewards, values, log_probs, actions
+    else:
         return makespan, sequences   
 
 #====================================================================================================================
@@ -419,6 +429,10 @@ def solve(model, instance, train=False):
 
 def sample_batches(instances, batch_size=PPO_CONF['batch_size']):
     return random.sample(instances, batch_size)
+
+def priority_to_probabilities(priorities):
+    action_logits = torch.stack(priorities)
+    return F.softmax(action_logits, dim=0)
 
 def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_factor'], lam=PPO_CONF['bias_variance_tradeoff']):
     advantages = []
@@ -429,8 +443,8 @@ def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_fac
         advantages.insert(0, GAE)
     return advantages
 
-def PPO_loss(gnn, old_log_probs, actions, advantages, values, rewards, clip_ratio=PPO_CONF['clip_ratio'], actor_w=PPO_CONF['policy_loss'], critic_w=PPO_CONF['value_loss'], entropy_w=PPO_CONF['entropy']):
-    log_probs = gnn.policy_network(actions)
+def PPO_loss(model, old_log_probs, actions, advantages, values, rewards, clip_ratio=PPO_CONF['clip_ratio'], actor_w=PPO_CONF['policy_loss'], critic_w=PPO_CONF['value_loss'], entropy_w=PPO_CONF['entropy']):
+    log_probs = priority_to_probabilities(model.policy_network(actions)) # TODO Find a way to compute the new probabilities! we already have the previous ones
     ratio = torch.exp(log_probs - old_log_probs)
     clipped_ratio = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio)
     policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
@@ -454,7 +468,7 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
             current_batch = sample_batches(train_instances, batch_size)
         all_rewards, all_values, all_log_probs, all_actions = [], [], [], []
         for instance in current_batch:
-            rewards, values, log_probs, actions = solve(model, instance)
+            rewards, values, log_probs, actions = solve(model, instance, train=True)
             all_rewards.append(rewards)
             all_values.append(values)
             all_log_probs.append(log_probs)
@@ -478,7 +492,7 @@ def validate(model, instances):
     total_loss = 0
     with torch.no_grad():
         for instance in instances:
-            rewards, values, log_probs, actions = solve(model, instance)
+            rewards, values, log_probs, actions = solve(model, instance, train=True)
             loss = PPO_loss(model, log_probs, actions, generalized_advantage_estimate(rewards, values), values, rewards)
             total_rewards += sum(rewards).item()
             total_loss += loss.item()
@@ -507,7 +521,8 @@ def test(model, instances, optimals):
 train_instances = load_instances(TRAIN_INSTANCES_PATH)
 test_instances = load_instances(TEST_INSTANCES_PATH)
 test_optimal = pd.read_csv(TEST_INSTANCES_PATH+'optimal.csv')
-model = PPO_train(train_instances)
+#model = PPO_train(train_instances)
+model = HeterogeneousGAT()
 nbr_optimals, errors = test(model, test_instances, test_optimal)
 print("Optimal makespans: ", test_optimal['values'].values)
 print("Errors (as percentages): ", errors)
