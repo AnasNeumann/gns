@@ -494,7 +494,7 @@ def test(model, instances, optimals):
     for idx, instance in enumerate(instances):
         makespan,_ = solve(model, instance, train=False)
         optimal =  optimals.iloc[idx]['values']
-        error = makespan - optimal
+        error = (makespan - optimal)/optimal
         if error <= 0:
             nbr_optimals = nbr_optimals + 1
         errors = np.append(errors, error)
@@ -509,8 +509,9 @@ test_instances = load_instances(TEST_INSTANCES_PATH)
 test_optimal = pd.read_csv(TEST_INSTANCES_PATH+'optimal.csv')
 model = PPO_train(train_instances)
 nbr_optimals, errors = test(model, test_instances, test_optimal)
-print("Errors: ", errors)
+print("Optimal makespans: ", test_optimal['values'].values)
+print("Errors (as percentages): ", errors)
 print("Maximum error: ", np.max(errors))
 print("Minimum error: ",  np.min(errors))
 print("Mean error: ",  np.mean(errors))
-print("Number of optimal value: ",  nbr_optimals)
+print("Number of optimal values: ",  nbr_optimals)
