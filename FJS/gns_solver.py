@@ -258,7 +258,7 @@ class HeterogeneousGAT(torch.nn.Module):
         return action_probs, state_value
 
 #====================================================================================================================
-# =*= III. FUNCTION TO USE THE SCHEDULING GNN AND UPDATE THE GRAPH =*=
+# =*= III. SOLVE AN INSTANCE =*=
 #====================================================================================================================
 
 def is_available(graph, res_idx, time):
@@ -424,7 +424,7 @@ def solve(model, instance, train=False):
         return makespan, sequences   
 
 #====================================================================================================================
-# =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
+# =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) =*=
 #====================================================================================================================
 
 def sample_batches(instances, batch_size=PPO_CONF['batch_size']):
