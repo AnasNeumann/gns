@@ -8,6 +8,7 @@ import torch.nn.functional as F
 import copy
 import pandas as pd 
 import random
+import numpy as np
 
 # Configuration
 TRAIN_INSTANCES_PATH = './FJS/instances/train/'
@@ -408,9 +409,9 @@ def solve(model, instance, train=False):
                 for res_id, resoure in enumerate(graph['resource'].x):
                    resoure[RES_FEATURES["past_utilization_rate"]] = utilization[res_id] / time
             error = next < 0     
-    print("Makespan: "+str(makespan))
-    print("Sequences: "+str(sequences))
-    # TODO return: rewards, values, log_probs, and actions in training mode!
+    if not train:
+        # TODO return: makespan, sequences, rewards, values, log_probs, and actions in training mode!
+        return makespan, sequences   
 
 #====================================================================================================================
 # =*= IV. PROXIMAL POLICY OPTIMIZATION (PPO) DEEP-REINFORCEMENT ALGORITHM =*=
@@ -488,7 +489,16 @@ def validate(model, instances):
     model.train()
 
 def test(model, instances, optimals):
-    pass
+    errors = np.array([])
+    nbr_optimals = 0
+    for idx, instance in enumerate(instances):
+        makespan,_ = solve(model, instance, train=False)
+        optimal =  optimals.iloc[idx]['values']
+        error = makespan - optimal
+        if error <= 0:
+            nbr_optimals = nbr_optimals + 1
+        errors = np.append(errors, error)
+    return nbr_optimals, errors
 
 #====================================================================================================================
 # =*= V. EXECUTE THE COMPLETE CODE =*=
@@ -498,4 +508,9 @@ train_instances = load_instances(TRAIN_INSTANCES_PATH)
 test_instances = load_instances(TEST_INSTANCES_PATH)
 test_optimal = pd.read_csv(TEST_INSTANCES_PATH+'optimal.csv')
 model = PPO_train(train_instances)
-test(model, test_instances, test_optimal)
+nbr_optimals, errors = test(model, test_instances, test_optimal)
+print("Errors: ", errors)
+print("Maximum error: ", np.max(errors))
+print("Minimum error: ",  np.min(errors))
+print("Mean error: ",  np.mean(errors))
+print("Number of optimal value: ",  nbr_optimals)
