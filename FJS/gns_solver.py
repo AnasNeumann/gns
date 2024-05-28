@@ -372,7 +372,6 @@ def solve(model, instance, train=False):
             action_idx = policy(probabilities, greedy=(not train))
             values.append(state_value)
             op_idx, res_idx = actions[action_idx]
-            print(probabilities[action_idx])
             log_probs.append(torch.log(probabilities[action_idx]))
             actions_taken.append((op_idx, res_idx))
 
@@ -444,12 +443,12 @@ def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_fac
     return advantages
 
 def PPO_loss(model, old_log_probs, actions, advantages, values, rewards, clip_ratio=PPO_CONF['clip_ratio'], actor_w=PPO_CONF['policy_loss'], critic_w=PPO_CONF['value_loss'], entropy_w=PPO_CONF['entropy']):
-    log_probs = priority_to_probabilities(model.policy_network(actions)) # TODO Find a way to compute the new probabilities! we already have the previous ones
+    log_probs = priority_to_probabilities(model.policy_network(actions)) # TODO My entropy term is still wrong! fix it latter!
     ratio = torch.exp(log_probs - old_log_probs)
     clipped_ratio = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio)
     policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
     value_loss = ((values - rewards) ** 2).mean()
-    return (actor_w*policy_loss) + (critic_w*value_loss) - (-log_probs.mean()*entropy_w)
+    return (actor_w*policy_loss) - (critic_w*value_loss) + (-log_probs.mean()*entropy_w)
 
 def PPO_optimize(optimizer, loss):
     optimizer.zero_grad()
@@ -521,8 +520,8 @@ def test(model, instances, optimals):
 train_instances = load_instances(TRAIN_INSTANCES_PATH)
 test_instances = load_instances(TEST_INSTANCES_PATH)
 test_optimal = pd.read_csv(TEST_INSTANCES_PATH+'optimal.csv')
-#model = PPO_train(train_instances)
-model = HeterogeneousGAT()
+model = PPO_train(train_instances)
+#model = HeterogeneousGAT()
 nbr_optimals, errors = test(model, test_instances, test_optimal)
 print("Optimal makespans: ", test_optimal['values'].values)
 print("Errors (as percentages): ", errors)
