@@ -420,7 +420,7 @@ def solve(model, instance, train=False):
                 time = next
                 for res_id, resoure in enumerate(graph['resource'].x):
                    resoure[RES_FEATURES["past_utilization_rate"]] = utilization[res_id] / time
-            error = next < 0  
+            error = next < 0
     if train:
         return rewards, values, probabilities, states, actions, actions_idx
     else:
@@ -482,16 +482,17 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
         all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
         for instance in current_batch:
             rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
-            all_rewards.extend(rewards)
-            all_values.extend(values)
+            all_rewards.append(rewards)
+            all_values.append(values)
             all_probabilities.extend(probabilities)
             all_states.extend(states)
             all_states.extend(actions)
             all_actions_idx.extend(actions_idx)
         all_returns = [calculate_returns(rewards) for rewards in all_rewards]
         advantages = [generalized_advantage_estimate(rewards, values) for rewards, values in zip(all_rewards, all_values)]
+        flattened_values = [v for vals in all_values for v in vals]
         for _ in range(epochs):
-            loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, all_values, all_returns)
+            loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
             PPO_optimize(optimizer, loss)
         if iteration % validation_rate == 0:
             validate(model, val_instances)
@@ -504,7 +505,7 @@ def validate(model, instances):
     with torch.no_grad():
         for instance in instances:
             rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
-            loss = PPO_loss(model, probabilities, states, actions, actions_idx , generalized_advantage_estimate(rewards, values), values, rewards)
+            loss = PPO_loss(model, probabilities, states, actions, actions_idx , generalized_advantage_estimate(rewards, values), values, calculate_returns(rewards))
             total_rewards += sum(rewards).item()
             total_loss += loss.item()
     num_instances = len(instances)
