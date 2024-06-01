@@ -238,7 +238,7 @@ class HeterogeneousGAT(torch.nn.Module):
             Lin(actor_critic_dim, 1)
         )
 
-    def forward(self, graph, actions, t):
+    def forward(self, graph, actions):
         operations, resources = graph['operation'].x, graph['resource'].x
         precedence_edges = graph['operation', 'precedence', 'operation'].edge_index
         requirement_edges = graph['operation', 'uses', 'resource'].edge_index
@@ -363,18 +363,22 @@ def solve(model, instance, train=False):
     requirements = graph['operation', 'uses', 'resource'].edge_index
     rewards = []
     values = []
-    log_probs = []
-    actions_taken = []
+    probabilities = []
+    actions_idx = []
+    states = []
+    actions = []
     while nb_operations_to_schedule > 0 and not error:
-        actions = possible_actions(graph, time)
-        if(len(actions)>0):
-            probabilities, state_value = model(copy.deepcopy(graph), actions, time)
-            action_idx = policy(probabilities, greedy=(not train))
+        poss_actions = possible_actions(graph, time)
+        if(len(poss_actions)>0):
+            probs, state_value = model(copy.deepcopy(graph), poss_actions)
             values.append(state_value)
-            op_idx, res_idx = actions[action_idx]
-            log_probs.append(torch.log(probabilities[action_idx]))
-            actions_taken.append((op_idx, res_idx))
-
+            states.append(copy.deepcopy(graph))
+            actions.append(poss_actions)
+            probabilities.append(probs)
+            idx = policy(probs, greedy=(not train))
+            actions_idx.append(idx)
+            op_idx, res_idx = poss_actions[idx]
+            
             # 1. Update all operations of the selected job
             job_unscheduled_ops = op_val(graph, op_idx, "job_unscheduled_ops") - 1
             succs = successors(graph, op_idx)
@@ -418,7 +422,7 @@ def solve(model, instance, train=False):
                    resoure[RES_FEATURES["past_utilization_rate"]] = utilization[res_id] / time
             error = next < 0  
     if train:
-        return rewards, values, log_probs, actions
+        return rewards, values, probabilities, states, actions, actions_idx
     else:
         return makespan, sequences   
 
@@ -429,9 +433,13 @@ def solve(model, instance, train=False):
 def sample_batches(instances, batch_size=PPO_CONF['batch_size']):
     return random.sample(instances, batch_size)
 
-def priority_to_probabilities(priorities):
-    action_logits = torch.stack(priorities)
-    return F.softmax(action_logits, dim=0)
+def calculate_returns(rewards, gamma=PPO_CONF['discount_factor']):
+    R = 0
+    returns = []
+    for r in reversed(rewards):
+        R = r + gamma * R
+        returns.insert(0, R)
+    return torch.tensor(returns, dtype=torch.float32)
 
 def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_factor'], lam=PPO_CONF['bias_variance_tradeoff']):
     advantages = []
@@ -442,13 +450,19 @@ def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_fac
         advantages.insert(0, GAE)
     return advantages
 
-def PPO_loss(model, old_log_probs, actions, advantages, values, rewards, clip_ratio=PPO_CONF['clip_ratio'], actor_w=PPO_CONF['policy_loss'], critic_w=PPO_CONF['value_loss'], entropy_w=PPO_CONF['entropy']):
-    log_probs = priority_to_probabilities(model.policy_network(actions)) # TODO My entropy term is still wrong! fix it latter!
-    ratio = torch.exp(log_probs - old_log_probs)
+def PPO_loss(model, old_probs, states, actions, actions_idx, advantages, old_values, returns, clip_ratio=PPO_CONF['clip_ratio'], actor_w=PPO_CONF['policy_loss'], critic_w=PPO_CONF['value_loss'], entropy_w=PPO_CONF['entropy']):
+    new_log_probs = []
+    old_log_probs = []
+    for i in range(len(states)):
+        p,_ = model(states[i], actions[i])
+        a = actions_idx[i]
+        new_log_probs.append(torch.log(p[a]))
+        old_log_probs.append(torch.log(old_probs[a]))
+    ratio = torch.exp(new_log_probs - old_log_probs)
     clipped_ratio = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio)
     policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
-    value_loss = ((values - rewards) ** 2).mean()
-    return (actor_w*policy_loss) - (critic_w*value_loss) + (-log_probs.mean()*entropy_w)
+    value_loss = ((old_values - returns) ** 2).mean()
+    return (actor_w*policy_loss) + (critic_w*value_loss) - (-new_log_probs.mean()*entropy_w)
 
 def PPO_optimize(optimizer, loss):
     optimizer.zero_grad()
@@ -465,21 +479,19 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
     for iteration in range(iterations):
         if iteration % switch_batch == 0:
             current_batch = sample_batches(train_instances, batch_size)
-        all_rewards, all_values, all_log_probs, all_actions = [], [], [], []
+        all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
         for instance in current_batch:
-            rewards, values, log_probs, actions = solve(model, instance, train=True)
-            all_rewards.append(rewards)
-            all_values.append(values)
-            all_log_probs.append(log_probs)
-            all_actions.append(actions)
+            rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
+            all_rewards.extend(rewards)
+            all_values.extend(values)
+            all_probabilities.extend(probabilities)
+            all_states.extend(states)
+            all_states.extend(actions)
+            all_actions_idx.extend(actions_idx)
+        all_returns = [calculate_returns(rewards) for rewards in all_rewards]
         advantages = [generalized_advantage_estimate(rewards, values) for rewards, values in zip(all_rewards, all_values)]
-        all_rewards = torch.cat(all_rewards)
-        all_values = torch.cat(all_values)
-        all_log_probs = torch.cat(all_log_probs)
-        all_actions = torch.cat(all_actions)
-        advantages = torch.cat(advantages)
         for _ in range(epochs):
-            loss = PPO_loss(model, all_log_probs, all_actions, advantages, all_values, all_rewards)
+            loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, all_values, all_returns)
             PPO_optimize(optimizer, loss)
         if iteration % validation_rate == 0:
             validate(model, val_instances)
@@ -491,8 +503,8 @@ def validate(model, instances):
     total_loss = 0
     with torch.no_grad():
         for instance in instances:
-            rewards, values, log_probs, actions = solve(model, instance, train=True)
-            loss = PPO_loss(model, log_probs, actions, generalized_advantage_estimate(rewards, values), values, rewards)
+            rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
+            loss = PPO_loss(model, probabilities, states, actions, actions_idx , generalized_advantage_estimate(rewards, values), values, rewards)
             total_rewards += sum(rewards).item()
             total_loss += loss.item()
     num_instances = len(instances)
@@ -505,7 +517,7 @@ def test(model, instances, optimals):
     errors = np.array([])
     nbr_optimals = 0
     for idx, instance in enumerate(instances):
-        makespan,_ = solve(model, instance, train=False)
+        makespan, sequences = solve(model, instance, train=False) # TODO print or save solution' sequences
         optimal =  optimals.iloc[idx]['values']
         error = (makespan - optimal)/optimal
         if error <= 0:
