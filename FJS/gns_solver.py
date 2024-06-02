@@ -361,8 +361,8 @@ def solve(model, instance, train=False):
     time = 0
     error = False
     requirements = graph['operation', 'uses', 'resource'].edge_index
-    rewards = []
-    values = []
+    rewards = torch.Tensor([])
+    values = torch.Tensor([])
     probabilities = []
     actions_idx = []
     states = []
@@ -371,7 +371,7 @@ def solve(model, instance, train=False):
         poss_actions = possible_actions(graph, time)
         if(len(poss_actions)>0):
             probs, state_value = model(copy.deepcopy(graph), poss_actions)
-            values.append(state_value)
+            values = torch.cat((values, torch.Tensor([state_value])))
             states.append(copy.deepcopy(graph))
             actions.append(poss_actions)
             probabilities.append(probs)
@@ -395,7 +395,7 @@ def solve(model, instance, train=False):
             sequences[res_idx].append(graph2instance[op_idx - 1])
             utilization[res_idx] = utilization[res_idx] + duration
             new_makespan = max(makespan, end_job)
-            rewards.append(makespan - new_makespan)
+            rewards = torch.cat((rewards, torch.Tensor([makespan - new_makespan])))
             makespan = new_makespan
             
             # 2. Update resources that have not been selected
@@ -486,12 +486,12 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
             rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
             all_rewards.append(rewards)
             all_values.append(values)
-            all_probabilities.extend(probabilities)
-            all_states.extend(states)
-            all_actions.extend(actions)
-            all_actions_idx.extend(actions_idx)
-        all_returns = [calculate_returns(rewards) for rewards in all_rewards]
-        advantages = [generalized_advantage_estimate(rewards, values) for rewards, values in zip(all_rewards, all_values)]
+            all_probabilities.append(probabilities)
+            all_states.append(states)
+            all_actions.append(actions)
+            all_actions_idx.append(actions_idx)
+        all_returns = torch.Tensor([calculate_returns(rewards) for rewards in all_rewards])
+        advantages = torch.Tensor([generalized_advantage_estimate(rewards, values) for rewards, values in zip(all_rewards, all_values)])
         flattened_values = [v for vals in all_values for v in vals]
         for _ in range(epochs):
             loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
