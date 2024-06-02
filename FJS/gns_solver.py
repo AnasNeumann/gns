@@ -1,7 +1,7 @@
 import torch
 from torch_geometric.data import HeteroData
 from torch_geometric.nn import MessagePassing, global_mean_pool
-from common import load_instances, OP_STRUCT
+from common import load_instances, OP_STRUCT, shape
 from torch.nn import Sequential as Seq, Linear as Lin, ELU, Tanh, Parameter
 from torch_geometric.utils import to_dense_adj
 import torch.nn.functional as F
@@ -39,8 +39,8 @@ PPO_CONF = {
     "switch_batch": 20, 
     "train_iterations": 1000, 
     "opt_epochs": 3,
-    "batch_size": 20, 
-    "clip_ratio": 0.2, 
+    "batch_size": 5, # 20, 
+    "clip_ratio": 0.2,
     "policy_loss": 1.0, 
     "value_loss": 0.5, 
     "entropy": 0.01, 
@@ -370,9 +370,9 @@ def solve(model, instance, train=False):
     while nb_operations_to_schedule > 0 and not error:
         poss_actions = possible_actions(graph, time)
         if(len(poss_actions)>0):
+            states.append(copy.deepcopy(graph))
             probs, state_value = model(copy.deepcopy(graph), poss_actions)
             values = torch.cat((values, torch.Tensor([state_value])))
-            states.append(copy.deepcopy(graph))
             actions.append(poss_actions)
             probabilities.append(probs)
             idx = policy(probs, greedy=(not train))
@@ -459,12 +459,17 @@ def PPO_loss(model, old_probs, states, actions, actions_idx, advantages, old_val
         p,_ = model(states[i], actions[i])
         a = actions_idx[i]
         new_log_probs = torch.cat((new_log_probs, torch.log(p[a])))
-        old_log_probs = torch.cat((old_log_probs, torch.log(old_probs[a])))
+        old_log_probs = torch.cat((old_log_probs, torch.log(old_probs[i][a])))
     ratio = torch.exp(new_log_probs - old_log_probs)
     clipped_ratio = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio)
     policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
-    value_loss = ((old_values - returns) ** 2).mean()
-    return (actor_w*policy_loss) + (critic_w*value_loss) - (-new_log_probs.mean()*entropy_w)
+    value_loss = torch.mean(torch.stack([(V_old - r) ** 2 for V_old, r in zip(old_values, returns)]))
+    entropy_loss = -new_log_probs.mean()
+    print("value loss - "+str(value_loss))
+    print("policy loss - "+str(policy_loss)) 
+    print("entropy loss - "+str(entropy_loss)) 
+    print("======")
+    return (actor_w*policy_loss) + (critic_w*value_loss) - (entropy_loss*entropy_w)
 
 def PPO_optimize(optimizer, loss):
     optimizer.zero_grad()
@@ -486,12 +491,12 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
             rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
             all_rewards.append(rewards)
             all_values.append(values)
-            all_probabilities.append(probabilities)
-            all_states.append(states)
-            all_actions.append(actions)
-            all_actions_idx.append(actions_idx)
-        all_returns = torch.Tensor([calculate_returns(rewards) for rewards in all_rewards])
-        advantages = torch.Tensor([generalized_advantage_estimate(rewards, values) for rewards, values in zip(all_rewards, all_values)])
+            all_probabilities.extend(probabilities)
+            all_states.extend(states)
+            all_actions.extend(actions)
+            all_actions_idx.extend(actions_idx)
+        all_returns = [ri for r in all_rewards for ri in calculate_returns(r)]
+        advantages = torch.Tensor([gae for r, v in zip(all_rewards, all_values) for gae in generalized_advantage_estimate(r, v)])
         flattened_values = [v for vals in all_values for v in vals]
         for _ in range(epochs):
             loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
@@ -520,7 +525,7 @@ def test(model, instances, optimals):
     errors = np.array([])
     nbr_optimals = 0
     for idx, instance in enumerate(instances):
-        makespan, sequences = solve(model, instance, train=False) # TODO print or save solution' sequences
+        makespan, sequences = solve(model, instance, train=False)
         optimal =  optimals.iloc[idx]['values']
         error = (makespan - optimal)/optimal
         if error <= 0:

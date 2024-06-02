@@ -14,3 +14,10 @@ def load_instances(path):
             with open(file_path, 'rb') as file:
                 instances.append(pickle.load(file))
     return instances
+
+def shape(lst):
+    shape = []
+    while isinstance(lst, list):
+        shape.append(len(lst))
+        lst = lst[0] if lst else None
+    return tuple(shape)
