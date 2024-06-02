@@ -442,10 +442,11 @@ def calculate_returns(rewards, gamma=PPO_CONF['discount_factor']):
     return torch.tensor(returns, dtype=torch.float32)
 
 def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_factor'], lam=PPO_CONF['bias_variance_tradeoff']):
-    advantages = []
+    deltas = rewards[:-1] + gamma * values[1:] - values[:-1]
+    deltas = np.append(deltas, rewards[-1] - values[-1])
     GAE = 0
-    for t in reversed(range(len(rewards))):
-        delta = rewards[t] + gamma * values[t + 1] - values[t]
+    advantages = []
+    for delta in reversed(deltas):
         GAE = delta + gamma * lam * GAE
         advantages.insert(0, GAE)
     return advantages
@@ -533,8 +534,9 @@ def test(model, instances, optimals):
 train_instances = load_instances(TRAIN_INSTANCES_PATH)
 test_instances = load_instances(TEST_INSTANCES_PATH)
 test_optimal = pd.read_csv(TEST_INSTANCES_PATH+'optimal.csv')
+print("Starting training process...")
 model = PPO_train(train_instances)
-#model = HeterogeneousGAT()
+print("Starting tests...")
 nbr_optimals, errors = test(model, test_instances, test_optimal)
 print("Optimal makespans: ", test_optimal['values'].values)
 print("Errors (as percentages): ", errors)

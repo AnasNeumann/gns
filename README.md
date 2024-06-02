@@ -13,7 +13,7 @@ A small Graph Attention Network (GAT) to schedule jobs in a ETO manufacturing en
 ## Architecture of the project
 * `/FJS/` contains the code for the traditional Flexible Job Shop scheduling problem;
     * `/FJS/instance_generator.py [nb train instances] [nb test instances] [min jobs] [max jobs] [min resources] [max type of resources] [max resources by type] [max operations]` the code to randomly generate instances and save them into `/FJS/instances/test/` and `/FJS/instances/train/`;
-        * e.g. `python FJS/instance_generator.py 10 5 2 10 3 7 3 6`;
+        * e.g. `python FJS/instance_generator.py 100 50 5 20 3 7 3 20`;
 
     * `/FJS/exact_solver.py [type]` the code to solve the instances using [Google OR solver](https://developers.google.com/optimization);
         * e.g. `python FJS/exact_solver.py test`;
