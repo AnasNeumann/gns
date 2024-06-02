@@ -35,13 +35,13 @@ GAT_CONF = {
     "actor_critic_dim": 64
 }
 PPO_CONF = {
-    "validation_rate" : 10, 
+    "validation_rate": 10, 
     "switch_batch": 20, 
     "train_iterations": 1000, 
-    "opt_epochs": 3, 
+    "opt_epochs": 3,
     "batch_size": 20, 
     "clip_ratio": 0.2, 
-    "policy_loss": 1, 
+    "policy_loss": 1.0, 
     "value_loss": 0.5, 
     "entropy": 0.01, 
     "discount_factor": 1.0,
@@ -442,23 +442,24 @@ def calculate_returns(rewards, gamma=PPO_CONF['discount_factor']):
     return torch.tensor(returns, dtype=torch.float32)
 
 def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_factor'], lam=PPO_CONF['bias_variance_tradeoff']):
-    deltas = rewards[:-1] + gamma * values[1:] - values[:-1]
-    deltas = np.append(deltas, rewards[-1] - values[-1])
     GAE = 0
     advantages = []
-    for delta in reversed(deltas):
+    for t in reversed(range(len(rewards))):
+        delta = rewards[t] - values[t]
+        if t<len(rewards)-1:
+            delta = delta + (gamma * values[t+1])
         GAE = delta + gamma * lam * GAE
         advantages.insert(0, GAE)
     return advantages
 
 def PPO_loss(model, old_probs, states, actions, actions_idx, advantages, old_values, returns, clip_ratio=PPO_CONF['clip_ratio'], actor_w=PPO_CONF['policy_loss'], critic_w=PPO_CONF['value_loss'], entropy_w=PPO_CONF['entropy']):
-    new_log_probs = []
-    old_log_probs = []
+    new_log_probs = torch.Tensor([])
+    old_log_probs = torch.Tensor([])
     for i in range(len(states)):
         p,_ = model(states[i], actions[i])
         a = actions_idx[i]
-        new_log_probs.append(torch.log(p[a]))
-        old_log_probs.append(torch.log(old_probs[a]))
+        new_log_probs = torch.cat((new_log_probs, torch.log(p[a])))
+        old_log_probs = torch.cat((old_log_probs, torch.log(old_probs[a])))
     ratio = torch.exp(new_log_probs - old_log_probs)
     clipped_ratio = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio)
     policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
@@ -487,7 +488,7 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
             all_values.append(values)
             all_probabilities.extend(probabilities)
             all_states.extend(states)
-            all_states.extend(actions)
+            all_actions.extend(actions)
             all_actions_idx.extend(actions_idx)
         all_returns = [calculate_returns(rewards) for rewards in all_rewards]
         advantages = [generalized_advantage_estimate(rewards, values) for rewards, values in zip(all_rewards, all_values)]
