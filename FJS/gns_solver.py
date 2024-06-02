@@ -471,9 +471,8 @@ def PPO_loss(model, old_probs, states, actions, actions_idx, advantages, old_val
     print("======")
     return (actor_w*policy_loss) + (critic_w*value_loss) - (entropy_loss*entropy_w)
 
-def PPO_optimize(optimizer, loss):
-    optimizer.zero_grad()
-    loss.backward()
+def PPO_optimize(optimizer, loss, retain=False):
+    loss.backward(retain_graph=retain)
     optimizer.step()
 
 def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'], validation_rate=PPO_CONF['validation_rate'], switch_batch=PPO_CONF['switch_batch'], validation_ratio=PPO_CONF['validation_ratio'], epochs=PPO_CONF['opt_epochs']):
@@ -488,6 +487,7 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
             current_batch = sample_batches(train_instances, batch_size)
         all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
         for instance in current_batch:
+            optimizer.zero_grad()
             rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
             all_rewards.append(rewards)
             all_values.append(values)
@@ -498,9 +498,9 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
         all_returns = [ri for r in all_rewards for ri in calculate_returns(r)]
         advantages = torch.Tensor([gae for r, v in zip(all_rewards, all_values) for gae in generalized_advantage_estimate(r, v)])
         flattened_values = [v for vals in all_values for v in vals]
-        for _ in range(epochs):
+        for e in range(epochs):
             loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
-            PPO_optimize(optimizer, loss)
+            PPO_optimize(optimizer, loss, retain=(e<epochs-1))
         if iteration % validation_rate == 0:
             validate(model, val_instances)
     return model
