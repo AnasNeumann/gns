@@ -1,4 +1,6 @@
 import torch
+import multiprocessing
+from torch.multiprocessing import Pool, set_start_method
 from torch_geometric.data import HeteroData
 from torch_geometric.nn import MessagePassing, global_mean_pool
 from common import load_instances, OP_STRUCT, shape
@@ -10,6 +12,7 @@ import pandas as pd
 import random
 import numpy as np
 torch.autograd.set_detect_anomaly(True)
+import argparse
 
 # Configuration
 TRAIN_INSTANCES_PATH = './FJS/instances/train/'
@@ -40,7 +43,7 @@ PPO_CONF = {
     "switch_batch": 20, 
     "train_iterations": 1000, 
     "opt_epochs": 3,
-    "batch_size": 5, # 20, 
+    "batch_size": 20,
     "clip_ratio": 0.2,
     "policy_loss": 1.0, 
     "value_loss": 0.5, 
@@ -50,7 +53,8 @@ PPO_CONF = {
     'validation_ratio': 0.1
 }
 OPT_CONF = {"learning_rate": 2e-4}
-SAMPLES = 100
+PARRALLEL = True
+DEVICE = None
 
 #====================================================================================================================
 # =*= I. FONCTIONS TO BUILD THE INITIAL GRAPH =*=
@@ -373,9 +377,9 @@ def solve(model, instance, train=False):
         if(len(poss_actions)>0):
             states.append(copy.deepcopy(graph))
             probs, state_value = model(copy.deepcopy(graph), poss_actions)
-            values = torch.cat((values, torch.Tensor([state_value])))
+            values = torch.cat((values, torch.Tensor([state_value.detach()])))
             actions.append(poss_actions)
-            probabilities.append(probs)
+            probabilities.append(probs.detach())
             idx = policy(probs, greedy=(not train))
             actions_idx.append(idx)
             op_idx, res_idx = poss_actions[idx]
@@ -456,16 +460,18 @@ def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_fac
 def PPO_loss(model, old_probs, states, actions, actions_idx, advantages, old_values, returns, clip_ratio=PPO_CONF['clip_ratio'], actor_w=PPO_CONF['policy_loss'], critic_w=PPO_CONF['value_loss'], entropy_w=PPO_CONF['entropy']):
     new_log_probs = torch.Tensor([])
     old_log_probs = torch.Tensor([])
+    entropies = torch.Tensor([])
     for i in range(len(states)):
-        p,_ = model(states[i], actions[i])
+        p,_ = model(states[i], actions[i]).detach()
         a = actions_idx[i]
-        new_log_probs = torch.cat((new_log_probs, torch.log(p[a])))
-        old_log_probs = torch.cat((old_log_probs, torch.log(old_probs[i][a])))
+        entropies = torch.cat((entropies, torch.sum(-p*torch.log(p+1e-8), dim=-1)))
+        new_log_probs = torch.cat((new_log_probs, torch.log(p[a]+1e-8)))
+        old_log_probs = torch.cat((old_log_probs, torch.log(old_probs[i][a]+1e-8)))
     ratio = torch.exp(new_log_probs - old_log_probs)
     clipped_ratio = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio)
     policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
     value_loss = torch.mean(torch.stack([(V_old - r) ** 2 for V_old, r in zip(old_values, returns)]))
-    entropy_loss = -new_log_probs.mean()
+    entropy_loss = torch.mean(entropies)
     print("\t\t value loss - "+str(value_loss))
     print("\t\t policy loss - "+str(policy_loss)) 
     print("\t\t entropy loss - "+str(entropy_loss)) 
@@ -476,35 +482,52 @@ def PPO_optimize(optimizer, loss):
     loss.backward(retain_graph=False)
     optimizer.step()
 
+def async_solve(init_args):
+    model, instance = init_args
+    print(instance)
+    print("\t start solving instance: "+str(instance['id'])+"...")
+    result = solve(model, instance, train=True)
+    print("\t end solving instance: "+str(instance['id'])+"!")
+    return result
+
+def async_batch(model, batch, epochs, num_processes, optimizer):
+    all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
+    with Pool(num_processes) as pool:
+        results = pool.map(async_solve, [(model, instance) for instance in batch])
+    rewards, values, probabilities, states, actions, actions_idx = zip(*results)
+    for i in range(len(batch)):
+        all_rewards.append(rewards[i])
+        all_values.append(values[i])
+        all_probabilities.extend(probabilities[i])
+        all_states.extend(states[i])
+        all_actions.extend(actions[i])
+        all_actions_idx.extend(actions_idx[i])
+    all_returns = [ri for r in all_rewards for ri in calculate_returns(r)]
+    advantages = torch.Tensor([gae for r, v in zip(all_rewards, all_values) for gae in generalized_advantage_estimate(r, v)])
+    flattened_values = [v for vals in all_values for v in vals]
+    for e in range(epochs):
+        print("\t Optimization epoch: "+str(e+1)+"/"+str(epochs))
+        loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
+        PPO_optimize(optimizer, loss)
+
 def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'], validation_rate=PPO_CONF['validation_rate'], switch_batch=PPO_CONF['switch_batch'], validation_ratio=PPO_CONF['validation_ratio'], epochs=PPO_CONF['opt_epochs']):
+    global DEVICE
     model = HeterogeneousGAT()
     optimizer = torch.optim.Adam(model.parameters(), lr=OPT_CONF['learning_rate'])
     model.train()
+    if DEVICE == "cuda":
+        model.to(DEVICE) 
     random.shuffle(instances)
     num_val = int(len(instances) * validation_ratio)
     train_instances, val_instances = instances[num_val:], instances[:num_val]
+    num_processes = multiprocessing.cpu_count() if PARRALLEL else 1
+    print("Running on "+str(num_processes)+" TPUs in parallel...")
     for iteration in range(iterations):
         print("PPO iteration: "+str(iteration+1)+"/"+str(iterations)+":")
         if iteration % switch_batch == 0:
-            print("\t Time to sample new batch...")
+            print("\t Time to sample new batch of size "+str(batch_size)+"...")
             current_batch = sample_batches(train_instances, batch_size)
-        all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
-        for i, instance in enumerate(current_batch):
-            print("\t solving instance: "+str(i+1)+"/"+str(batch_size)+"...")
-            rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
-            all_rewards.append(rewards)
-            all_values.append(values)
-            all_probabilities.extend(probabilities)
-            all_states.extend(states)
-            all_actions.extend(actions)
-            all_actions_idx.extend(actions_idx)
-        all_returns = [ri for r in all_rewards for ri in calculate_returns(r)]
-        advantages = torch.Tensor([gae for r, v in zip(all_rewards, all_values) for gae in generalized_advantage_estimate(r, v)])
-        flattened_values = [v for vals in all_values for v in vals]
-        for e in range(epochs):
-            print("\t Optimization epoch: "+str(e+1)+"/"+str(epochs))
-            loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
-            PPO_optimize(optimizer, loss)
+        async_batch(model, current_batch, epochs, num_processes, optimizer)
         if iteration % validation_rate == 0:
             print("\t Time to validate the loss...")
             validate(model, val_instances)
@@ -540,19 +563,33 @@ def test(model, instances, optimals):
     return nbr_optimals, errors
 
 #====================================================================================================================
-# =*= V. EXECUTE THE COMPLETE CODE =*=
+# =*= V. EXECUTE THE COMPLETE CODE (main process only) =*=
 #====================================================================================================================
-
-train_instances = load_instances(TRAIN_INSTANCES_PATH)
-test_instances = load_instances(TEST_INSTANCES_PATH)
-test_optimal = pd.read_csv(TEST_INSTANCES_PATH+'optimal.csv')
-print("Starting training process...")
-model = PPO_train(train_instances)
-print("Starting tests...")
-nbr_optimals, errors = test(model, test_instances, test_optimal)
-print("Optimal makespans: ", test_optimal['values'].values)
-print("Errors (as percentages): ", errors)
-print("Maximum error: ", np.max(errors))
-print("Minimum error: ",  np.min(errors))
-print("Mean error: ",  np.mean(errors))
-print("Number of optimal values: ",  nbr_optimals)
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Description of your script.")
+    parser.add_argument("--mode", help="Execution mode (either prod or test)", required=True)
+    args = parser.parse_args()
+    print(f"Execution mode: {args.mode}...")
+    if args.mode == 'test':
+        PPO_CONF['train_iterations'] = 10
+        PPO_CONF['batch_size'] = 3
+        PARRALLEL = False
+    try:
+        set_start_method('spawn')
+    except RuntimeError:
+        pass
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Execution device: {DEVICE}...")
+    train_instances = load_instances(TRAIN_INSTANCES_PATH)
+    test_instances = load_instances(TEST_INSTANCES_PATH)
+    test_optimal = pd.read_csv(TEST_INSTANCES_PATH+'optimal.csv')
+    print("Starting training process...")
+    model =  PPO_train(train_instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'])
+    print("Starting tests...")
+    nbr_optimals, errors = test(model, test_instances, test_optimal)
+    print("Optimal makespans: ", test_optimal['values'].values)
+    print("Errors (as percentages): ", errors)
+    print("Maximum error: ", np.max(errors))
+    print("Minimum error: ",  np.min(errors))
+    print("Mean error: ",  np.mean(errors))
+    print("Number of optimal values: ",  nbr_optimals)
