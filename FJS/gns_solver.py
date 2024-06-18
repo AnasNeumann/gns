@@ -465,10 +465,9 @@ def PPO_loss(model, old_probs, states, actions, actions_idx, advantages, old_val
     policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
     value_loss = torch.mean(torch.stack([(V_old - r) ** 2 for V_old, r in zip(old_values, returns)]))
     entropy_loss = -new_log_probs.mean()
-    print("value loss - "+str(value_loss))
-    print("policy loss - "+str(policy_loss)) 
-    print("entropy loss - "+str(entropy_loss)) 
-    print("======")
+    print("\t\t value loss - "+str(value_loss))
+    print("\t\t policy loss - "+str(policy_loss)) 
+    print("\t\t entropy loss - "+str(entropy_loss)) 
     return (actor_w*policy_loss) + (critic_w*value_loss) - (entropy_loss*entropy_w)
 
 def PPO_optimize(optimizer, loss, retain=False):
@@ -483,10 +482,13 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
     num_val = int(len(instances) * validation_ratio)
     train_instances, val_instances = instances[num_val:], instances[:num_val]
     for iteration in range(iterations):
+        print("PPO iteration: "+str(iteration+1)+"/"+str(iterations)+":")
         if iteration % switch_batch == 0:
+            print("\t Time to sample new batch...")
             current_batch = sample_batches(train_instances, batch_size)
         all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
-        for instance in current_batch:
+        for i, instance in enumerate(current_batch):
+            print("\t solving instance: "+str(i+1)+"/"+str(batch_size)+"...")
             optimizer.zero_grad()
             rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
             all_rewards.append(rewards)
@@ -499,10 +501,13 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
         advantages = torch.Tensor([gae for r, v in zip(all_rewards, all_values) for gae in generalized_advantage_estimate(r, v)])
         flattened_values = [v for vals in all_values for v in vals]
         for e in range(epochs):
+            print("\t Optimization epoch: "+str(e+1)+"/"+str(epochs))
             loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
             PPO_optimize(optimizer, loss, retain=(e<epochs-1))
         if iteration % validation_rate == 0:
+            print("\t Time to validate the loss...")
             validate(model, val_instances)
+        print("<======***--|--***======>")
     return model
 
 def validate(model, instances):
@@ -518,14 +523,14 @@ def validate(model, instances):
     num_instances = len(instances)
     avg_reward = total_rewards / num_instances
     avg_loss = total_loss / num_instances
-    print(f'Validation - Average Reward: {avg_reward:.4f}, Average Loss: {avg_loss:.4f}')
+    print(f'\t Validation - Average Reward: {avg_reward:.4f}, Average Loss: {avg_loss:.4f}')
     model.train()
 
 def test(model, instances, optimals):
     errors = np.array([])
     nbr_optimals = 0
     for idx, instance in enumerate(instances):
-        makespan, sequences = solve(model, instance, train=False)
+        makespan,_ = solve(model, instance, train=False)
         optimal =  optimals.iloc[idx]['values']
         error = (makespan - optimal)/optimal
         if error <= 0:
