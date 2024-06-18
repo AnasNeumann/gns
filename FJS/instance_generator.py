@@ -39,7 +39,7 @@ for i in range(NB_TRAIN_INSTANCES + NB_TEST_INSTANCES):
         jobs.append(j)
 
     # SAVE THE INSTANCE
-    instance = {"resources": resources, "jobs": jobs, "size": total_ops, "nb_res": total_res}
+    instance = {"id": i, "resources": resources, "jobs": jobs, "size": total_ops, "nb_res": total_res}
     folder = "train" if i < NB_TRAIN_INSTANCES else "test"
     with open('./FJS/instances/'+folder+'/instance_'+str(i)+'.pkl', 'wb') as f:
         pickle.dump(instance, f)
