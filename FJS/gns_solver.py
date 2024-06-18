@@ -462,7 +462,7 @@ def PPO_loss(model, old_probs, states, actions, actions_idx, advantages, old_val
     old_log_probs = torch.Tensor([])
     entropies = torch.Tensor([])
     for i in range(len(states)):
-        p,_ = model(states[i], actions[i]).detach()
+        p,_ = model(states[i], actions[i])
         a = actions_idx[i]
         entropies = torch.cat((entropies, torch.sum(-p*torch.log(p+1e-8), dim=-1)))
         new_log_probs = torch.cat((new_log_probs, torch.log(p[a]+1e-8)))
