@@ -507,7 +507,7 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
         if iteration % validation_rate == 0:
             print("\t Time to validate the loss...")
             validate(model, val_instances)
-        print("<======***--|--***======>")
+    print("<======***--| END OF TRAINING |--***======>")
     return model
 
 def validate(model, instances):
