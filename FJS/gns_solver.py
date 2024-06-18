@@ -9,6 +9,7 @@ import copy
 import pandas as pd 
 import random
 import numpy as np
+torch.autograd.set_detect_anomaly(True)
 
 # Configuration
 TRAIN_INSTANCES_PATH = './FJS/instances/train/'
@@ -470,8 +471,9 @@ def PPO_loss(model, old_probs, states, actions, actions_idx, advantages, old_val
     print("\t\t entropy loss - "+str(entropy_loss)) 
     return (actor_w*policy_loss) + (critic_w*value_loss) - (entropy_loss*entropy_w)
 
-def PPO_optimize(optimizer, loss, retain=False):
-    loss.backward(retain_graph=retain)
+def PPO_optimize(optimizer, loss):
+    optimizer.zero_grad()
+    loss.backward(retain_graph=False)
     optimizer.step()
 
 def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'], validation_rate=PPO_CONF['validation_rate'], switch_batch=PPO_CONF['switch_batch'], validation_ratio=PPO_CONF['validation_ratio'], epochs=PPO_CONF['opt_epochs']):
@@ -489,7 +491,6 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
         all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
         for i, instance in enumerate(current_batch):
             print("\t solving instance: "+str(i+1)+"/"+str(batch_size)+"...")
-            optimizer.zero_grad()
             rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
             all_rewards.append(rewards)
             all_values.append(values)
@@ -503,7 +504,7 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
         for e in range(epochs):
             print("\t Optimization epoch: "+str(e+1)+"/"+str(epochs))
             loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
-            PPO_optimize(optimizer, loss, retain=(e<epochs-1))
+            PPO_optimize(optimizer, loss)
         if iteration % validation_rate == 0:
             print("\t Time to validate the loss...")
             validate(model, val_instances)
