@@ -17,7 +17,6 @@ MAX_PROCESSING_TIME = 15
 
 # INSTANCE GENERATION:
 for i in range(NB_TRAIN_INSTANCES + NB_TEST_INSTANCES):
-
     # RESOURCES GENERATION
     resources = []
     total_res = 0

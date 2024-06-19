@@ -484,8 +484,10 @@ def PPO_optimize(optimizer, loss):
 
 def async_solve(init_args):
     model, instance = init_args
-    print(instance)
-    print("\t start solving instance: "+str(instance['id'])+"...")
+    total_ops = 0
+    for j in instance['jobs']:
+        total_ops += len(j)
+    print("\t start solving instance: "+str(instance['id'])+" (jobs="+str(len(instance['jobs']))+", ops="+str(total_ops)+", resources="+str(len(instance['resources']))+")...")
     result = solve(model, instance, train=True)
     print("\t end solving instance: "+str(instance['id'])+"!")
     return result
