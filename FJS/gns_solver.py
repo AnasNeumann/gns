@@ -499,13 +499,11 @@ def async_solve(init_args):
     return result
 
 def async_batch(model, batch, epochs, num_processes, optimizer):
-    all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
+    all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], []
     with Pool(num_processes) as pool:
         results = pool.map(async_solve, [(model, instance) for instance in batch])
-    rewards, values, probabilities, states, actions, actions_idx = zip(*results)
+    all_rewards, all_values, probabilities, states, actions, actions_idx = zip(*results)
     for i in range(len(batch)):
-        all_rewards.append(rewards[i])
-        all_values.append(values[i])
         all_probabilities.extend(probabilities[i])
         all_states.extend(states[i])
         all_actions.extend(actions[i])
@@ -544,30 +542,39 @@ def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF[
 
 def validate(model, instances):
     model.eval()
-    total_rewards = 0
-    total_loss = 0
     with torch.no_grad():
+        all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
         for instance in instances:
             rewards, values, probabilities, states, actions, actions_idx = solve(model, instance, train=True)
-            loss = PPO_loss(model, probabilities, states, actions, actions_idx , generalized_advantage_estimate(rewards, values), values, calculate_returns(rewards))
-            total_rewards += sum(rewards).item()
-            total_loss += loss.item()
-    num_instances = len(instances)
-    avg_reward = total_rewards / num_instances
-    avg_loss = total_loss / num_instances
-    print(f'\t Validation - Average Reward: {avg_reward:.4f}, Average Loss: {avg_loss:.4f}')
+            all_rewards.append(rewards)
+            all_values.append(values)
+            all_probabilities.extend(probabilities)
+            all_states.extend(states)
+            all_actions.extend(actions)
+            all_actions_idx.extend(actions_idx)
+        all_returns = [ri for r in all_rewards for ri in calculate_returns(r)]
+        advantages = torch.Tensor([gae for r, v in zip(all_rewards, all_values) for gae in generalized_advantage_estimate(r, v)])
+        flattened_values = [v for vals in all_values for v in vals]
+        loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
+        print(f'\t Average Loss: {loss:.4f}')
     model.train()
 
 def test(model, instances, optimals):
     errors = np.array([])
     nbr_optimals = 0
-    for idx, instance in enumerate(instances):
-        makespan,_ = solve(model, instance, train=False)
-        optimal =  optimals.iloc[idx]['values']
-        error = (makespan - optimal)/optimal
-        if error <= 0:
-            nbr_optimals = nbr_optimals + 1
-        errors = np.append(errors, error)
+    model.eval()
+    with torch.no_grad():
+        for idx, instance in enumerate(instances):
+            for j in instance['jobs']:
+                total_ops += len(j)
+            print("\t start solving instance: "+str(instance['id'])+" (jobs="+str(len(instance['jobs']))+", ops="+str(total_ops)+", resources="+str(len(instance['resources']))+")...")
+            makespan,_ = solve(model, instance, train=False)
+            optimal = optimals.iloc[idx]['values']
+            error = (makespan - optimal)/optimal
+            if error <= 0:
+                nbr_optimals = nbr_optimals + 1
+            errors = np.append(errors, error)
+            print("\t end solving instance: "+str(instance['id'])+"!")
     return nbr_optimals, errors
 
 #====================================================================================================================
@@ -592,12 +599,12 @@ if __name__ == '__main__':
     test_instances = load_instances(TEST_INSTANCES_PATH)
     test_optimal = pd.read_csv(TEST_INSTANCES_PATH+'optimal.csv')
     print("Starting training process...")
-    model =  PPO_train(train_instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'])
+    model = PPO_train(train_instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'])
     print("Starting tests...")
     nbr_optimals, errors = test(model, test_instances, test_optimal)
     print("Optimal makespans: ", test_optimal['values'].values)
     print("Errors (as percentages): ", errors)
     print("Maximum error: ", np.max(errors))
-    print("Minimum error: ",  np.min(errors))
-    print("Mean error: ",  np.mean(errors))
-    print("Number of optimal values: ",  nbr_optimals)
+    print("Minimum error: ", np.min(errors))
+    print("Mean error: ", np.mean(errors))
+    print("Number of optimal values: ", nbr_optimals)
