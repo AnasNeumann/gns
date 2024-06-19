@@ -2,7 +2,7 @@ import torch
 import multiprocessing
 from torch.multiprocessing import Pool, set_start_method
 from torch_geometric.data import HeteroData
-from torch_geometric.nn import MessagePassing, global_mean_pool
+from torch_geometric.nn import global_mean_pool
 from common import load_instances, OP_STRUCT, shape
 from torch.nn import Sequential as Seq, Linear as Lin, ELU, Tanh, Parameter
 from torch_geometric.utils import to_dense_adj
@@ -13,6 +13,7 @@ import random
 import numpy as np
 torch.autograd.set_detect_anomaly(True)
 import argparse
+import time as systime
 
 # Configuration
 TRAIN_INSTANCES_PATH = './FJS/instances/train/'
@@ -138,7 +139,7 @@ def display_graph(graph):
 # =*= II. GRAPH ATTENTION NEURAL NET ARCHITECTURE: TWO-STAGE EMBEDDING + ACTOR-CRITIC HEADS =*=
 #====================================================================================================================
 
-class ResourceAttentionEmbeddingLayer(MessagePassing):
+class ResourceAttentionEmbeddingLayer(torch.nn.Module):
     def __init__(self, resource_features_dim, operation_features_dim):
         super(ResourceAttentionEmbeddingLayer, self).__init__()
         self.hidden_dim = GAT_CONF["embedding_dims"]
@@ -171,7 +172,7 @@ class ResourceAttentionEmbeddingLayer(MessagePassing):
         embedding = F.elu(norm_self_attention * resources + sum_ops_by_edges)
         return embedding
 
-class OperationEmbeddingLayer(MessagePassing):
+class OperationEmbeddingLayer(torch.nn.Module):
     def __init__(self, in_channels, out_channels):
         super(OperationEmbeddingLayer, self).__init__()
         self.hidden_channels = GAT_CONF["MLP_size"]
@@ -247,9 +248,15 @@ class HeterogeneousGAT(torch.nn.Module):
         operations, resources = graph['operation'].x, graph['resource'].x
         precedence_edges = graph['operation', 'precedence', 'operation'].edge_index
         requirement_edges = graph['operation', 'uses', 'resource'].edge_index
+        s8 = systime.time()
         for l in range(GAT_CONF["gnn_layers"]):
+            s9 = systime.time()
             resources = self.resource_layers[l](resources, operations, requirement_edges)
+            print("\t\t\t\t\t time to vectorize resource embeddings: "+str(systime.time() - s9))
+            s10 = systime.time()
             operations  = self.operation_layers[l](operations, resources, precedence_edges, requirement_edges)
+            print("\t\t\t\t\t time to vectorize operations embeddings: "+str(systime.time() - s10))
+        print("\t\t\t\t time to vectorize node embeddings: "+str(systime.time() - s8))
         pooled_operations = global_mean_pool(operations, torch.zeros(operations.shape[0], dtype=torch.long))
         pooled_resources = global_mean_pool(resources, torch.zeros(resources.shape[0], dtype=torch.long))
         graph_state = torch.cat([pooled_operations, pooled_resources], dim=-1)[0]
@@ -348,11 +355,10 @@ def update_res(graph, res_idx, updates):
 def possible_actions(graph, t):
     actions = []
     requirement_edges = graph['operation', 'uses', 'resource'].edge_index
-    for op_idx, _ in enumerate(graph['operation'].x):
-        if to_schedule(graph, op_idx, t):
-            for res_idx in requirement_edges[1][requirement_edges[0] == op_idx]:
-                if is_available(graph, res_idx, t):
-                    actions.append((op_idx, res_idx.item()))
+    for pos, op_idx in enumerate(requirement_edges[0]):
+        res_idx = requirement_edges[1][pos].item()
+        if to_schedule(graph, op_idx, t) and is_available(graph, res_idx, t):
+            actions.append((op_idx, res_idx))
     return actions
 
 def policy(probabilities, greedy=True):
@@ -373,10 +379,17 @@ def solve(model, instance, train=False):
     states = []
     actions = []
     while nb_operations_to_schedule > 0 and not error:
+        s1 = systime.time()
         poss_actions = possible_actions(graph, time)
+        print("\t\t\t time to compute possible actions: "+str(systime.time() - s1))
         if(len(poss_actions)>0):
-            states.append(copy.deepcopy(graph))
-            probs, state_value = model(copy.deepcopy(graph), poss_actions)
+            s7 = systime.time()
+            state_cop, model_copy = copy.deepcopy(graph), copy.deepcopy(graph)
+            print("\t\t\t time to create two deep copy of the global heterogenous graph: "+str(systime.time() - s7))
+            s2 = systime.time()
+            probs, state_value = model(model_copy, poss_actions)
+            states.append(state_cop)
+            print("\t\t\t time to compute une the Attention-based graph neural net: "+str(systime.time() - s2))
             values = torch.cat((values, torch.Tensor([state_value.detach()])))
             actions.append(poss_actions)
             probabilities.append(probs.detach())
@@ -385,6 +398,7 @@ def solve(model, instance, train=False):
             op_idx, res_idx = poss_actions[idx]
             
             # 1. Update all operations of the selected job
+            s3 = systime.time()
             job_unscheduled_ops = op_val(graph, op_idx, "job_unscheduled_ops") - 1
             succs = successors(graph, op_idx)
             duration = op_val(graph, op_idx, "duration")
@@ -410,7 +424,9 @@ def solve(model, instance, train=False):
                     update_res(graph, other_res, [('remaining_neighboring_ops', remaining_neighboring_ops)])
                     prune_requirements(graph, op_idx, other_res)
             nb_operations_to_schedule = nb_operations_to_schedule - 1
+            print("\t\t\t time to execute the related scheduling decisions: "+str(systime.time() - s3))
         else:
+            s4 = systime.time()
             # 3. Update resource usage and current time (based on next available machine and next free operation)
             next = -1
             for resoure in graph['resource'].x:
@@ -426,6 +442,7 @@ def solve(model, instance, train=False):
                 for res_id, resoure in enumerate(graph['resource'].x):
                    resoure[RES_FEATURES["past_utilization_rate"]] = utilization[res_id] / time
             error = next < 0
+            print("\t\t\t time to execute the search of the next step (plus the resource related feature updates): "+str(systime.time() - s4))
     if train:
         return rewards, values, probabilities, states, actions, actions_idx
     else:
@@ -494,9 +511,11 @@ def async_solve(init_args):
 
 def async_batch(model, batch, epochs, num_processes, optimizer):
     all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
-    with Pool(num_processes) as pool:
-        results = pool.map(async_solve, [(model, instance) for instance in batch])
-    rewards, values, probabilities, states, actions, actions_idx = zip(*results)
+    rewards, values, probabilities, states, actions, actions_idx = async_solve((model, batch[0])) # test with only one instance
+    # TODO this later
+    # with Pool(num_processes) as pool:
+    #    results = pool.map(async_solve, [(model, instance) for instance in batch])
+    #rewards, values, probabilities, states, actions, actions_idx = zip(*results)
     for i in range(len(batch)):
         all_rewards.append(rewards[i])
         all_values.append(values[i])
@@ -504,12 +523,16 @@ def async_batch(model, batch, epochs, num_processes, optimizer):
         all_states.extend(states[i])
         all_actions.extend(actions[i])
         all_actions_idx.extend(actions_idx[i])
+    s6 = systime.time()
     all_returns = [ri for r in all_rewards for ri in calculate_returns(r)]
     advantages = torch.Tensor([gae for r, v in zip(all_rewards, all_values) for gae in generalized_advantage_estimate(r, v)])
+    print("\t\t\t time to compute generalized advantage estimate: "+str(systime.time() - s6))
     flattened_values = [v for vals in all_values for v in vals]
     for e in range(epochs):
         print("\t Optimization epoch: "+str(e+1)+"/"+str(epochs))
+        s5 = systime.time()
         loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
+        print("\t\t\t time to compute proximal policy optimization loss: "+str(systime.time() - s5))
         PPO_optimize(optimizer, loss)
 
 def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'], validation_rate=PPO_CONF['validation_rate'], switch_batch=PPO_CONF['switch_batch'], validation_ratio=PPO_CONF['validation_ratio'], epochs=PPO_CONF['opt_epochs']):
