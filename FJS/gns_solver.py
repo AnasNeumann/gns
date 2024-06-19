@@ -355,9 +355,10 @@ def update_res(graph, res_idx, updates):
 def possible_actions(graph, t):
     actions = []
     requirement_edges = graph['operation', 'uses', 'resource'].edge_index
-    for pos, op_idx in enumerate(requirement_edges[0]):
+    for pos in range(len(requirement_edges[0])):
         res_idx = requirement_edges[1][pos].item()
-        if to_schedule(graph, op_idx, t) and is_available(graph, res_idx, t):
+        op_idx = requirement_edges[0][pos].item()
+        if is_available(graph, res_idx, t) and to_schedule(graph, op_idx, t):
             actions.append((op_idx, res_idx))
     return actions
 
