@@ -380,17 +380,10 @@ def solve(model, instance, train=False):
     states = []
     actions = []
     while nb_operations_to_schedule > 0 and not error:
-        s1 = systime.time()
         poss_actions = possible_actions(graph, time)
-        print("\t\t\t time to compute possible actions: "+str(systime.time() - s1))
         if(len(poss_actions)>0):
-            s7 = systime.time()
-            state_cop, model_copy = copy.deepcopy(graph), copy.deepcopy(graph)
-            print("\t\t\t time to create two deep copy of the global heterogenous graph: "+str(systime.time() - s7))
-            s2 = systime.time()
-            probs, state_value = model(model_copy, poss_actions)
-            states.append(state_cop)
-            print("\t\t\t time to compute une the Attention-based graph neural net: "+str(systime.time() - s2))
+            probs, state_value = model(copy.deepcopy(graph), poss_actions)
+            states.append(copy.deepcopy(graph))
             values = torch.cat((values, torch.Tensor([state_value.detach()])))
             actions.append(poss_actions)
             probabilities.append(probs.detach())
@@ -399,7 +392,6 @@ def solve(model, instance, train=False):
             op_idx, res_idx = poss_actions[idx]
             
             # 1. Update all operations of the selected job
-            s3 = systime.time()
             job_unscheduled_ops = op_val(graph, op_idx, "job_unscheduled_ops") - 1
             succs = successors(graph, op_idx)
             duration = op_val(graph, op_idx, "duration")
@@ -425,9 +417,7 @@ def solve(model, instance, train=False):
                     update_res(graph, other_res, [('remaining_neighboring_ops', remaining_neighboring_ops)])
                     prune_requirements(graph, op_idx, other_res)
             nb_operations_to_schedule = nb_operations_to_schedule - 1
-            print("\t\t\t time to execute the related scheduling decisions: "+str(systime.time() - s3))
         else:
-            s4 = systime.time()
             # 3. Update resource usage and current time (based on next available machine and next free operation)
             next = -1
             for resoure in graph['resource'].x:
@@ -443,7 +433,6 @@ def solve(model, instance, train=False):
                 for res_id, resoure in enumerate(graph['resource'].x):
                    resoure[RES_FEATURES["past_utilization_rate"]] = utilization[res_id] / time
             error = next < 0
-            print("\t\t\t time to execute the search of the next step (plus the resource related feature updates): "+str(systime.time() - s4))
     if train:
         return rewards, values, probabilities, states, actions, actions_idx
     else:
@@ -524,16 +513,12 @@ def async_batch(model, batch, epochs, num_processes, optimizer):
         all_states.extend(states[i])
         all_actions.extend(actions[i])
         all_actions_idx.extend(actions_idx[i])
-    s6 = systime.time()
     all_returns = [ri for r in all_rewards for ri in calculate_returns(r)]
     advantages = torch.Tensor([gae for r, v in zip(all_rewards, all_values) for gae in generalized_advantage_estimate(r, v)])
-    print("\t\t\t time to compute generalized advantage estimate: "+str(systime.time() - s6))
     flattened_values = [v for vals in all_values for v in vals]
     for e in range(epochs):
         print("\t Optimization epoch: "+str(e+1)+"/"+str(epochs))
-        s5 = systime.time()
         loss = PPO_loss(model, all_probabilities, all_states, all_actions, all_actions_idx, advantages, flattened_values, all_returns)
-        print("\t\t\t time to compute proximal policy optimization loss: "+str(systime.time() - s5))
         PPO_optimize(optimizer, loss)
 
 def PPO_train(instances, batch_size=PPO_CONF['batch_size'], iterations=PPO_CONF['train_iterations'], validation_rate=PPO_CONF['validation_rate'], switch_batch=PPO_CONF['switch_batch'], validation_ratio=PPO_CONF['validation_ratio'], epochs=PPO_CONF['opt_epochs']):
