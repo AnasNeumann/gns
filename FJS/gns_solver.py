@@ -167,7 +167,7 @@ class ResourceAttentionEmbeddingLayer(torch.nn.Module):
         norm_self_attention = normalizer[:self_attention.size(0)]
         norm_cross_attention = normalizer[self_attention.size(0):]
         weighted_ops_by_edges = norm_cross_attention * ops_by_edges
-        sum_ops_by_edges = torch.zeros_like(resources)
+        sum_ops_by_edges = torch.zeros_like(resources, device=resources.device)
         sum_ops_by_edges.index_add_(0, requirement_edges[1], weighted_ops_by_edges)
         embedding = F.elu(norm_self_attention * resources + sum_ops_by_edges)
         return embedding
@@ -203,75 +203,72 @@ class OperationEmbeddingLayer(torch.nn.Module):
             Lin(self.hidden_channels, out_channels)
         )
 
-    def forward(self, operations, resources, precedence_edges, requirement_edges):
-        adj_ops = to_dense_adj(precedence_edges)[0]
+    def forward(self, operations, resources, requirement_edges, preds, succs):
         ops_idx_by_edges = requirement_edges[0]
         res_embeddings_by_edges = resources[requirement_edges[1]]
-        agg_machine_embeddings = torch.zeros((operations.size(0), resources.size(1)))
-        for i, op_idx in enumerate(ops_idx_by_edges):
-            agg_machine_embeddings[op_idx] += res_embeddings_by_edges[i]
-        predecessors = torch.zeros((operations.shape[0], self.embedding_size))
-        successors = torch.zeros((operations.shape[0], self.embedding_size))
-        for i in range(1, operations.shape[0] - 1):
-            predecessors[i] = self.mlp_predecessor(operations[adj_ops[:,i].nonzero()].mean(dim=0))
-            successors[i] = self.mlp_successor(operations[adj_ops[i].nonzero()].mean(dim=0))
+        agg_machine_embeddings = torch.zeros((operations.size(0), resources.size(1)), device=operations.device)
+        agg_machine_embeddings.index_add_(0, ops_idx_by_edges, res_embeddings_by_edges)
+        predecessors = self.mlp_predecessor(operations[preds[1:-1]])
+        successors = self.mlp_successor(operations[succs[1:-1]])
         same_embeddings = self.mlp_same(operations[1:-1])
         agg_machine_embeddings = self.mlp_resources(agg_machine_embeddings[1:-1])
-        embedding = torch.zeros((operations.shape[0], self.embedding_size))
-        embedding[1:-1] = self.mlp_combined(torch.cat([predecessors[1:-1], successors[1:-1], agg_machine_embeddings, same_embeddings], dim=-1))
+        embedding = torch.zeros((operations.shape[0], self.embedding_size), device=operations.device)
+        embedding[1:-1] = self.mlp_combined(torch.cat([predecessors, successors, agg_machine_embeddings, same_embeddings], dim=-1))
         return embedding
     
 class HeterogeneousGAT(torch.nn.Module):
     def __init__(self):
         super(HeterogeneousGAT, self).__init__()
-        embedding_size = GAT_CONF["embedding_dims"]
+        self.embedding_size = GAT_CONF["embedding_dims"]
         self.resource_layers = torch.nn.ModuleList()
         self.operation_layers = torch.nn.ModuleList()
         self.resource_layers.append(ResourceAttentionEmbeddingLayer(len(RES_FEATURES), len(OP_FEATURES)))
-        self.operation_layers.append(OperationEmbeddingLayer(len(OP_FEATURES), embedding_size))
+        self.operation_layers.append(OperationEmbeddingLayer(len(OP_FEATURES), self.embedding_size))
         for _ in range(GAT_CONF["gnn_layers"]-1):
-            self.resource_layers.append(ResourceAttentionEmbeddingLayer(embedding_size, embedding_size))
-            self.operation_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size))
+            self.resource_layers.append(ResourceAttentionEmbeddingLayer(self.embedding_size, self.embedding_size))
+            self.operation_layers.append(OperationEmbeddingLayer(self.embedding_size, self.embedding_size))
         actor_critic_dim = GAT_CONF["actor_critic_dim"]
         self.actor_mlp = Seq(
-            Lin(embedding_size * 4, actor_critic_dim), Tanh(),
+            Lin(self.embedding_size * 4, actor_critic_dim), Tanh(),
             Lin(actor_critic_dim, actor_critic_dim), Tanh(),
             Lin(actor_critic_dim, 1)
         )
         self.critic_mlp = Seq(
-            Lin(embedding_size * 2, actor_critic_dim), Tanh(),
+            Lin(self.embedding_size * 2, actor_critic_dim), Tanh(),
             Lin(actor_critic_dim, actor_critic_dim), Tanh(), 
             Lin(actor_critic_dim, 1)
         )
 
-    def forward(self, graph, actions):
+    def forward(self, graph, actions, preds, succs):
         operations, resources = graph['operation'].x, graph['resource'].x
-        precedence_edges = graph['operation', 'precedence', 'operation'].edge_index
         requirement_edges = graph['operation', 'uses', 'resource'].edge_index
-        s8 = systime.time()
         for l in range(GAT_CONF["gnn_layers"]):
-            s9 = systime.time()
             resources = self.resource_layers[l](resources, operations, requirement_edges)
-            print("\t\t\t\t\t time to vectorize resource embeddings: "+str(systime.time() - s9))
-            s10 = systime.time()
-            operations  = self.operation_layers[l](operations, resources, precedence_edges, requirement_edges)
-            print("\t\t\t\t\t time to vectorize operations embeddings: "+str(systime.time() - s10))
-        print("\t\t\t\t time to vectorize node embeddings: "+str(systime.time() - s8))
+            operations  = self.operation_layers[l](operations, resources, requirement_edges, preds, succs)
         pooled_operations = global_mean_pool(operations, torch.zeros(operations.shape[0], dtype=torch.long))
         pooled_resources = global_mean_pool(resources, torch.zeros(resources.shape[0], dtype=torch.long))
         graph_state = torch.cat([pooled_operations, pooled_resources], dim=-1)[0]
         state_value = self.critic_mlp(graph_state)
-        action_logits = []
-        for op_idx, res_idx in actions:
-            action_input = torch.cat([operations[op_idx], resources[res_idx], graph_state], dim=-1)
-            action_logits.append(self.actor_mlp(action_input))
-        action_logits = torch.stack(action_logits)
+        action_inputs = torch.zeros((len(actions), 4 * self.embedding_size))
+        for i, (op_idx, res_idx) in enumerate(actions):
+            action_inputs[i] = torch.cat([operations[op_idx], resources[res_idx], graph_state], dim=-1)
+        action_logits = self.actor_mlp(action_inputs)
         action_probs = F.softmax(action_logits, dim=0)
         return action_probs, state_value
 
 #====================================================================================================================
 # =*= III. SOLVE AN INSTANCE =*=
 #====================================================================================================================
+
+def flat_preds_and_succs(graph):
+    adj = to_dense_adj(graph['operation', 'precedence', 'operation'].edge_index)[0]
+    nb_ops = graph['operation'].x.size(0)
+    preds = torch.zeros(nb_ops, dtype=torch.long)
+    succs = torch.zeros(nb_ops, dtype=torch.long)
+    for i in range(1, nb_ops-1):
+        preds[i] = adj[:,i].nonzero(as_tuple=True)[0]
+        succs[i] = adj[i].nonzero(as_tuple=True)[0]
+    return preds, succs
 
 def is_available(graph, res_idx, time):
     return graph['resource'].x[res_idx][RES_FEATURES["available_time"]].item() <= time
@@ -370,6 +367,7 @@ def solve(model, instance, train=False):
     sequences = [[] for _ in graph['resource'].x]
     utilization = [0 for _ in graph['resource'].x]
     nb_operations_to_schedule = graph['operation'].x.shape[0] - 2
+    xpreds, xsuccs = flat_preds_and_succs(graph)
     time = 0
     error = False
     requirements = graph['operation', 'uses', 'resource'].edge_index
@@ -382,7 +380,7 @@ def solve(model, instance, train=False):
     while nb_operations_to_schedule > 0 and not error:
         poss_actions = possible_actions(graph, time)
         if(len(poss_actions)>0):
-            probs, state_value = model(copy.deepcopy(graph), poss_actions)
+            probs, state_value = model(copy.deepcopy(graph), poss_actions, xpreds, xsuccs)
             states.append(copy.deepcopy(graph))
             values = torch.cat((values, torch.Tensor([state_value.detach()])))
             actions.append(poss_actions)
@@ -469,7 +467,8 @@ def PPO_loss(model, old_probs, states, actions, actions_idx, advantages, old_val
     old_log_probs = torch.Tensor([])
     entropies = torch.Tensor([])
     for i in range(len(states)):
-        p,_ = model(states[i], actions[i])
+        xpreds, xsuccs = flat_preds_and_succs(states[i])
+        p,_ = model(states[i], actions[i], xpreds, xsuccs)
         a = actions_idx[i]
         entropies = torch.cat((entropies, torch.sum(-p*torch.log(p+1e-8), dim=-1)))
         new_log_probs = torch.cat((new_log_probs, torch.log(p[a]+1e-8)))
@@ -501,11 +500,9 @@ def async_solve(init_args):
 
 def async_batch(model, batch, epochs, num_processes, optimizer):
     all_rewards, all_values, all_probabilities, all_states, all_actions, all_actions_idx = [], [], [], [], [], []
-    rewards, values, probabilities, states, actions, actions_idx = async_solve((model, batch[0])) # test with only one instance
-    # TODO this later
-    # with Pool(num_processes) as pool:
-    #    results = pool.map(async_solve, [(model, instance) for instance in batch])
-    #rewards, values, probabilities, states, actions, actions_idx = zip(*results)
+    with Pool(num_processes) as pool:
+        results = pool.map(async_solve, [(model, instance) for instance in batch])
+    rewards, values, probabilities, states, actions, actions_idx = zip(*results)
     for i in range(len(batch)):
         all_rewards.append(rewards[i])
         all_values.append(values[i])
