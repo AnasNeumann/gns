@@ -244,7 +244,7 @@ class HeterogeneousGAT(torch.nn.Module):
         requirement_edges = graph['operation', 'uses', 'resource'].edge_index
         for l in range(GAT_CONF["gnn_layers"]):
             resources = self.resource_layers[l](resources, operations, requirement_edges)
-            operations  = self.operation_layers[l](operations, resources, requirement_edges, preds, succs)
+            operations = self.operation_layers[l](operations, resources, requirement_edges, preds, succs)
         pooled_operations = global_mean_pool(operations, torch.zeros(operations.shape[0], dtype=torch.long))
         pooled_resources = global_mean_pool(resources, torch.zeros(resources.shape[0], dtype=torch.long))
         graph_state = torch.cat([pooled_operations, pooled_resources], dim=-1)[0]
@@ -581,7 +581,7 @@ def test(model, instances, optimals):
 # =*= V. EXECUTE THE COMPLETE CODE (main process only) =*=
 #====================================================================================================================
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="Description of your script.")
+    parser = argparse.ArgumentParser(description="Hyper-Graph Neural Net (HGNN) trained with Proximal Policy Optimization (PPO) to solve Flexible Job Shop Scheduling Problems (FJSSP)")
     parser.add_argument("--mode", help="Execution mode (either prod or test)", required=True)
     args = parser.parse_args()
     print(f"Execution mode: {args.mode}...")
