@@ -1,7 +1,7 @@
 import argparse
 import random
 import pickle
-from models import Instance, get_direct_children, get_direct_parent, get_operations_idx, get_name, require, real_time_scale
+from model import Instance, get_direct_children, get_direct_parent, get_operations_idx, get_name, require, real_time_scale
 
 PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 SIZE = 0
@@ -38,7 +38,7 @@ MEAN_OPS_PER_ELT = [3, 3, 3, 3, 4, 5]
 # 21 (23), 63 (65), 90 (97), 120 (133), 200 (225), 300 (337) tasks
 
 def bias_generator(prop_false):
-    return random.random(0.0,1.000001)>=prop_false
+    return random.uniform(0.0,1.000001)>=prop_false
 
 def init_array(size, min, max, rdm=True):
     result = []
@@ -48,14 +48,14 @@ def init_array(size, min, max, rdm=True):
 
 def build_resources(i: Instance):
     nb_projects = NB_PROJECTS[SIZE]
-    i.resource_family = [[False] * i.nb_resource_types] * i.nb_resources
+    i.resource_family = [[False] * i.nb_resource_types for _ in range(i.nb_resources)]
     i.finite_capacity = [False] * i.nb_resources
-    i.design_setup = [[0] * i.nb_settings] * i.nb_resources
+    i.design_setup = [[0] * i.nb_settings for _ in range(i.nb_resources)]
     i.operation_setup = [0] * i.nb_resources
-    i.execution_time = [[] * i.nb_projects] * i.nb_resources # TODO o
+    i.execution_time = [[-1] * i.nb_projects for _ in range(i.nb_resources)]
     i.init_quantity =  [0] * i.nb_resources
     i.purchase_time = [0] * i.nb_resources
-    i.quantity_needed =  [[] * i.nb_projects] * i.nb_resources # TODO o
+    i.quantity_needed =  [[-1] * i.nb_projects for _ in range(i.nb_resources)]
     for r in range(i.nb_resources):
         if r < i.nb_human_resources:
             i.finite_capacity[r] = True
@@ -74,6 +74,8 @@ def build_resources(i: Instance):
             i.init_quantity[r] = INIT_QUANTITY
             i.resourceFamily[r][i.nb_production_machine_types + r - i.nb_production_machines] = True
         for p in range(nb_projects):
+            i.quantity_needed[r][p] = [-1 * i.O_size[p][o]]
+            i.execution_time[r][p] = [-1 * i.O_size[p][o]]
             for o in range(i.O_size[p]):
                 if require(i,p,o,r):
                     if i.finite_capacity[r]:
@@ -93,22 +95,22 @@ def build_operations(i: Instance):
     nb_assembly_operation_types = NB_ASSEMBLY_OPERATION_TYPES[SIZE]
     nb_production_operation_types = NB_PRODUCTION_OPERATION_TYPES[SIZE]
     i.nb_ops_types = nb_design_operations_types + nb_assembly_operation_types + nb_production_operation_types
-    i.operation_family = [[]] * nb_projects
-    i.simultaneous = [[]] * nb_projects
-    i.resource_type_needed = [[]] * nb_projects
-    i.in_hours = [[]] * nb_projects
-    i.in_days = [[]] * nb_projects
-    i.is_design = [[]] * nb_projects
-    i.design_value = [[]] * nb_projects
+    i.operation_family = [[-1] for _ in range(nb_projects)]
+    i.simultaneous = [[-1] for _ in range(nb_projects)]
+    i.resource_type_needed = [[-1] for _ in range(nb_projects)]
+    i.in_hours = [[-1] for _ in range(nb_projects)]
+    i.in_days = [[-1] for _ in range(nb_projects)]
+    i.is_design = [[-1] for _ in range(nb_projects)]
+    i.design_value = [[-1] for _ in range(nb_projects)]
     for p in range(nb_projects):
         nb_ops = i.O_size[p]
-        i.operation_family[p] = [[False] * i.nb_ops_types] * nb_ops
+        i.operation_family[p] = [[False] * i.nb_ops_types for _ in range(nb_ops)]
         i.simultaneous[p] = [False] * nb_ops
-        i.resource_type_needed[p]= [[False] * i.nb_resource_types] * nb_ops
+        i.resource_type_needed[p]= [[False] * i.nb_resource_types for _ in range(nb_ops)]
         i.in_hours[p] = [False] * nb_ops
         i.in_days[p] = [False] * nb_ops
         i.is_design[p] = [False] * nb_ops
-        i.design_value[p] = [[-1] * i.nb_settings] * nb_ops
+        i.design_value[p] = [[-1] * i.nb_settings for _ in range(nb_ops)]
         for e in range(elts_per_project):
             first, last = get_operations_idx(i, p, e)
             for idx, o in enumerate(range(first, last)):
@@ -146,11 +148,11 @@ def build_assembly(i: Instance, p, parent, ancestors):
 def build_elements(i: Instance):
     nb_projects = NB_PROJECTS[SIZE]
     elts_per_project = NB_ELTS_PER_PROJECT[SIZE]
-    i.assembly = [[[False] * elts_per_project] * elts_per_project] * nb_projects
-    i.direct_assembly = [[[False] * elts_per_project] * elts_per_project] * nb_projects
-    i.external = [[False] * elts_per_project] * nb_projects
-    i.outsourcing_time = [[-1] * elts_per_project] * nb_projects
-    i.external_cost = [[-1] * elts_per_project] * nb_projects
+    i.assembly = [[[False] * elts_per_project for _ in range(elts_per_project)] for _ in range(nb_projects)]
+    i.direct_assembly = [[[False] * elts_per_project for _ in range(elts_per_project)] for _ in range(nb_projects)]
+    i.external = [[False] * elts_per_project for _ in range(nb_projects)]
+    i.outsourcing_time = [[-1] * elts_per_project for _ in range(nb_projects)]
+    i.external_cost = [[-1] * elts_per_project for _ in range(nb_projects)]
     mean_elt_op_time = MAX_PROCESSING_TIMES_DESIGN*60;
     MAX_PRICE = round(mean_elt_op_time*MAX_OUTSOURCING_PRICE_SHARE);
     MIN_PRICE = round(mean_elt_op_time*MIN_OUTSOURCING_PRICE_SHARE);
@@ -158,29 +160,34 @@ def build_elements(i: Instance):
     MIN_TIME  = round(mean_elt_op_time*MIN_OUTSOURCING_TIME_SHARE);
     i.M = 5 * mean_elt_op_time * NB_ELTS_PER_PROJECT[SIZE] * NB_PROJECTS[SIZE];
     for p in range(nb_projects):
-        for e in range(elts_per_project):
-            if e>0:
-                i.direct_assembly[p][random.randint(0,e-1)][e] = True
+        print(i.direct_assembly[p])
+        for e in range(1, elts_per_project):
+            print(e)
+            print(i.direct_assembly[p])
+            i.direct_assembly[p][random.randint(0,e-1)][e] = True
+            print(i.direct_assembly[p])
+            print("===")
+        print(i.direct_assembly[p])
         i = build_assembly(i, p, 0, [])
         for e in range(elts_per_project):
             has_children = get_direct_children(i, p, e)
             outsourcable = e>0 and (i.external[p][get_direct_parent(i,p,e)] or ((not has_children and bias_generator(0.05)) or (has_children and bias_generator(0.25))))
             if outsourcable:
                 i.external[p][e] = True
-                i.outsourcing_time[p][e] = random.random(MIN_TIME, MAX_TIME)
-                i.external_cost[p][e] = random.random(MIN_PRICE, MAX_PRICE)
+                i.outsourcing_time[p][e] = random.randint(MIN_TIME, MAX_TIME)
+                i.external_cost[p][e] = random.randint(MIN_PRICE, MAX_PRICE)
     return i
 
 def build_precedence(i: Instance):
     nb_projects = NB_PROJECTS[SIZE]
     elts_per_project = NB_ELTS_PER_PROJECT[SIZE]
-    i.operations_by_element = [[] * elts_per_project] * nb_projects
-    i.precedence = [[] * elts_per_project] * nb_projects
+    i.operations_by_element = [[-1] * elts_per_project for _ in range(nb_projects)]
+    i.precedence = [[-1] * elts_per_project for _ in range(nb_projects)]
     for p in range(nb_projects):
         start = 0
-        i.operations_by_element[p][e] = [False] * i.O_size[p]
-        i.precedence[p][e] = [[False] * i.O_size[p]] * i.O_size[p]
         for e in range(elts_per_project):
+            i.operations_by_element[p][e] = [False] * i.O_size[p]
+            i.precedence[p][e] = [[False] * i.O_size[p] for _ in range(i.O_size[p])]
             for o in range(start, start + i.EO_size[p][e]):
                 i.operations_by_element[p][e][o] = True
                 if o > start:
@@ -215,7 +222,7 @@ def build_one(size, id, w_makespan):
     i.nb_resource_types = i.nb_HR_types + i.nb_production_machine_types + i.nb_material + UNKOWN_MACHINE_TYPE
     i.nb_resources = i.nb_human_resources + i.nb_production_machines + i.nb_material
     i.E_size = [elts_per_project] * nb_projects
-    i.EO_size = [[-1] * elts_per_project] * nb_projects
+    i.EO_size = [[-1] * elts_per_project for _ in range(nb_projects)]
     i.O_size = [-1] * nb_projects
     return build_resources(build_operations(build_elements(build_precedence(build_projects(i)))))
 
@@ -224,13 +231,13 @@ if __name__ == '__main__':
     parser.add_argument("--train", help="Number of training instances", required=True)
     parser.add_argument("--test", help="Number of testing instances", required=True)
     args = parser.parse_args()
-    nb_train = args.train
-    nb_test = args.test
+    nb_train = int(args.train)
+    nb_test = int(args.test)
     for size, size_folder in enumerate(PROBLEM_SIZES):
         SIZE = size
-        print("Start size "+size_folder+"("+SIZE+")...")
+        print("Start size "+size_folder+"("+str(SIZE)+")...")
         for i in range(nb_train+nb_test):
-            instance = build_one(size_folder, i, random.random(0.01, 0.99))
+            instance = build_one(size_folder, i, random.uniform(0.01, 0.99))
             folder = "train" if i<nb_train else "test"
             with open('./EPSIII/instances/'+size_folder+'/'+folder+'/instance_'+str(i)+'.pkl', 'wb') as f:
                 pickle.dump(instance, f)

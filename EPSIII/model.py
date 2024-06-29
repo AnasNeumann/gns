@@ -56,11 +56,11 @@ def get_name(i: Instance):
     return i.size+"_"+str(i.id)
 
 def get_direct_children(i: Instance, p, e):
-    chilren = []
+    children = []
     for e2 in range(i.E_size[p]):
         if i.direct_assembly[p][e][e2]:
-            return chilren.append(e2)
-    return chilren
+            children.append(e2)
+    return children
 
 def get_direct_parent(i: Instance, p, e):
     for e2 in range(i.E_size[p]):
