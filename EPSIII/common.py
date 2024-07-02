@@ -1,8 +1,10 @@
 import pickle
 import os
+import resource
 
-# Common definition
-OP_STRUCT = {"resource_type": 0, "duration": 1}
+def load_instance(path):
+    with open(path, 'rb') as file:
+        return pickle.load(file)
 
 def load_instances(path):
     print(f"Loading data from path: {path}...")
@@ -15,9 +17,6 @@ def load_instances(path):
     print("end of loading!")
     return instances
 
-def shape(lst):
-    shape = []
-    while isinstance(lst, list):
-        shape.append(len(lst))
-        lst = lst[0] if lst else None
-    return tuple(shape)
+def set_memory_limit(max_ram_bytes):
+    _, hard = resource.getrlimit(resource.RLIMIT_AS)
+    resource.setrlimit(resource.RLIMIT_AS, (max_ram_bytes * 1024 * 1024 * 1024, hard))

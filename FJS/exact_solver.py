@@ -2,14 +2,19 @@ from ortools.sat.python import cp_model
 import sys
 import pandas as pd
 from common import load_instances
+import resource
 
 # CONFIGURATION AND LOAD INSTANCES
 INSTANCES_TYPES = sys.argv[1] # train or test
-INSTANCES_PATH = './FJS/instances/'+INSTANCES_TYPES
+INSTANCES_PATH = './instances/'+INSTANCES_TYPES
 END_DATE = 1
 START_DATE = 0
 CHOSEN_RESOURCE = 3
 instances = load_instances(INSTANCES_PATH)
+
+def set_memory_limit(max_ram_bytes):
+    _, hard = resource.getrlimit(resource.RLIMIT_AS)
+    resource.setrlimit(resource.RLIMIT_AS, (max_ram_bytes, hard))
 
 # SOLVE ALL INSTANCES ONE BY ONE
 solutions = []
@@ -79,6 +84,8 @@ for i in instances:
 
     # SOLVE: solve the model and display the results
     solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 3 * 60.0 # 3 computing hours 
+    set_memory_limit(10 * 1024 * 1024 * 1024) # 10 GB
     status = solver.Solve(model)
     if status == cp_model.OPTIMAL or status == cp_model.FEASIBLE:
         print(f'Minimum makespan: {solver.Value(obj_var)}')
