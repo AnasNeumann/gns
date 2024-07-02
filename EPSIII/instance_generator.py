@@ -52,10 +52,10 @@ def build_resources(i: Instance):
     i.finite_capacity = [False] * i.nb_resources
     i.design_setup = [[0] * i.nb_settings for _ in range(i.nb_resources)]
     i.operation_setup = [0] * i.nb_resources
-    i.execution_time = [[-1] * i.nb_projects for _ in range(i.nb_resources)]
+    i.execution_time = [[-1] * nb_projects for _ in range(i.nb_resources)]
     i.init_quantity =  [0] * i.nb_resources
     i.purchase_time = [0] * i.nb_resources
-    i.quantity_needed =  [[-1] * i.nb_projects for _ in range(i.nb_resources)]
+    i.quantity_needed =  [[-1] * nb_projects for _ in range(i.nb_resources)]
     for r in range(i.nb_resources):
         if r < i.nb_human_resources:
             i.finite_capacity[r] = True
@@ -66,16 +66,16 @@ def build_resources(i: Instance):
             if r - i.nb_human_resources < i.nb_production_machine_types:
                 i.resource_family[r][r] = True
             else:
-                i.resourceFamily[r][random.randint(i.nb_human_resources, i.nb_human_resources + i.nb_production_machine_types - 1)] = True
+                i.resource_family[r][random.randint(i.nb_human_resources, i.nb_human_resources + i.nb_production_machine_types - 1)] = True
             for s in range(i.nb_settings):
                 i.design_setup[r][s] = MAX_SETUP_TIME if bias_generator(0.8) else 0
         else:
             i.purchase_time[r] = H * 60 * random.randint(1,3)
             i.init_quantity[r] = INIT_QUANTITY
-            i.resourceFamily[r][i.nb_production_machine_types + r - i.nb_production_machines] = True
+            i.resource_family[r][i.nb_production_machine_types + r - i.nb_production_machines] = True
         for p in range(nb_projects):
-            i.quantity_needed[r][p] = [-1 * i.O_size[p][o]]
-            i.execution_time[r][p] = [-1 * i.O_size[p][o]]
+            i.quantity_needed[r][p] = [-1] * i.O_size[p]
+            i.execution_time[r][p] = [-1] * i.O_size[p]
             for o in range(i.O_size[p]):
                 if require(i,p,o,r):
                     if i.finite_capacity[r]:
@@ -118,7 +118,7 @@ def build_operations(i: Instance):
                     i.design_value[p][o] = init_array(i.nb_settings, 0, MAX_SETTINGS_VALUE)
                 ot = random.randint(0, nb_design_operations_types-1) if idx==0 \
                     else random.randint(nb_design_operations_types, nb_assembly_operation_types+nb_design_operations_types-1) if idx==1 \
-                    else random.randint(nb_assembly_operation_types+nb_design_operations_types, i.nb_ops_types)
+                    else random.randint(nb_assembly_operation_types+nb_design_operations_types, i.nb_ops_types-1)
                 if ot<nb_design_operations_types:
                     i.in_days[p][o] = True
                     i.is_design[p][o] = True
@@ -126,14 +126,14 @@ def build_operations(i: Instance):
                     i.in_hours[p][o] = True
                 i.operation_family[p][o][ot] = True
                 i.simultaneous[p][o] = bias_generator(0.9)
-                maxRT = i.nb_HR_types-1 if (i.in_days[p][o] or i.in_hours[p][o]) else i.nb_production_machine_types - i.nb_material - UNKOWN_MACHINE_TYPE -1
+                maxRT = i.nb_HR_types-1 if (i.in_days[p][o] or i.in_hours[p][o]) else i.nb_resource_types - i.nb_material - UNKOWN_MACHINE_TYPE -1
                 minRT = 0 if (i.in_days[p][o] or i.in_hours[p][o]) else i.nb_HR_types
                 i.resource_type_needed[p][o][random.randint(minRT, maxRT)] = True
                 if not i.in_days[p][o] and not i.in_hours[p][o] and bias_generator(0.8):
                     i.resource_type_needed[p][o][random.randint(maxRT+1, maxRT+i.nb_material)] = True
                 if not found_unkown_elt and i.external[p][e] and not i.in_days[p][o] and not i.in_hours[p][o] and len(get_direct_children(i,p,e))<=0:
                     found_unkown_elt = True
-                    i.resource_type_needed[p][o][random.randint(maxRT+i.nb_material+UNKOWN_MACHINE_TYPE)] = True
+                    i.resource_type_needed[p][o][maxRT+i.nb_material+UNKOWN_MACHINE_TYPE] = True
                     i.external_cost[p][e] = i.external_cost[p][e] * 2
     return i
 
@@ -160,14 +160,8 @@ def build_elements(i: Instance):
     MIN_TIME  = round(mean_elt_op_time*MIN_OUTSOURCING_TIME_SHARE);
     i.M = 5 * mean_elt_op_time * NB_ELTS_PER_PROJECT[SIZE] * NB_PROJECTS[SIZE];
     for p in range(nb_projects):
-        print(i.direct_assembly[p])
         for e in range(1, elts_per_project):
-            print(e)
-            print(i.direct_assembly[p])
             i.direct_assembly[p][random.randint(0,e-1)][e] = True
-            print(i.direct_assembly[p])
-            print("===")
-        print(i.direct_assembly[p])
         i = build_assembly(i, p, 0, [])
         for e in range(elts_per_project):
             has_children = get_direct_children(i, p, e)
@@ -236,10 +230,10 @@ if __name__ == '__main__':
     for size, size_folder in enumerate(PROBLEM_SIZES):
         SIZE = size
         print("Start size "+size_folder+"("+str(SIZE)+")...")
-        for i in range(nb_train+nb_test):
+        for i in range(1, nb_train+nb_test+1):
             instance = build_one(size_folder, i, random.uniform(0.01, 0.99))
-            folder = "train" if i<nb_train else "test"
-            with open('./EPSIII/instances/'+size_folder+'/'+folder+'/instance_'+str(i)+'.pkl', 'wb') as f:
+            folder = "train" if i<=nb_train else "test"
+            with open('./instances/'+folder+'/'+size_folder+'/instance_'+str(i)+'.pkl', 'wb') as f:
                 pickle.dump(instance, f)
-            print("\t Instance #"+get_name(i)+" saved successfully!")
-        print("End size "+size_folder+"("+SIZE+")...")
+            print("\t Instance #"+get_name(instance)+" saved successfully!")
+        print("End size "+size_folder+"("+str(SIZE)+")...")
