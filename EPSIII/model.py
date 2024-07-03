@@ -8,8 +8,9 @@ class Solution:
         self.precedes = []
         # Design setup (p, o, r, s)
         self.D_setup = []
-        # Cmax
+        # Cmax and objective
         self.Cmax = -1
+        self.obj = []
 
 class Instance:
     def __init__(self, size, id, w_makespan, H, **kwargs):

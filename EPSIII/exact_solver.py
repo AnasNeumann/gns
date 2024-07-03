@@ -46,8 +46,13 @@ def init_vars(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
 def init_objective_function(model: cp_model.CpModel, i: Instance, s: Solution):
-    obj_var = None
-    return model, s, obj_var
+    s.obj.append(s.Cmax * i.w_makespan)
+    for p in range(get_nb_projects(i)):
+        for e in range(i.E_size[p]):
+            if i.external[p][e]:
+                s.obj.append(s.E_outsourced[p][e] * i.external_cost[p][e] * (1.0 - i.w_makespan))
+    model.Minimize(sum(s.obj))
+    return model, s
 
 def c1(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
@@ -136,15 +141,15 @@ def solve_one(instance: Instance, solution_path):
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = MAX_COMPUTING_HOURS * 60.0 
     model, solution = init_vars(model, instance)
-    model, solution, obj_var = init_objective_function(model, instance, solution)
+    model, solution = init_objective_function(model, instance, solution)
     for constraint in [c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16,c17,c18,c19,c20,c21,c22,c23,c24,c25,c26,c27]:
         model, solution = constraint(model, instance, solution)
     status = solver.Solve(model)
     computing_time = systime.time()-start_time
     if status == cp_model.OPTIMAL:
-        solutions_df = pd.DataFrame({'index': instance.id, 'value': solver.Value(obj_var), 'status': 'optimal', 'computing_time': computing_time, 'max_time': MAX_COMPUTING_HOURS, 'max_memory': MAX_RAM})
+        solutions_df = pd.DataFrame({'index': instance.id, 'value': solver.Value(solver.ObjectiveValue()), 'status': 'optimal', 'computing_time': computing_time, 'max_time': MAX_COMPUTING_HOURS, 'max_memory': MAX_RAM})
     elif status == cp_model.FEASIBLE:
-        solutions_df = pd.DataFrame({'index': instance.id, 'value': solver.Value(obj_var), 'status': 'feasible', 'computing_time': computing_time, 'max_time': MAX_COMPUTING_HOURS, 'max_memory': MAX_RAM})
+        solutions_df = pd.DataFrame({'index': instance.id, 'value': solver.Value(solver.ObjectiveValue()), 'status': 'feasible', 'computing_time': computing_time, 'max_time': MAX_COMPUTING_HOURS, 'max_memory': MAX_RAM})
     else:
         solutions_df = pd.DataFrame({'index': instance.id, 'value': -1, 'status': 'failure', 'computing_time': computing_time, 'max_time': MAX_COMPUTING_HOURS, 'max_memory': MAX_RAM})
     print(solutions_df)
