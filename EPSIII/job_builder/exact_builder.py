@@ -17,7 +17,7 @@ if __name__ == '__main__':
             f = open("../jobs/exact/"+str(size)+"/"+str(instance)+".sh", "w+")
             f.write("#!/bin/bash\n")
             f.write("#SBATCH --nodes 1\n")
-            f.write("#SBATCH --time=3:00:00\n")
+            f.write("#SBATCH --time=3:15:00\n")
             f.write("#SBATCH --cpus-per-task=64\n")
             f.write("#SBATCH --mem=16G\n")
             f.write("#SBATCH --account=def-"+args.parent+"\n")
