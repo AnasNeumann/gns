@@ -1,3 +1,16 @@
+class Solution:
+    def __init__(self):
+        # Elements (p, e)
+        self.E_start, self.E_outsourced, self.E_prod_start, self.E_validated, self.E_end = [], [], [], [], []
+        # Execution of oerations (p, o, feasible r)
+        self.O_uses_init_quantity, self.O_start, self.O_setup, self.O_end, self.O_executed = [], [], [], [], []
+        # Relation between operations (p1, p2, o1, o2, feasible r)
+        self.precedes = []
+        # Design setup (p, o, r, s)
+        self.D_setup = []
+        # Cmax
+        self.Cmax = -1
+
 class Instance:
     def __init__(self, size, id, w_makespan, H, **kwargs):
         self.id = id
@@ -82,3 +95,6 @@ def require(i: Instance, p, o, r):
 
 def real_time_scale(i: Instance, p, o):
     return 60*i.H if i.in_days[p][o] else 60 if i.in_hours[p][o] else 1
+
+def get_nb_projects(i: Instance):
+    return len(i.E_size)

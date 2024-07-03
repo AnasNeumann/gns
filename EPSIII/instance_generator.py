@@ -1,7 +1,7 @@
 import argparse
 import random
 import pickle
-from model import Instance, get_direct_children, get_direct_parent, get_operations_idx, get_name, require, real_time_scale
+from model import Instance, get_direct_children, get_direct_parent, get_operations_idx, get_name, require, real_time_scale, nb_projects
 
 PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 SIZE = 0
