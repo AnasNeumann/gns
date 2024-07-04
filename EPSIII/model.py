@@ -99,3 +99,17 @@ def real_time_scale(i: Instance, p, o):
 
 def get_nb_projects(i: Instance):
     return len(i.E_size)
+
+def project_head(i: Instance, p):
+    for e in range(i.E_size[p]):
+        is_head = True
+        for e2 in range(i.E_size[p]):
+            if e2 != e and i.assembly[p][e2][e]:
+                is_head = False
+                break
+        if(is_head):
+            return e
+    return -1
+
+def last_operations(i: Instance, p, e):
+    pass # TODO

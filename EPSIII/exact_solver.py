@@ -1,7 +1,7 @@
 import pickle
 import os
 from common import set_memory_limit, load_instance, init_several_1D, init_2D, init_several_2D, init_3D
-from model import Instance, Solution, get_nb_projects, require
+from model import Instance, Solution, get_nb_projects, require, project_head
 import argparse
 import pandas as pd
 from ortools.sat.python import cp_model
@@ -54,84 +54,116 @@ def init_objective_function(model: cp_model.CpModel, i: Instance, s: Solution):
     model.Minimize(sum(s.obj))
     return model, s
 
+# Cmax computation
 def c1(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        model.Add(s.Cmax >= s.E_end[p][project_head(i,p)])
     return model, s
 
+# End of non-outsourced item
 def c2(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e in range(i.E_size[p]):
+            pass # TODO
     return model, s
 
+# End of outsourced item
 def c3(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Physical start of non-outsourced item
 def c4(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Subcontract only if possible (known supplier)
 def c5(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Subcontract a whole branch of elements
 def c6(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Available quantity of raw material before purchase
 def c7(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Is an operation executed with the init quantity (before purchase)?
 def c8(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Complete execution of an operation on all required types of resources
 def c9(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Simultaneous operations (sync of resources mandatory)
 def c10(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# End of an operation according to the execution time and start time
 def c11(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Precedence relations between operations of one element
 def c12(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Start time of parent' production
 def c13(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Start time after design validation
 def c14(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Design validation only after parent' validation
 def c15(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Start of any operation only after parent' validation
 def c16(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# No more than one direct predecessor (by resource)
 def c17(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# No more than one direct successor (by resource)
 def c18(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# No operation can be its own successor or predecessor
 def c19(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Total number of operations in a resource (capacity)
 def c20(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Precedence only for operations executed by the resource
 def c21(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Precedence only for operations executed by the resource (other way)
 def c22(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Start operation only after the end of its predecessor (by resource)
 def c23(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Operation setups
 def c24(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Setups for design parameters
 def c25(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# Validation of an element
 def c26(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
+# No double execution on the same type of resources (by operation)
 def c27(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
