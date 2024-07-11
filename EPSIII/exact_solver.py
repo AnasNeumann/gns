@@ -66,7 +66,7 @@ def c2(model: cp_model.CpModel, i: Instance, s: Solution):
         for e in range(i.E_size[p]):
             for o in last_operations(i, p, e):
                 for r in required_resources(i, p, o):
-                    model.Add(s.E_end[p][e] - i.M*s.O_executed[p][o][r] - real_time_scale(i, p, o)*s.O_end[p][o][r] >= -1.0*i.M)
+                    model.Add(s.E_end[p][e] - i.M*s.O_executed[p][o][r] - real_time_scale(i,p,o)*s.O_end[p][o][r] >= -1.0*i.M)
     return model, s
 
 # End of outsourced item
@@ -83,7 +83,7 @@ def c4(model: cp_model.CpModel, i: Instance, s: Solution):
             for o in get_operations_idx(i, p, e):
                 if not i.is_design[p][o]:
                     for r in required_resources(i, p, o):
-                        model.Add(s.E_prod_start[p][e] + i.M*s.O_executed[p][o][r] - real_time_scale(i, p, o)*s.O_start[p][o][r] <= i.M)
+                        model.Add(s.E_prod_start[p][e] + i.M*s.O_executed[p][o][r] - real_time_scale(i,p,o)*s.O_start[p][o][r] <= i.M)
     return model, s
 
 # Subcontract only if possible (known supplier)
@@ -124,7 +124,7 @@ def c8(model: cp_model.CpModel, i: Instance, s: Solution):
         for o in range(i.O_size[p]):
             for r in required_resources(p, o):
                 if not i.finite_capacity[r]:
-                    model.Add(s.O_uses_init_quantity[p][o][r] - s.O_executed[p][o][r] + reverse_scale(real_time_scale(i, p, o), i.M)*s.O_start[p][o][r] >= reverse_scale(i.purchase_time[r], i.M) - 1)
+                    model.Add(s.O_uses_init_quantity[p][o][r] - s.O_executed[p][o][r] + reverse_scale(real_time_scale(i,p,o), i.M)*s.O_start[p][o][r] >= reverse_scale(i.purchase_time[r], i.M) - 1)
     return model, s
 
 # Complete execution of an operation on all required types of resources
@@ -154,22 +154,48 @@ def c10(model: cp_model.CpModel, i: Instance, s: Solution):
 
 # End of an operation according to the execution time and start time
 def c11(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for o in range(i.O_size[p]):
+            for r in required_resources(i, p, o):
+                if i.finite_capacity[r]:
+                    model.Add(real_time_scale(i,p,o)*s.O_end[p][o][r] - real_time_scale(i,p,o)*s.O_start[p][o][r] - i.M*s.O_executed[p][o][r] >= i.execution_time[r][p][o] - i.M)
     return model, s
 
 # Precedence relations between operations of one element
 def c12(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e in range(i.E_size[p]):
+            for o1 in get_operations_idx(i, p, e):
+                for o2 in get_operations_idx(i, p, e):
+                    if o1 != o2 and i.precedence[p][e][o1][o2]:
+                        for r in required_resources(i, p, o1):
+                            for v in required_resources(i, p, o2):
+                                model.Add(real_time_scale(i,p,o1)*s.O_start[p][o1][r] - real_time_scale(i,p,o2)*s.O_end[p][o2][v] - i.M*s.O_executed[p][o1][r] - i.M*s.O_executed[p][o2][v] >= -2*i.M)
     return model, s
 
 # Start time of parent' production
 def c13(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e1 in range(i.E_size[p]):
+            for e2 in range(i.E_size[p]):
+                if e1 != e2 and i.direct_assembly[p][e1][e2]:
+                    model.Add(s.E_prod_start[p][e1] - s.E_end[p][e2] >= 0)
     return model, s
 
 # Start time after design validation
 def c14(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e in range(i.E_size[p]):
+            model.Add(s.E_prod_start[p][e] - s.E_validated[p][e] >= 0)
     return model, s
 
 # Design validation only after parent' validation
 def c15(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e1 in range(i.E_size[p]):
+            for e2 in range(i.E_size[p]):
+                if e1 != e2 and i.direct_assembly[p][e1][e2]:
+                    model.Add(s.validated[p][e2] - s.E_validated[p][e1] >= 0)
     return model, s
 
 # Start of any operation only after parent' validation
