@@ -112,4 +112,40 @@ def project_head(i: Instance, p):
     return -1
 
 def last_operations(i: Instance, p, e):
-    pass # TODO
+    last_ops = []
+    ops = get_operations_idx(i, p, e)
+    for o1 in ops:
+        is_last = True
+        for o2 in ops:
+            if i.precedence[p][e][o2][o1] and o2 != o1:
+                is_last = False
+                break
+        if is_last:
+            last_ops.append(o1)
+    return last_ops
+
+def required_resources(i: Instance, p, o):
+    resources = []
+    for r in range(i.nb_resources):
+        if require(i, p, o, r):
+            resources.append(r)
+    return resources
+
+def is_same(p1, p2, o1, o2):
+    return (p1 == p2) and (o1 == o2)
+
+def get_resource_familly(i: Instance, r):
+    for rf in range(i.nb_resource_types):
+        if i.resource_family[r][rf]:
+            return rf
+    return -1
+
+def real_time_scale(i: Instance, p, o):
+    return 60*i.H if i.in_days[p][o] else 60 if i.in_hours[p][o] else 1
+
+def resources_by_type(i: Instance, rt):
+    resources = []
+    for r in range(i.nb_resources):
+        if i.resource_family[r][rt]
+            resources.append(r)
+    return resources

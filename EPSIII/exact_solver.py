@@ -1,7 +1,7 @@
 import pickle
 import os
 from common import set_memory_limit, load_instance, init_several_1D, init_2D, init_several_2D, init_3D
-from model import Instance, Solution, get_nb_projects, require, project_head
+from model import Instance, Solution, get_nb_projects, require, project_head, last_operations, required_resources, get_operations_idx, is_same, get_resource_familly, resources_by_type, real_time_scale, resources_by_type
 import argparse
 import pandas as pd
 from ortools.sat.python import cp_model
@@ -64,39 +64,92 @@ def c1(model: cp_model.CpModel, i: Instance, s: Solution):
 def c2(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in range(get_nb_projects(i)):
         for e in range(i.E_size[p]):
-            pass # TODO
+            for o in last_operations(i, p, e):
+                for r in required_resources(i, p, o):
+                    model.Add(s.E_end[p][e] - i.M*s.O_executed[p][o][r] - real_time_scale(i, p, o)*s.O_end[p][o][r] >= -1.0*i.M)
     return model, s
 
 # End of outsourced item
 def c3(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e in range(i.E_size[p]):
+            model.Add(s.E_end[p][e] - s.E_prod_start[p][e] - i.M*s.E_outsourced[p][e] >= (i.outsourcing_time[p][e] - i.M))
     return model, s
 
 # Physical start of non-outsourced item
 def c4(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e in range(i.E_size[p]):
+            for o in get_operations_idx(i, p, e):
+                if not i.is_design[p][o]:
+                    for r in required_resources(i, p, o):
+                        model.Add(s.E_prod_start[p][e] + i.M*s.O_executed[p][o][r] - real_time_scale(i, p, o)*s.O_start[p][o][r] <= i.M)
     return model, s
 
 # Subcontract only if possible (known supplier)
 def c5(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e in range(i.E_size[p]):
+            if not i.external[p][e]:
+                model.Add(s.E_outsourced[p][e] <= 0)
     return model, s
 
 # Subcontract a whole branch of elements
 def c6(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e in range(i.E_size[p]):
+            for e2 in range(i.E_size[p]):
+                if e2 != e and i.direct_assembly[p][e][e2]:
+                    model.Add(s.E_outsourced[p][e2] - s.E_outsourced[p][e] >= 0)
     return model, s
 
 # Available quantity of raw material before purchase
 def c7(model: cp_model.CpModel, i: Instance, s: Solution):
+    for r in range(i.nb_resources):
+        if not i.finite_capacity[r]:
+            constraint = cp_model.LinearExpr()
+            for p in range(get_nb_projects(i)):
+                for o in range(i.O_size[p]):
+                    if require(i, p, o, r):
+                        constraint += i.quantity_needed[r][p][o]*s.O_uses_init_quantity[p][o][r]
+            model.Add(constraint <= i.init_quantity[r])
     return model, s
+
+def reverse_scale(val, M):
+    return (1.0 * val)/M
 
 # Is an operation executed with the init quantity (before purchase)?
 def c8(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for o in range(i.O_size[p]):
+            for r in required_resources(p, o):
+                if not i.finite_capacity[r]:
+                    model.Add(s.O_uses_init_quantity[p][o][r] - s.O_executed[p][o][r] + reverse_scale(real_time_scale(i, p, o), i.M)*s.O_start[p][o][r] >= reverse_scale(i.purchase_time[r], i.M) - 1)
     return model, s
 
 # Complete execution of an operation on all required types of resources
 def c9(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e in range(i.E_size[p]):
+            for o in get_operations_idx(i, p, e):
+                for rt in i.nb_resource_types:
+                    if i.resource_type_needed[p][o][rt]:
+                        constraint = cp_model.LinearExpr()
+                        constraint += s.E_outsourced[p][e]
+                        for r in resources_by_type(i, rt):
+                            constraint += s.O_executed[p][o][r]
+                        model.Add(constraint == 1)
     return model, s
 
 # Simultaneous operations (sync of resources mandatory)
 def c10(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for o in range(i.O_size[p]):
+            if i.simultaneous[p][o]:
+                for r in required_resources(i, p, o):
+                    for v in required_resources(i, p, o):
+                        if r != v:
+                            model.Add(s.O_start[p][o][r] - s.O_start[p][o][v] + i.M*s.O_executed[p][o][r] + i.M*s.O_executed[p][o][v] <= 2*i.M)
     return model, s
 
 # End of an operation according to the execution time and start time
