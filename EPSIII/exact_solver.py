@@ -200,22 +200,85 @@ def c15(model: cp_model.CpModel, i: Instance, s: Solution):
 
 # Start of any operation only after parent' validation
 def c16(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e1 in range(i.E_size[p]):
+            for e2 in range(i.E_size[p]):
+                if e1 != e2 and i.direct_assembly[p][e1][e2]:
+                    for o in get_operations_idx(i, p, e2):
+                        for r in required_resources(i, p, o):
+                            model.Add(real_time_scale(i,p,o)*s.O_start[p][o][r] - s.E_validated[p][e1] -i.M*s.O_executed[p][o][r] >= -1*i.M)
     return model, s
 
 # No more than one direct predecessor (by resource)
 def c17(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p1 in range(get_nb_projects(i)):
+        for o1 in range(i.O_size[p1]):
+            for r in required_resources(i,p1,o1):
+                if i.finite_capacity[r]:
+                    need_constraint = False
+                    constraint = cp_model.LinearExpr()
+                    for p2 in range(get_nb_projects(i)):
+                        for o2 in range(i.O_size[p2]):
+                            if not is_same(p1,p2,o1,o2) and require(i,p2,o2,r):
+                                need_constraint = True
+                                constraint += s.precedes[p1][p2][o1][o2][r]
+                    if need_constraint:
+                        model.Add(constraint <= 1)
     return model, s
 
 # No more than one direct successor (by resource)
 def c18(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p1 in range(get_nb_projects(i)):
+        for o1 in range(i.O_size[p1]):
+            for r in required_resources(i,p1,o1):
+                if i.finite_capacity[r]:
+                    need_constraint = False
+                    constraint = cp_model.LinearExpr() 
+                    for p2 in range(get_nb_projects(i)):
+                        for o2 in range(i.O_size[p2]):
+                            if require(i,p2,o2,r):
+                                need_constraint = True
+                                constraint += s.precedes[p2][p1][o2][o1][r]
+                    if need_constraint:
+                        model.Add(constraint <= 1)
     return model, s
 
 # No operation can be its own successor or predecessor
 def c19(model: cp_model.CpModel, i: Instance, s: Solution):
+    for r in range(i.nb_resources):
+        if i.finite_capacity[r]:
+            need_constraint = False
+            constraint = cp_model.LinearExpr() 
+            for p in range(get_nb_projects(i)):
+                for o in range(i.O_size[p]): 
+                    if require(i,p,o):
+                        need_constraint = True
+                        constraint += s.precedes[p][p][o][o][r]
+            if need_constraint:
+                model.Add(constraint == 0)
     return model, s
 
 # Total number of operations in a resource (capacity)
 def c20(model: cp_model.CpModel, i: Instance, s: Solution):
+    for r in range(i.nb_resources):
+        if i.finite_capacity[r]:
+            need_constraint = False
+            constraint = cp_model.LinearExpr() 
+            for p1 in range(get_nb_projects(i)):
+                for o1 in range(i.O_size[p1]): 
+                    if require(i,p1,o1):
+                        for p2 in range(get_nb_projects(i)):
+                            for o2 in range(i.O_size[p2]): 
+                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
+                                    need_constraint = True
+                                    constraint += s.precedes[p1][p2][o1][o2][r]
+            for p in range(get_nb_projects(i)):
+                for o in range(i.O_size[p]): 
+                    if require(i,p,o):
+                        need_constraint = True
+                        constraint += -1.0 * s.O_executed[p][o][r]
+            if need_constraint:
+                model.Add(constraint >= -1)
     return model, s
 
 # Precedence only for operations executed by the resource
