@@ -309,22 +309,74 @@ def c22(model: cp_model.CpModel, i: Instance, s: Solution):
 
 # Start operation only after the end of its predecessor (by resource)
 def c23(model: cp_model.CpModel, i: Instance, s: Solution):
+    for r in range(i.nb_resources):
+        if i.finite_capacity[r]:
+            for p1 in range(get_nb_projects(i)):
+                for o1 in range(i.O_size[p1]): 
+                    if require(i,p1,o1):
+                        for p2 in range(get_nb_projects(i)):
+                            for o2 in range(i.O_size[p2]): 
+                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
+                                    constraint = cp_model.LinearExpr() 
+                                    constraint += real_time_scale(i,p1,o1) * s.O_start[p1][o1][r]
+                                    constraint += -1 * real_time_scale(i,p2,o2) * s.O_end[p2][o2][r]
+                                    constraint += -1 * i.operation_setup[r] * s.O_setup[p1][o1][r]
+                                    for s in range(i.nb_settings):
+                                        constraint += -1 * i.design_setup[r][s] * s.D_setup[p1][o1][r][s]
+                                    constraint += -1 * i.M * s.precedes[p1][p2][o1][o2][r]
+                                    model.Add(constraint >= -1 * i.M)
     return model, s
 
 # Operation setups
 def c24(model: cp_model.CpModel, i: Instance, s: Solution):
+    for r in range(i.nb_resources):
+        if i.finite_capacity[r]:
+            for p1 in range(get_nb_projects(i)):
+                for o1 in range(i.O_size[p1]): 
+                    if require(i,p1,o1):
+                        for p2 in range(get_nb_projects(i)):
+                            for o2 in range(i.O_size[p2]): 
+                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
+                                    weight = 0.0
+                                    for ot in range(i.nb_ops_types):
+                                        weight += 1.0 if i.operation_family[p1][o1][ot] != i.operation_family[p2][o2][ot] else 0.0
+                                    weight = weight / 2.0
+                                    model.Add(weight * s.precedes[p1][p2][o1][o2][r] - s.O_setup[p1][o1][r] <= 0)
     return model, s
 
 # Setups for design parameters
 def c25(model: cp_model.CpModel, i: Instance, s: Solution):
+    for r in range(i.nb_resources):
+        if i.finite_capacity[r]:
+            for p1 in range(get_nb_projects(i)):
+                for o1 in range(i.O_size[p1]): 
+                    if require(i,p1,o1):
+                        for p2 in range(get_nb_projects(i)):
+                            for o2 in range(i.O_size[p2]): 
+                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
+                                    for s in range(i.nb_settings):
+                                        weight = (1.0 * abs(i.design_value[p1][o1][s] - i.design_value[p2][o2][s]))/(i.design_value[p1][o1][s] + i.design_value[p2][o2][s])
+                                        model.Add(weight*s.precedes[p1][p2][o1][o2][r] - s.D_setup[p1][p2][r][s] <= 0)
     return model, s
 
 # Validation of an element
 def c26(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for e in range(i.E_size[p]):
+            for o in get_operations_idx(i,p,e):
+                if i.is_design[p][o]:
+                    for r in required_resources(i,p,o):
+                        model.Add(s.E_validated[p][e] - i.M*s.O_executed[p][o][r] - real_time_scale(i,p,o)*s.O_end[p][o][r] >= -1 * i.M)
     return model, s
 
 # No double execution on the same type of resources (by operation)
 def c27(model: cp_model.CpModel, i: Instance, s: Solution):
+    for p in range(get_nb_projects(i)):
+        for o in range(i.O_size[p]):
+            for r1 in required_resources(i,p,o):
+                for r2 in required_resources(i,p,o):
+                    if r1 != r2 and get_resource_familly(i,r1) == get_resource_familly(i,r2):
+                        model.Add(s.O_executed[p][o][r1] + s.O_executed[p][o][r2] <= 1)
     return model, s
 
 def solve_one(instance: Instance, solution_path):
