@@ -283,10 +283,28 @@ def c20(model: cp_model.CpModel, i: Instance, s: Solution):
 
 # Precedence only for operations executed by the resource
 def c21(model: cp_model.CpModel, i: Instance, s: Solution):
+    for r in range(i.nb_resources):
+        if i.finite_capacity[r]:
+            for p1 in range(get_nb_projects(i)):
+                for o1 in range(i.O_size[p1]): 
+                    if require(i,p1,o1):
+                        for p2 in range(get_nb_projects(i)):
+                            for o2 in range(i.O_size[p2]): 
+                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
+                                    model.Add(s.O_executed[p1][o1][r] - s.precedes[p1][p2][o1][o2][r] >= 0)                     
     return model, s
 
 # Precedence only for operations executed by the resource (other way)
 def c22(model: cp_model.CpModel, i: Instance, s: Solution):
+    for r in range(i.nb_resources):
+        if i.finite_capacity[r]:
+            for p1 in range(get_nb_projects(i)):
+                for o1 in range(i.O_size[p1]): 
+                    if require(i,p1,o1):
+                        for p2 in range(get_nb_projects(i)):
+                            for o2 in range(i.O_size[p2]): 
+                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
+                                    model.Add(s.O_executed[p2][o2][r] - s.precedes[p1][p2][o1][o2][r] >= 0) 
     return model, s
 
 # Start operation only after the end of its predecessor (by resource)
