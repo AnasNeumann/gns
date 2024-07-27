@@ -50,7 +50,7 @@ def init_objective_function(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in range(get_nb_projects(i)):
         for e in range(i.E_size[p]):
             if i.external[p][e]:
-                s.obj.append(s.E_outsourced[p][e] * i.external_cost[p][e] * (1.0 - i.w_makespan))
+                s.obj.append(s.E_outsourced[p][e] * i.external_cost[p][e] * (1 - i.w_makespan))
     model.Minimize(sum(s.obj))
     return model, s
 
@@ -66,7 +66,7 @@ def c2(model: cp_model.CpModel, i: Instance, s: Solution):
         for e in range(i.E_size[p]):
             for o in last_operations(i, p, e):
                 for r in required_resources(i, p, o):
-                    model.Add(s.E_end[p][e] - i.M*s.O_executed[p][o][r] - real_time_scale(i,p,o)*s.O_end[p][o][r] >= -1.0*i.M)
+                    model.Add(s.E_end[p][e] - i.M*s.O_executed[p][o][r] - real_time_scale(i,p,o)*s.O_end[p][o][r] >= -1 * i.M)
     return model, s
 
 # End of outsourced item
@@ -116,7 +116,7 @@ def c7(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
 def reverse_scale(val, M):
-    return (1.0 * val)/M
+    return val/M
 
 # Is an operation executed with the init quantity (before purchase)?
 def c8(model: cp_model.CpModel, i: Instance, s: Solution):
@@ -206,7 +206,7 @@ def c16(model: cp_model.CpModel, i: Instance, s: Solution):
                 if e1 != e2 and i.direct_assembly[p][e1][e2]:
                     for o in get_operations_idx(i, p, e2):
                         for r in required_resources(i, p, o):
-                            model.Add(real_time_scale(i,p,o)*s.O_start[p][o][r] - s.E_validated[p][e1] -i.M*s.O_executed[p][o][r] >= -1*i.M)
+                            model.Add(real_time_scale(i,p,o)*s.O_start[p][o][r] - s.E_validated[p][e1] -i.M*s.O_executed[p][o][r] >= -1 * i.M)
     return model, s
 
 # No more than one direct predecessor (by resource)
@@ -276,7 +276,7 @@ def c20(model: cp_model.CpModel, i: Instance, s: Solution):
                 for o in range(i.O_size[p]): 
                     if require(i,p,o):
                         need_constraint = True
-                        constraint += -1.0 * s.O_executed[p][o][r]
+                        constraint += -1 * s.O_executed[p][o][r]
             if need_constraint:
                 model.Add(constraint >= -1)
     return model, s
@@ -339,7 +339,7 @@ def c24(model: cp_model.CpModel, i: Instance, s: Solution):
                                 if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
                                     weight = 0.0
                                     for ot in range(i.nb_ops_types):
-                                        weight += 1.0 if i.operation_family[p1][o1][ot] != i.operation_family[p2][o2][ot] else 0.0
+                                        weight += 1 if i.operation_family[p1][o1][ot] != i.operation_family[p2][o2][ot] else 0.0
                                     weight = weight / 2.0
                                     model.Add(weight * s.precedes[p1][p2][o1][o2][r] - s.O_setup[p1][o1][r] <= 0)
     return model, s
@@ -355,7 +355,7 @@ def c25(model: cp_model.CpModel, i: Instance, s: Solution):
                             for o2 in range(i.O_size[p2]): 
                                 if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
                                     for s in range(i.nb_settings):
-                                        weight = (1.0 * abs(i.design_value[p1][o1][s] - i.design_value[p2][o2][s]))/(i.design_value[p1][o1][s] + i.design_value[p2][o2][s])
+                                        weight = (abs(i.design_value[p1][o1][s] - i.design_value[p2][o2][s]))/(i.design_value[p1][o1][s] + i.design_value[p2][o2][s])
                                         model.Add(weight*s.precedes[p1][p2][o1][o2][r] - s.D_setup[p1][p2][r][s] <= 0)
     return model, s
 
