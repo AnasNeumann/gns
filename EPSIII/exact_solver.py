@@ -380,11 +380,11 @@ def solve_one(instance: Instance, solution_path):
     status = solver.Solve(model)
     computing_time = systime.time()-start_time
     if status == cp_model.OPTIMAL:
-        solutions_df = pd.DataFrame({'index': instance.id, 'value': solver.Value(solver.ObjectiveValue()), 'status': 'optimal', 'computing_time': computing_time, 'max_time': MAX_COMPUTING_HOURS, 'max_memory': MAX_RAM})
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [solver.ObjectiveValue()/100], 'status': ['optimal'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
     elif status == cp_model.FEASIBLE:
-        solutions_df = pd.DataFrame({'index': instance.id, 'value': solver.Value(solver.ObjectiveValue()), 'status': 'feasible', 'computing_time': computing_time, 'max_time': MAX_COMPUTING_HOURS, 'max_memory': MAX_RAM})
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [solver.ObjectiveValue()/100], 'status': ['feasible'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
     else:
-        solutions_df = pd.DataFrame({'index': instance.id, 'value': -1, 'status': 'failure', 'computing_time': computing_time, 'max_time': MAX_COMPUTING_HOURS, 'max_memory': MAX_RAM})
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [-1], 'status': ['failure'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
     print(solutions_df)
     solutions_df.to_csv(solution_path, index=False)
 
