@@ -146,6 +146,6 @@ def real_time_scale(i: Instance, p, o):
 def resources_by_type(i: Instance, rt):
     resources = []
     for r in range(i.nb_resources):
-        if i.resource_family[r][rt]
+        if i.resource_family[r][rt]:
             resources.append(r)
     return resources

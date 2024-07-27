@@ -8,13 +8,13 @@ from ortools.sat.python import cp_model
 import time as systime
 
 MAX_COMPUTING_HOURS = 3
-MAX_RAM = 13
+MAX_RAM = 6
 
-def init_vars(model: cp_model.CpModel, i: Instance, s: Solution):
+def init_vars(model: cp_model.CpModel, i: Instance):
     s = Solution()
     nb_projects = get_nb_projects(i)
     elts_per_project = i.E_size[0]
-    s.E_start = [[model.New(0, i.M, f'E_start_{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
+    s.E_start = [[model.NewIntVar(0, i.M, f'E_start_{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
     s.E_outsourced = [[model.NewBoolVar(f'E_outsource{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
     s.E_prod_start = [[model.NewIntVar(0, i.M, f'E_prod_start{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
     s.E_end = [[model.NewIntVar(0, i.M, f'E_end{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
@@ -402,11 +402,11 @@ def solve_one(instance: Instance, solution_path):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII exact solver")
     parser.add_argument("--size", help="Size of the solved instance", required=True)
-    parser.add_argument("--number", help="Number of the solved instance", required=True)
+    parser.add_argument("--id", help="Id of the solved instance", required=True)
     args = parser.parse_args()
-    INSTANCE_PATH = './instances/test/'+args.size+'/instance_'+args.number+'.pkl'
-    SOLUTION_PATH = './instances/test/'+args.size+'/solution_'+args.number+'.csv'
-    set_memory_limit(MAX_RAM)
+    INSTANCE_PATH = './instances/test/'+args.size+'/instance_'+args.id+'.pkl'
+    SOLUTION_PATH = './instances/test/'+args.size+'/solution_'+args.id+'.csv'
+    print("Loading "+INSTANCE_PATH+"...")
     instance = load_instance(INSTANCE_PATH)
     print("===* START SOLVING *===")
     solve_one(instance, SOLUTION_PATH)

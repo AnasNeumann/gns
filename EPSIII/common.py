@@ -25,10 +25,10 @@ def init_1D(a, default_value):
     return [default_value] * a
 
 def init_2D(a, b, default_value):
-    return [[default_value] * a for _ in range(b)]
+    return [[default_value for _ in range(b)] for _ in range(a)]
 
 def init_3D(a, b, c, default_value):
-    return [[[default_value] * a for _ in range(b)] for _ in range(c)]
+    return [[[default_value for _ in range(c)] for _ in range(b)] for _ in range(a)]
 
 def init_several_1D(a, default_value, nb):
     return (init_1D(a, default_value) for _ in range(nb))
