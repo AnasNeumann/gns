@@ -34,7 +34,7 @@ def init_vars(model: cp_model.CpModel, i: Instance):
                     s.O_setup[p][o][r] = model.NewBoolVar(f'O_setup{p}_{o}_{r}')
                     s.O_end[p][o][r] = model.NewIntVar(0, i.M, f'O_end{p}_{o}_{r}')
                     s.O_executed[p][o][r] = model.NewBoolVar(f'O_executed{p}_{o}_{r}')
-                    s.D_setup[p][o][r] = [model.NewBoolVar(f'D_setup{p}_{o}_{r}_{s}') for s in range(i.nb_settings)]
+                    s.D_setup[p][o][r] = [model.NewBoolVar(f'D_setup{p}_{o}_{r}_{c}') for c in range(i.nb_settings)]
         for p2 in range(nb_projects):
             nb_ops2 = i.O_size[p2]
             s.precedes[p][p2] = init_3D(nb_ops, nb_ops2, i.nb_resources, [None])
@@ -46,11 +46,12 @@ def init_vars(model: cp_model.CpModel, i: Instance):
     return model, s
 
 def init_objective_function(model: cp_model.CpModel, i: Instance, s: Solution):
-    s.obj.append(s.Cmax * i.w_makespan)
+    weight = int(100 * i.w_makespan)
+    s.obj.append(s.Cmax * weight)
     for p in range(get_nb_projects(i)):
         for e in range(i.E_size[p]):
             if i.external[p][e]:
-                s.obj.append(s.E_outsourced[p][e] * i.external_cost[p][e] * (1 - i.w_makespan))
+                s.obj.append(s.E_outsourced[p][e] * i.external_cost[p][e] * (100 - weight))
     model.Minimize(sum(s.obj))
     return model, s
 
@@ -108,24 +109,22 @@ def c6(model: cp_model.CpModel, i: Instance, s: Solution):
 def c7(model: cp_model.CpModel, i: Instance, s: Solution):
     for r in range(i.nb_resources):
         if not i.finite_capacity[r]:
-            constraint = cp_model.LinearExpr()
+            terms = []
             for p in range(get_nb_projects(i)):
                 for o in range(i.O_size[p]):
                     if require(i, p, o, r):
-                        constraint += i.quantity_needed[r][p][o]*s.O_uses_init_quantity[p][o][r]
-            model.Add(constraint <= i.init_quantity[r])
+                        terms.append(i.quantity_needed[r][p][o]*s.O_uses_init_quantity[p][o][r])
+            if len(terms)>0:
+                model.Add(sum(terms) <= i.init_quantity[r])
     return model, s
-
-def reverse_scale(val, M):
-    return val/M
 
 # Is an operation executed with the init quantity (before purchase)?
 def c8(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in range(get_nb_projects(i)):
         for o in range(i.O_size[p]):
-            for r in required_resources(p, o):
+            for r in required_resources(i, p, o):
                 if not i.finite_capacity[r]:
-                    model.Add(s.O_uses_init_quantity[p][o][r] - s.O_executed[p][o][r] + reverse_scale(real_time_scale(i,p,o), i.M)*s.O_start[p][o][r] >= reverse_scale(i.purchase_time[r], i.M) - 1)
+                    model.Add(i.M*s.O_uses_init_quantity[p][o][r] - s.O_executed[p][o][r] + real_time_scale(i,p,o)*s.O_start[p][o][r] >=  i.purchase_time[r] - 1)
     return model, s
 
 # Complete execution of an operation on all required types of resources
@@ -134,13 +133,12 @@ def c9(model: cp_model.CpModel, i: Instance, s: Solution):
         for e in range(i.E_size[p]):
             start, end = get_operations_idx(i, p, e)
             for o in range(start, end):
-                for rt in i.nb_resource_types:
+                for rt in range(i.nb_resource_types):
                     if i.resource_type_needed[p][o][rt]:
-                        constraint = cp_model.LinearExpr()
-                        constraint += s.E_outsourced[p][e]
+                        terms = []
                         for r in resources_by_type(i, rt):
-                            constraint += s.O_executed[p][o][r]
-                        model.Add(constraint == 1)
+                            terms.append(s.O_executed[p][o][r])
+                        model.Add(s.E_outsourced[p][e] + sum(terms) == 1)
     return model, s
 
 # Simultaneous operations (sync of resources mandatory)
@@ -198,7 +196,7 @@ def c15(model: cp_model.CpModel, i: Instance, s: Solution):
         for e1 in range(i.E_size[p]):
             for e2 in range(i.E_size[p]):
                 if e1 != e2 and i.direct_assembly[p][e1][e2]:
-                    model.Add(s.validated[p][e2] - s.E_validated[p][e1] >= 0)
+                    model.Add(s.E_validated[p][e2] - s.E_validated[p][e1] >= 0)
     return model, s
 
 # Start of any operation only after parent' validation
@@ -219,15 +217,13 @@ def c17(model: cp_model.CpModel, i: Instance, s: Solution):
         for o1 in range(i.O_size[p1]):
             for r in required_resources(i,p1,o1):
                 if i.finite_capacity[r]:
-                    need_constraint = False
-                    constraint = cp_model.LinearExpr()
+                    terms = []
                     for p2 in range(get_nb_projects(i)):
                         for o2 in range(i.O_size[p2]):
                             if not is_same(p1,p2,o1,o2) and require(i,p2,o2,r):
-                                need_constraint = True
-                                constraint += s.precedes[p1][p2][o1][o2][r]
-                    if need_constraint:
-                        model.Add(constraint <= 1)
+                                terms.append(s.precedes[p1][p2][o1][o2][r])
+                    if len(terms)>0:
+                        model.Add(sum(terms) <= 1)
     return model, s
 
 # No more than one direct successor (by resource)
@@ -236,53 +232,47 @@ def c18(model: cp_model.CpModel, i: Instance, s: Solution):
         for o1 in range(i.O_size[p1]):
             for r in required_resources(i,p1,o1):
                 if i.finite_capacity[r]:
-                    need_constraint = False
-                    constraint = cp_model.LinearExpr() 
+                    terms = []
                     for p2 in range(get_nb_projects(i)):
                         for o2 in range(i.O_size[p2]):
                             if require(i,p2,o2,r):
-                                need_constraint = True
-                                constraint += s.precedes[p2][p1][o2][o1][r]
-                    if need_constraint:
-                        model.Add(constraint <= 1)
+                                terms.append(s.precedes[p2][p1][o2][o1][r])
+                    if len(terms)>0:
+                        model.Add(sum(terms) <= 1)
     return model, s
 
 # No operation can be its own successor or predecessor
 def c19(model: cp_model.CpModel, i: Instance, s: Solution):
     for r in range(i.nb_resources):
         if i.finite_capacity[r]:
-            need_constraint = False
-            constraint = cp_model.LinearExpr() 
+            terms = []
             for p in range(get_nb_projects(i)):
                 for o in range(i.O_size[p]): 
-                    if require(i,p,o):
-                        need_constraint = True
-                        constraint += s.precedes[p][p][o][o][r]
-            if need_constraint:
-                model.Add(constraint == 0)
+                    if require(i,p,o,r):
+                        terms.append(s.precedes[p][p][o][o][r])
+            if len(terms)>0:
+                model.Add(sum(terms) == 0)
     return model, s
 
 # Total number of operations in a resource (capacity)
 def c20(model: cp_model.CpModel, i: Instance, s: Solution):
     for r in range(i.nb_resources):
         if i.finite_capacity[r]:
-            need_constraint = False
-            constraint = cp_model.LinearExpr() 
+            terms_pos = []
+            terms_neg = []
             for p1 in range(get_nb_projects(i)):
                 for o1 in range(i.O_size[p1]): 
-                    if require(i,p1,o1):
+                    if require(i,p1,o1,r):
                         for p2 in range(get_nb_projects(i)):
                             for o2 in range(i.O_size[p2]): 
-                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
-                                    need_constraint = True
-                                    constraint += s.precedes[p1][p2][o1][o2][r]
+                                if require(i,p2,o2,r) and not is_same(p1,p2,o1,o2):
+                                    terms_pos.append(s.precedes[p1][p2][o1][o2][r])
             for p in range(get_nb_projects(i)):
                 for o in range(i.O_size[p]): 
-                    if require(i,p,o):
-                        need_constraint = True
-                        constraint += -1 * s.O_executed[p][o][r]
-            if need_constraint:
-                model.Add(constraint >= -1)
+                    if require(i,p,o,r):
+                        terms_neg.append(s.O_executed[p][o][r])
+            if len(terms_pos)>0 or len(terms_neg)>0:
+                model.Add(sum(terms_pos) - sum(terms_neg)>= -1)
     return model, s
 
 # Precedence only for operations executed by the resource
@@ -291,10 +281,10 @@ def c21(model: cp_model.CpModel, i: Instance, s: Solution):
         if i.finite_capacity[r]:
             for p1 in range(get_nb_projects(i)):
                 for o1 in range(i.O_size[p1]): 
-                    if require(i,p1,o1):
+                    if require(i,p1,o1,r):
                         for p2 in range(get_nb_projects(i)):
                             for o2 in range(i.O_size[p2]): 
-                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
+                                if require(i,p2,o2,r) and not is_same(p1,p2,o1,o2):
                                     model.Add(s.O_executed[p1][o1][r] - s.precedes[p1][p2][o1][o2][r] >= 0)                     
     return model, s
 
@@ -304,10 +294,10 @@ def c22(model: cp_model.CpModel, i: Instance, s: Solution):
         if i.finite_capacity[r]:
             for p1 in range(get_nb_projects(i)):
                 for o1 in range(i.O_size[p1]): 
-                    if require(i,p1,o1):
+                    if require(i,p1,o1,r):
                         for p2 in range(get_nb_projects(i)):
                             for o2 in range(i.O_size[p2]): 
-                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
+                                if require(i,p2,o2,r) and not is_same(p1,p2,o1,o2):
                                     model.Add(s.O_executed[p2][o2][r] - s.precedes[p1][p2][o1][o2][r] >= 0) 
     return model, s
 
@@ -317,18 +307,14 @@ def c23(model: cp_model.CpModel, i: Instance, s: Solution):
         if i.finite_capacity[r]:
             for p1 in range(get_nb_projects(i)):
                 for o1 in range(i.O_size[p1]): 
-                    if require(i,p1,o1):
+                    if require(i,p1,o1,r):
                         for p2 in range(get_nb_projects(i)):
                             for o2 in range(i.O_size[p2]): 
-                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
-                                    constraint = cp_model.LinearExpr() 
-                                    constraint += real_time_scale(i,p1,o1) * s.O_start[p1][o1][r]
-                                    constraint += -1 * real_time_scale(i,p2,o2) * s.O_end[p2][o2][r]
-                                    constraint += -1 * i.operation_setup[r] * s.O_setup[p1][o1][r]
-                                    for s in range(i.nb_settings):
-                                        constraint += -1 * i.design_setup[r][s] * s.D_setup[p1][o1][r][s]
-                                    constraint += -1 * i.M * s.precedes[p1][p2][o1][o2][r]
-                                    model.Add(constraint >= -1 * i.M)
+                                if require(i,p2,o2,r) and not is_same(p1,p2,o1,o2):
+                                    terms = []
+                                    for c in range(i.nb_settings):
+                                        terms.append(i.design_setup[r][c] * s.D_setup[p1][o1][r][c])
+                                    model.Add(real_time_scale(i,p1,o1)*s.O_start[p1][o1][r] -sum(terms) - real_time_scale(i,p2,o2) * s.O_end[p2][o2][r] - i.operation_setup[r]*s.O_setup[p1][o1][r] - i.M*s.precedes[p1][p2][o1][o2][r]>= -1 * i.M)
     return model, s
 
 # Operation setups
@@ -337,15 +323,14 @@ def c24(model: cp_model.CpModel, i: Instance, s: Solution):
         if i.finite_capacity[r]:
             for p1 in range(get_nb_projects(i)):
                 for o1 in range(i.O_size[p1]): 
-                    if require(i,p1,o1):
+                    if require(i,p1,o1,r):
                         for p2 in range(get_nb_projects(i)):
                             for o2 in range(i.O_size[p2]): 
-                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
-                                    weight = 0.0
+                                if require(i,p2,o2,r) and not is_same(p1,p2,o1,o2):
+                                    weight = 0
                                     for ot in range(i.nb_ops_types):
-                                        weight += 1 if i.operation_family[p1][o1][ot] != i.operation_family[p2][o2][ot] else 0.0
-                                    weight = weight / 2.0
-                                    model.Add(weight * s.precedes[p1][p2][o1][o2][r] - s.O_setup[p1][o1][r] <= 0)
+                                        weight += 1 if i.operation_family[p1][o1][ot] != i.operation_family[p2][o2][ot] else 0
+                                    model.Add(weight*s.precedes[p1][p2][o1][o2][r] - 2*s.O_setup[p1][o1][r] <= 0)
     return model, s
 
 # Setups for design parameters
@@ -354,13 +339,12 @@ def c25(model: cp_model.CpModel, i: Instance, s: Solution):
         if i.finite_capacity[r]:
             for p1 in range(get_nb_projects(i)):
                 for o1 in range(i.O_size[p1]): 
-                    if require(i,p1,o1):
+                    if require(i,p1,o1,r):
                         for p2 in range(get_nb_projects(i)):
                             for o2 in range(i.O_size[p2]): 
-                                if require(i,p2,o2) and not is_same(p1,p2,o1,o2):
-                                    for s in range(i.nb_settings):
-                                        weight = (abs(i.design_value[p1][o1][s] - i.design_value[p2][o2][s]))/(i.design_value[p1][o1][s] + i.design_value[p2][o2][s])
-                                        model.Add(weight*s.precedes[p1][p2][o1][o2][r] - s.D_setup[p1][p2][r][s] <= 0)
+                                if require(i,p2,o2,r) and not is_same(p1,p2,o1,o2):
+                                    for c in range(i.nb_settings):
+                                        model.Add(abs(i.design_value[p1][o1][c]-i.design_value[p2][o2][c])*s.precedes[p1][p2][o1][o2][r] - (i.design_value[p1][o1][c]+i.design_value[p2][o2][c])*s.D_setup[p1][o1][r][c] <= 0)
     return model, s
 
 # Validation of an element
