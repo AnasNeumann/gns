@@ -113,10 +113,10 @@ def project_head(i: Instance, p):
 
 def last_operations(i: Instance, p, e):
     last_ops = []
-    ops = get_operations_idx(i, p, e)
-    for o1 in ops:
+    start, end = get_operations_idx(i, p, e)
+    for o1 in range(start, end):
         is_last = True
-        for o2 in ops:
+        for o2 in range(start, end):
             if i.precedence[p][e][o2][o1] and o2 != o1:
                 is_last = False
                 break

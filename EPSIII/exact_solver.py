@@ -80,7 +80,8 @@ def c3(model: cp_model.CpModel, i: Instance, s: Solution):
 def c4(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in range(get_nb_projects(i)):
         for e in range(i.E_size[p]):
-            for o in get_operations_idx(i, p, e):
+            start, end = get_operations_idx(i, p, e)
+            for o in range(start, end):
                 if not i.is_design[p][o]:
                     for r in required_resources(i, p, o):
                         model.Add(s.E_prod_start[p][e] + i.M*s.O_executed[p][o][r] - real_time_scale(i,p,o)*s.O_start[p][o][r] <= i.M)
@@ -131,7 +132,8 @@ def c8(model: cp_model.CpModel, i: Instance, s: Solution):
 def c9(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in range(get_nb_projects(i)):
         for e in range(i.E_size[p]):
-            for o in get_operations_idx(i, p, e):
+            start, end = get_operations_idx(i, p, e)
+            for o in range(start, end):
                 for rt in i.nb_resource_types:
                     if i.resource_type_needed[p][o][rt]:
                         constraint = cp_model.LinearExpr()
@@ -165,8 +167,9 @@ def c11(model: cp_model.CpModel, i: Instance, s: Solution):
 def c12(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in range(get_nb_projects(i)):
         for e in range(i.E_size[p]):
-            for o1 in get_operations_idx(i, p, e):
-                for o2 in get_operations_idx(i, p, e):
+            start, end = get_operations_idx(i, p, e)
+            for o1 in range(start, end):
+                for o2 in range(start, end):
                     if o1 != o2 and i.precedence[p][e][o1][o2]:
                         for r in required_resources(i, p, o1):
                             for v in required_resources(i, p, o2):
@@ -204,7 +207,8 @@ def c16(model: cp_model.CpModel, i: Instance, s: Solution):
         for e1 in range(i.E_size[p]):
             for e2 in range(i.E_size[p]):
                 if e1 != e2 and i.direct_assembly[p][e1][e2]:
-                    for o in get_operations_idx(i, p, e2):
+                    start, end = get_operations_idx(i, p, e2)
+                    for o in range(start, end):
                         for r in required_resources(i, p, o):
                             model.Add(real_time_scale(i,p,o)*s.O_start[p][o][r] - s.E_validated[p][e1] -i.M*s.O_executed[p][o][r] >= -1 * i.M)
     return model, s
@@ -363,7 +367,8 @@ def c25(model: cp_model.CpModel, i: Instance, s: Solution):
 def c26(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in range(get_nb_projects(i)):
         for e in range(i.E_size[p]):
-            for o in get_operations_idx(i,p,e):
+            start, end = get_operations_idx(i, p, e)
+            for o in range(start, end):
                 if i.is_design[p][o]:
                     for r in required_resources(i,p,o):
                         model.Add(s.E_validated[p][e] - i.M*s.O_executed[p][o][r] - real_time_scale(i,p,o)*s.O_end[p][o][r] >= -1 * i.M)
