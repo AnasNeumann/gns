@@ -1,3 +1,5 @@
+from torch_geometric.data import HeteroData
+
 class Solution:
     def __init__(self):
         # Elements (p, e)
@@ -65,87 +67,90 @@ class Instance:
         self.design_value = kwargs.get('design_value', []) #p, o, s
         self.operations_by_element = kwargs.get('operations_by_element', []) #p, e, o
         self.precedence = kwargs.get('precedence', []) #p, e, o1, o2
+    
+    def get_name(self):
+        return self.size+"_"+str(self.id)
 
-def get_name(i: Instance):
-    return i.size+"_"+str(i.id)
+    def get_direct_children(self, p, e):
+        children = []
+        for e2 in range(self.E_size[p]):
+            if self.direct_assembly[p][e][e2]:
+                children.append(e2)
+        return children
 
-def get_direct_children(i: Instance, p, e):
-    children = []
-    for e2 in range(i.E_size[p]):
-        if i.direct_assembly[p][e][e2]:
-            children.append(e2)
-    return children
+    def get_direct_parent(self, p, e):
+        for e2 in range(self.E_size[p]):
+            if self.direct_assembly[p][e2][e]:
+                return e2
+        return -1
 
-def get_direct_parent(i: Instance, p, e):
-    for e2 in range(i.E_size[p]):
-        if i.direct_assembly[p][e2][e]:
-            return e2
-    return -1
+    def get_operations_idx(self, p, e):
+        start = 0
+        for e2 in range(0, e):
+            start = start + self.EO_size[p][e2]    
+        return start, start+self.EO_size[p][e]
 
-def get_operations_idx(i: Instance, p, e):
-    start = 0
-    for e2 in range(0, e):
-       start = start + i.EO_size[p][e2]    
-    return start, start+i.EO_size[p][e]
+    def require(self, p, o, r):
+        for rt in range(self.nb_resource_types):
+            if self.resource_family[r][rt]:
+                return self.resource_type_needed[p][o][rt]
+        return False
 
-def require(i: Instance, p, o, r):
-    for rt in range(i.nb_resource_types):
-        if i.resource_family[r][rt]:
-            return i.resource_type_needed[p][o][rt]
-    return False
+    def real_time_scale(self, p, o):
+        return 60*self.H if self.in_days[p][o] else 60 if self.in_hours[p][o] else 1
 
-def real_time_scale(i: Instance, p, o):
-    return 60*i.H if i.in_days[p][o] else 60 if i.in_hours[p][o] else 1
+    def get_nb_projects(self):
+        return len(self.E_size)
 
-def get_nb_projects(i: Instance):
-    return len(i.E_size)
+    def project_head(self, p):
+        for e in range(self.E_size[p]):
+            is_head = True
+            for e2 in range(self.E_size[p]):
+                if e2 != e and self.assembly[p][e2][e]:
+                    is_head = False
+                    break
+            if(is_head):
+                return e
+        return -1
 
-def project_head(i: Instance, p):
-    for e in range(i.E_size[p]):
-        is_head = True
-        for e2 in range(i.E_size[p]):
-            if e2 != e and i.assembly[p][e2][e]:
-                is_head = False
-                break
-        if(is_head):
-            return e
-    return -1
+    def last_operations(self, p, e):
+        last_ops = []
+        start, end = self.get_operations_idx(p, e)
+        for o1 in range(start, end):
+            is_last = True
+            for o2 in range(start, end):
+                if self.precedence[p][e][o2][o1] and o2 != o1:
+                    is_last = False
+                    break
+            if is_last:
+                last_ops.append(o1)
+        return last_ops
 
-def last_operations(i: Instance, p, e):
-    last_ops = []
-    start, end = get_operations_idx(i, p, e)
-    for o1 in range(start, end):
-        is_last = True
-        for o2 in range(start, end):
-            if i.precedence[p][e][o2][o1] and o2 != o1:
-                is_last = False
-                break
-        if is_last:
-            last_ops.append(o1)
-    return last_ops
+    def required_resources(self, p, o):
+        resources = []
+        for r in range(self.nb_resources):
+            if self.require(p, o, r):
+                resources.append(r)
+        return resources
 
-def required_resources(i: Instance, p, o):
-    resources = []
-    for r in range(i.nb_resources):
-        if require(i, p, o, r):
-            resources.append(r)
-    return resources
+    def is_same(p1, p2, o1, o2):
+        return (p1 == p2) and (o1 == o2)
 
-def is_same(p1, p2, o1, o2):
-    return (p1 == p2) and (o1 == o2)
+    def get_resource_familly(self, r):
+        for rf in range(self.nb_resource_types):
+            if self.resource_family[r][rf]:
+                return rf
+        return -1
 
-def get_resource_familly(i: Instance, r):
-    for rf in range(i.nb_resource_types):
-        if i.resource_family[r][rf]:
-            return rf
-    return -1
+    def real_time_scale(self, p, o):
+        return 60*self.H if self.in_days[p][o] else 60 if self.in_hours[p][o] else 1
 
-def real_time_scale(i: Instance, p, o):
-    return 60*i.H if i.in_days[p][o] else 60 if i.in_hours[p][o] else 1
-
-def resources_by_type(i: Instance, rt):
-    resources = []
-    for r in range(i.nb_resources):
-        if i.resource_family[r][rt]:
-            resources.append(r)
-    return resources
+    def resources_by_type(self, rt):
+        resources = []
+        for r in range(self.nb_resources):
+            if self.resource_family[r][rt]:
+                resources.append(r)
+        return resources
+    
+class GraphInstance(HeteroData):
+    pass
