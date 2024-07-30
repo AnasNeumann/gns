@@ -133,7 +133,7 @@ class Instance:
                 resources.append(r)
         return resources
 
-    def is_same(p1, p2, o1, o2):
+    def is_same(self, p1, p2, o1, o2):
         return (p1 == p2) and (o1 == o2)
 
     def get_resource_familly(self, r):
