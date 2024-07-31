@@ -1,5 +1,10 @@
 from torch_geometric.data import HeteroData
+import torch
+import copy
 
+# =====================================================
+# =*= SOLUTION DATA STRUCTURE =*=
+# =====================================================
 class Solution:
     def __init__(self):
         # Elements (p, e)
@@ -14,6 +19,9 @@ class Solution:
         self.Cmax = -1
         self.obj = []
 
+# =====================================================
+# =*= INSTANCE DATA STRUCTURE =*=
+# =====================================================
 class Instance:
     def __init__(self, size, id, w_makespan, H, **kwargs):
         self.id = id
@@ -69,7 +77,7 @@ class Instance:
         self.precedence = kwargs.get('precedence', []) #p, e, o1, o2
     
     def get_name(self):
-        return self.size+"_"+str(self.id)
+        return self.size+'_'+str(self.id)
 
     def get_direct_children(self, p, e):
         children = []
@@ -151,6 +159,182 @@ class Instance:
             if self.resource_family[r][rt]:
                 resources.append(r)
         return resources
-    
+
+# =====================================================
+# =*= HYPER-GRAPH DATA STRUCTURE =*=
+# =====================================================
+class State:
+    def __init__(self, items, operations, resources, materials, need_for_materials, need_for_resources, operation_assembly, assembly, precedences, same_types):
+        self.items = copy.deepcopy(items)
+        self.operations = copy.deepcopy(operations)
+        self.resources = copy.deepcopy(resources)
+        self.materials = copy.deepcopy(materials)
+        self.need_for_resources = copy.deepcopy(need_for_resources)
+        self.need_for_materials = copy.deepcopy(need_for_materials)
+        self.operation_assembly = operation_assembly
+        self.assembly = assembly
+        self.precedences = precedences
+        self.same_types = same_types
+
 class GraphInstance(HeteroData):
-    pass
+    def __init__(self):
+        super()
+        self.operations_g2i = []
+        self.items_g2i = []
+        self.resources_g2i = []
+        self.materials_g2i = []
+        self.current_operation_type = []
+        self.current_design_value = []
+        self.features = {
+            'operation': {
+                'physical': 0,
+                'sync': 1,
+                'timescale_minutes': 2,
+                'timescale_hours': 3,
+                'timescale_days': 4,
+                'direct_successors': 5,
+                'total_successors': 6,
+                'remaining_time': 7,
+                'remaining_resources': 8,
+                'outsourced': 9,
+                'available_time': 10,
+                'end_time': 11
+            }, 'resource': {
+                'utilization_ratio': 0,
+                'available_time': 1,
+                'executed_operations': 2,
+                'remaining_operations': 3,
+                'similar_resources': 4
+            }, 'material': {
+                'quantity': 0,
+                'time_before_arrival': 1,
+                'remaining_demand': 2
+            }, 'item': {
+                'head': 0,
+                'outsourced_yet': 1,
+                'outsourced': 2,
+                'outsourcing_cost': 3,
+                'outsourcing_time': 4,
+                'deadline': 5,
+                'remaining_physical_time': 5,
+                'remaining_design_time': 6,
+                'parents': 7,
+                'children': 8,
+                'parents_physical_time': 9,
+                'children_design_time': 10,
+                'start_time': 11,
+                'end_time': 12
+            }, 'need_for_resources': {
+                'status': 0,
+                'basic_processing_time': 1,
+                'current_processing_time': 2,
+                'start_time': 3,
+                'end_time': 4
+            }, 'need_for_materials': {
+                'status': 0,
+                'execution_time': 1,
+                'quantity_needed': 2
+            }
+        }
+
+    def build_from_instance(self, instance: Instance):
+        # TODO translate an instance into a graph structure
+        pass
+
+    def add_node(self, type, features):
+        self[type].x = torch.cat([self[type].x, features], dim=0) if type in self.node_types else features
+
+    def add_edge(self, node_1, relation, node_2, features):
+        self[node_1, relation, node_2].edge_index = torch.cat([self[node_1, relation, node_2].edge_index, features], dim=1) if (node_1, relation, node_2) in self.edge_types else features
+    
+    def precedences(self):
+        return self['operation', 'precedes', 'operation'].edge_index
+    
+    def item_assembly(self):
+        return self['item', 'parent', 'item'].edge_index
+    
+    def operation_assembly(self):
+        return self['item', 'has', 'operation'].edge_index
+    
+    def need_for_resources(self):
+        return self['operation', 'needs_res', 'resource'].edge_index
+    
+    def need_for_materials(self):
+        return self['operation', 'needs_mat', 'material'].edge_index
+    
+    def same_types(self):
+        return self['resource', 'same', 'resource'].edge_index
+    
+    def operations(self):
+        return self['operation'].x
+    
+    def items(self):
+        return self['item'].x
+    
+    def resources(self):
+        return self['resource'].x
+    
+    def materials(self):
+        return self['material'].x
+
+    def operation(self, id, feature):
+        return self['operation'].x[id][self.features['operation'][feature]].item()
+
+    def material(self, id, feature):
+        return self['material'].x[id][self.features['material'][feature]].item()
+    
+    def resource(self, id, feature):
+        return self['resource'].x[id][self.features['resource'][feature]].item()
+    
+    def item(self, id, feature):
+        return self['item'].x[id][self.features['item'][feature]].item()
+    
+    def update_operation(self, id, updates):
+        for feature, value in updates:
+            self['operation'].x[id][self.features['operation'][feature]] = value
+        
+    def update_resource(self, id, updates):
+        for feature, value in updates:
+            self['resource'].x[id][self.features['resource'][feature]] = value
+    
+    def update_material(self, id, updates):
+        for feature, value in updates:
+            self['material'].x[id][self.features['material'][feature]] = value
+    
+    def update_item(self, id, updates):
+        for feature, value in updates:
+            self['item'].x[id][self.features['item'][feature]] = value
+
+    def update_operation(self, id, updates):
+        for feature, value in updates:
+            self['operation'].x[id][self.features['operation'][feature]] = value
+
+    def update_need_for_material(self, operation_id, material_id, updates):
+        key = (operation_id, 'needs_mat', material_id)
+        idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == material_id)
+        for feature, value in updates:
+            self[key].edge_attr[idx, self.features['need_for_materials'][feature]] = value
+
+    def update_need_for_resources(self, operation_id, resource_id, updates):
+        key = (operation_id, 'needs_res', resource_id)
+        idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == resource_id)
+        for feature, value in updates:
+            self[key].edge_attr[idx, self.features['need_for_resources'][feature]] = value
+
+    def to_state(self):
+        state = State(self.items, 
+                      self.operations, 
+                      self.resources, 
+                      self.materials, 
+                      self.need_for_materials, 
+                      self.need_for_resources, 
+                      self.operation_assembly, 
+                      self.item_assembly, 
+                      self.precedences, 
+                      self.same_types)
+        return state
+    
+    def feasible_actions(self):
+        # TODO return all feasible actions
+        actions = []
+        return actions
