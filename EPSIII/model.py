@@ -1,6 +1,8 @@
-from torch_geometric.data import HeteroData
-import torch
 import copy
+import torch
+from torch_geometric.data import HeteroData
+from torch.nn import Sequential, Linear, ELU, Tanh, Parameter, LeakyReLU, Module
+import torch.nn.functional as F
 
 # =====================================================
 # =*= SOLUTION DATA STRUCTURE =*=
@@ -237,33 +239,30 @@ class GraphInstance(HeteroData):
             }
         }
 
-    def build_from_instance(self, instance: Instance):
-        # TODO translate an instance into a graph structure
-        pass
-
     def add_node(self, type, features):
         self[type].x = torch.cat([self[type].x, features], dim=0) if type in self.node_types else features
 
-    def add_edge(self, node_1, relation, node_2, features):
-        self[node_1, relation, node_2].edge_index = torch.cat([self[node_1, relation, node_2].edge_index, features], dim=1) if (node_1, relation, node_2) in self.edge_types else features
+    def add_edge(self, node_1, relation, node_2, idx, features):
+        self[node_1, relation, node_2].edge_index = torch.cat([self[node_1, relation, node_2].edge_index, idx], dim=1) if (node_1, relation, node_2) in self.edge_types else idx
+        self[node_1, relation, node_2].edge_attr = torch.cat([self[node_1, relation, node_2].edge_attr, features], dim=1) if (node_1, relation, node_2) in self.edge_types else features
     
     def precedences(self):
-        return self['operation', 'precedes', 'operation'].edge_index
+        return self['operation', 'precedes', 'operation']
     
     def item_assembly(self):
-        return self['item', 'parent', 'item'].edge_index
+        return self['item', 'parent', 'item']
     
     def operation_assembly(self):
-        return self['item', 'has', 'operation'].edge_index
+        return self['item', 'has', 'operation']
     
     def need_for_resources(self):
-        return self['operation', 'needs_res', 'resource'].edge_index
+        return self['operation', 'needs_res', 'resource']
     
     def need_for_materials(self):
-        return self['operation', 'needs_mat', 'material'].edge_index
+        return self['operation', 'needs_mat', 'material']
     
     def same_types(self):
-        return self['resource', 'same', 'resource'].edge_index
+        return self['resource', 'same', 'resource']
     
     def operations(self):
         return self['operation'].x
@@ -315,7 +314,7 @@ class GraphInstance(HeteroData):
         for feature, value in updates:
             self[key].edge_attr[idx, self.features['need_for_materials'][feature]] = value
 
-    def update_need_for_resources(self, operation_id, resource_id, updates):
+    def update_need_for_resource(self, operation_id, resource_id, updates):
         key = (operation_id, 'needs_res', resource_id)
         idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == resource_id)
         for feature, value in updates:
@@ -333,8 +332,175 @@ class GraphInstance(HeteroData):
                       self.precedences, 
                       self.same_types)
         return state
+
+# =====================================================
+# =*= GRAPH ATTENTION NEURAL NETWORK (GaNN) =*=
+# =====================================================
+
+class MaterialEmbedding(Module):
+    def __init__(self, material_dimension, operation_dimension, embedding_dimension):
+        super(MaterialEmbedding, self).__init__()
+        self.material_transform = Linear(material_dimension, embedding_dimension, bias=False)
+        self.att_self_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
+        self.operation_transform = Linear(operation_dimension, embedding_dimension, bias=False)
+        self.att_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
+        self.leaky_relu = LeakyReLU(negative_slope=0.2)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        torch.nn.init.xavier_uniform_(self.material_transform.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.operation_transform.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.att_coef.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.att_self_coef.data, gain=1.414)
+
+    def forward(self, materials, operations, need_for_materials):
+        materials = self.material_transform(materials)
+        self_attention = self.leaky_relu(torch.matmul(torch.cat([materials, materials], dim=-1), self.att_self_coef))
+        
+        ops_by_edges = self.operation_transform(torch.cat([operations[need_for_materials.edge_index[0]], need_for_materials.edge_attr], dim=-1))
+        mat_by_edges = materials[need_for_materials.edge_index[1]]
+        cross_attention = self.leaky_relu(torch.matmul(torch.cat([mat_by_edges, ops_by_edges], dim=-1), self.att_coef))
+
+        normalizer = F.softmax(torch.cat([self_attention, cross_attention], dim=0), dim=0)
+        norm_self_attention = normalizer[:self_attention.size(0)]
+        norm_cross_attention = normalizer[self_attention.size(0):]
+
+        weighted_ops_by_edges = norm_cross_attention * ops_by_edges
+        sum_ops_by_edges = torch.zeros_like(materials, device=materials.device)
+        sum_ops_by_edges.index_add_(0, need_for_materials.edge_index[1], weighted_ops_by_edges)
+        embedding = F.elu(norm_self_attention * materials + sum_ops_by_edges)
+        return embedding
+
+class ResourceEmbedding(Module):
+    def __init__(self, resource_dimension, operation_dimension, embedding_dimension):
+        super(MaterialEmbedding, self).__init__()
+        self.self_transform = Linear(resource_dimension, embedding_dimension, bias=False)
+        self.resource_transform = Linear(resource_dimension, embedding_dimension, bias=False)
+        self.operation_transform = Linear(operation_dimension, embedding_dimension, bias=False)
+        self.att_operation_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
+        self.att_resource_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
+        self.att_self_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
+        self.leaky_relu = LeakyReLU(negative_slope=0.2)
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        torch.nn.init.xavier_uniform_(self.self_transform.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.resource_transform.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.operation_transform.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.att_operation_coef.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.att_resource_coef.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.att_self_coef.data, gain=1.414)
+
+    def forward(self, resources, operations, need_for_resources, same_types):
+        self_resources = self.self_transform(resources) 
+        self_attention = self.leaky_relu(torch.matmul(torch.cat([self_resources, self_resources], dim=-1), self.att_self_coef))
+
+        ops_by_need_edges = self.operation_transform(torch.cat([operations[need_for_resources.edge_index[0]], need_for_resources.edge_attr], dim=-1))
+        res_by_need_edges = self_resources[need_for_resources.edge_index[1]]
+        operations_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res_by_need_edges, ops_by_need_edges], dim=-1), self.att_operation_coef))
+        
+        res1_by_same_edges = self.resource_transform(resources[same_types.edge_index[0]])
+        res2_by_same_edges = self_resources[same_types.edge_index[1]]
+        resources_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res2_by_same_edges, res1_by_same_edges], dim=-1), self.att_resource_coef))
+        
+        normalizer = F.softmax(torch.cat([self_attention, operations_cross_attention, resources_cross_attention], dim=0), dim=0)
+        norm_self_attention = normalizer[:self_attention.size(0)+operations_cross_attention.size(0)]
+        norm_operations_cross_attention = normalizer[self_attention.size(0):operations_cross_attention.size(0)]
+        norm_resources_cross_attention = normalizer[self_attention.size(0)+operations_cross_attention.size(0):]
+
+        weighted_ops_by_edges = norm_operations_cross_attention * ops_by_need_edges
+        sum_ops_by_edges = torch.zeros_like(resources, device=resources.device)
+        sum_ops_by_edges.index_add_(0, need_for_resources.edge_index[1], weighted_ops_by_edges)
+
+        weighted_res_by_edges = norm_resources_cross_attention * res1_by_same_edges
+        sum_res_by_edges = torch.zeros_like(resources, device=resources.device)
+        sum_res_by_edges.index_add_(0, same_types.edge_index[1], weighted_res_by_edges)
+        
+        embedding = F.elu(norm_self_attention * resources + sum_ops_by_edges + sum_res_by_edges)
+        return embedding
     
-    def feasible_actions(self):
-        # TODO return all feasible actions
-        actions = []
-        return actions
+class ItemLayer(Module):
+    def __init__(self, in_channels, hidden_channels, out_channels):
+        super(ItemLayer, self).__init__()
+        self.embedding_size = out_channels
+        self.mlp_combined = Sequential(
+            Linear(4 * out_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+        self.mlp_predecessor = Sequential(
+            Linear(in_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+        self.mlp_successor = Sequential(
+            Linear(in_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+        self.mlp_resources = Sequential(
+            Linear(out_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+        self.mlp_same = Sequential(
+            Linear(in_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+
+    def forward(self, operations, resources, requirement_edges, preds, succs):
+        ops_idx_by_edges = requirement_edges[0]
+        res_embeddings_by_edges = resources[requirement_edges[1]]
+        agg_machine_embeddings = torch.zeros((operations.size(0), resources.size(1)), device=operations.device)
+        agg_machine_embeddings.index_add_(0, ops_idx_by_edges, res_embeddings_by_edges)
+        predecessors = self.mlp_predecessor(operations[preds[1:-1]])
+        successors = self.mlp_successor(operations[succs[1:-1]])
+        same_embeddings = self.mlp_same(operations[1:-1])
+        agg_machine_embeddings = self.mlp_resources(agg_machine_embeddings[1:-1])
+        embedding = torch.zeros((operations.shape[0], self.embedding_size), device=operations.device)
+        embedding[1:-1] = self.mlp_combined(torch.cat([predecessors, successors, agg_machine_embeddings, same_embeddings], dim=-1))
+        return embedding
+    
+class OperationLayer(Module):
+    def __init__(self, in_channels, hidden_channels, out_channels):
+        super(OperationLayer, self).__init__()
+        self.embedding_size = out_channels
+        self.mlp_combined = Sequential(
+            Linear(4 * out_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+        self.mlp_predecessor = Sequential(
+            Linear(in_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+        self.mlp_successor = Sequential(
+            Linear(in_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+        self.mlp_resources = Sequential(
+            Linear(out_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+        self.mlp_same = Sequential(
+            Linear(in_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+
+    def forward(self, operations, resources, requirement_edges, preds, succs):
+        ops_idx_by_edges = requirement_edges[0]
+        res_embeddings_by_edges = resources[requirement_edges[1]]
+        agg_machine_embeddings = torch.zeros((operations.size(0), resources.size(1)), device=operations.device)
+        agg_machine_embeddings.index_add_(0, ops_idx_by_edges, res_embeddings_by_edges)
+        predecessors = self.mlp_predecessor(operations[preds[1:-1]])
+        successors = self.mlp_successor(operations[succs[1:-1]])
+        same_embeddings = self.mlp_same(operations[1:-1])
+        agg_machine_embeddings = self.mlp_resources(agg_machine_embeddings[1:-1])
+        embedding = torch.zeros((operations.shape[0], self.embedding_size), device=operations.device)
+        embedding[1:-1] = self.mlp_combined(torch.cat([predecessors, successors, agg_machine_embeddings, same_embeddings], dim=-1))
+        return embedding
