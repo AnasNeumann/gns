@@ -615,7 +615,7 @@ def EPSIII_GNN(Module):
         if len(actions.outsourcing)>0:
             inputs = torch.zeros((len(actions.outsourcing), (self.embedding_size * 5) + 2))
             for i, (item_id, val) in enumerate(actions.outsourcing):
-                inputs[i] = torch.cat([state.items[item_id], torch.tensor([val], dtype=torch.float32), state_embedding], dim=-1)
+                inputs[i] = torch.cat([state.items[item_id], torch.tensor([val], dtype=torch.long), state_embedding], dim=-1)
             action_logits = self.outsourcing_actor(inputs)
 
         elif len(actions.scheduling)>0:
