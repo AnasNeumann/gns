@@ -1,8 +1,9 @@
 import copy
 import torch
 from torch_geometric.data import HeteroData
-from torch.nn import Sequential, Linear, ELU, Tanh, Parameter, LeakyReLU, Module
+from torch.nn import Sequential, Linear, ELU, Tanh, Parameter, LeakyReLU, Module, ModuleList
 import torch.nn.functional as F
+from torch_geometric.nn import global_mean_pool
 
 # =====================================================
 # =*= SOLUTION DATA STRUCTURE =*=
@@ -178,6 +179,63 @@ class State:
         self.precedences = precedences
         self.same_types = same_types
 
+class FeatureConfiguration:
+    def __init__(self):
+        self.operation = {
+            'physical': 0,
+            'sync': 1,
+            'timescale_minutes': 2,
+            'timescale_hours': 3,
+            'timescale_days': 4,
+            'direct_successors': 5,
+            'total_successors': 6,
+            'remaining_time': 7,
+            'remaining_resources': 8,
+            'outsourced': 9,
+            'available_time': 10,
+            'end_time': 11
+        }
+        self.resource = {
+            'utilization_ratio': 0,
+            'available_time': 1,
+            'executed_operations': 2,
+            'remaining_operations': 3,
+            'similar_resources': 4
+        }
+        self.material = {
+            'quantity': 0,
+            'time_before_arrival': 1,
+            'remaining_demand': 2
+        }
+        self.item = {
+            'head': 0,
+            'outsourced_yet': 1,
+            'outsourced': 2,
+            'outsourcing_cost': 3,
+            'outsourcing_time': 4,
+            'deadline': 5,
+            'remaining_physical_time': 5,
+            'remaining_design_time': 6,
+            'parents': 7,
+            'children': 8,
+            'parents_physical_time': 9,
+            'children_design_time': 10,
+            'start_time': 11,
+            'end_time': 12
+        }
+        self.need_for_resources = {
+            'status': 0,
+            'basic_processing_time': 1,
+            'current_processing_time': 2,
+            'start_time': 3,
+            'end_time': 4
+        }
+        self.need_for_materials = {
+            'status': 0,
+            'execution_time': 1,
+            'quantity_needed': 2
+        }
+
 class GraphInstance(HeteroData):
     def __init__(self):
         super()
@@ -187,57 +245,7 @@ class GraphInstance(HeteroData):
         self.materials_g2i = []
         self.current_operation_type = []
         self.current_design_value = []
-        self.features = {
-            'operation': {
-                'physical': 0,
-                'sync': 1,
-                'timescale_minutes': 2,
-                'timescale_hours': 3,
-                'timescale_days': 4,
-                'direct_successors': 5,
-                'total_successors': 6,
-                'remaining_time': 7,
-                'remaining_resources': 8,
-                'outsourced': 9,
-                'available_time': 10,
-                'end_time': 11
-            }, 'resource': {
-                'utilization_ratio': 0,
-                'available_time': 1,
-                'executed_operations': 2,
-                'remaining_operations': 3,
-                'similar_resources': 4
-            }, 'material': {
-                'quantity': 0,
-                'time_before_arrival': 1,
-                'remaining_demand': 2
-            }, 'item': {
-                'head': 0,
-                'outsourced_yet': 1,
-                'outsourced': 2,
-                'outsourcing_cost': 3,
-                'outsourcing_time': 4,
-                'deadline': 5,
-                'remaining_physical_time': 5,
-                'remaining_design_time': 6,
-                'parents': 7,
-                'children': 8,
-                'parents_physical_time': 9,
-                'children_design_time': 10,
-                'start_time': 11,
-                'end_time': 12
-            }, 'need_for_resources': {
-                'status': 0,
-                'basic_processing_time': 1,
-                'current_processing_time': 2,
-                'start_time': 3,
-                'end_time': 4
-            }, 'need_for_materials': {
-                'status': 0,
-                'execution_time': 1,
-                'quantity_needed': 2
-            }
-        }
+        self.features = FeatureConfiguration()
 
     def add_node(self, type, features):
         self[type].x = torch.cat([self[type].x, features], dim=0) if type in self.node_types else features
@@ -277,61 +285,71 @@ class GraphInstance(HeteroData):
         return self['material'].x
 
     def operation(self, id, feature):
-        return self['operation'].x[id][self.features['operation'][feature]].item()
+        return self['operation'].x[id][self.features.operation[feature]].item()
 
     def material(self, id, feature):
-        return self['material'].x[id][self.features['material'][feature]].item()
+        return self['material'].x[id][self.features.material[feature]].item()
     
     def resource(self, id, feature):
-        return self['resource'].x[id][self.features['resource'][feature]].item()
+        return self['resource'].x[id][self.features.resource[feature]].item()
     
     def item(self, id, feature):
-        return self['item'].x[id][self.features['item'][feature]].item()
+        return self['item'].x[id][self.features.item[feature]].item()
     
     def update_operation(self, id, updates):
         for feature, value in updates:
-            self['operation'].x[id][self.features['operation'][feature]] = value
+            self['operation'].x[id][self.features.operation[feature]] = value
         
     def update_resource(self, id, updates):
         for feature, value in updates:
-            self['resource'].x[id][self.features['resource'][feature]] = value
+            self['resource'].x[id][self.features.resource[feature]] = value
     
     def update_material(self, id, updates):
         for feature, value in updates:
-            self['material'].x[id][self.features['material'][feature]] = value
+            self['material'].x[id][self.features.material[feature]] = value
     
     def update_item(self, id, updates):
         for feature, value in updates:
-            self['item'].x[id][self.features['item'][feature]] = value
+            self['item'].x[id][self.features.item[feature]] = value
 
     def update_operation(self, id, updates):
         for feature, value in updates:
-            self['operation'].x[id][self.features['operation'][feature]] = value
+            self['operation'].x[id][self.features.operation[feature]] = value
 
     def update_need_for_material(self, operation_id, material_id, updates):
         key = (operation_id, 'needs_mat', material_id)
         idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == material_id)
         for feature, value in updates:
-            self[key].edge_attr[idx, self.features['need_for_materials'][feature]] = value
+            self[key].edge_attr[idx, self.features.need_for_materials[feature]] = value
 
     def update_need_for_resource(self, operation_id, resource_id, updates):
         key = (operation_id, 'needs_res', resource_id)
         idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == resource_id)
         for feature, value in updates:
-            self[key].edge_attr[idx, self.features['need_for_resources'][feature]] = value
+            self[key].edge_attr[idx, self.features.need_for_resources[feature]] = value
 
     def to_state(self):
-        state = State(self.items, 
-                      self.operations, 
-                      self.resources, 
-                      self.materials, 
-                      self.need_for_materials, 
-                      self.need_for_resources, 
-                      self.operation_assembly, 
-                      self.item_assembly, 
-                      self.precedences, 
-                      self.same_types)
+        state = State(self.items(), 
+                      self.operations(), 
+                      self.resources(), 
+                      self.materials(), 
+                      self.need_for_materials(), 
+                      self.need_for_resources(), 
+                      self.operation_assembly(), 
+                      self.item_assembly(), 
+                      self.precedences(), 
+                      self.same_types())
         return state
+
+# =====================================================
+# =*= DATA STRUCTURES RELATED TO EPSIII SOLVING =*=
+# =====================================================
+
+class Actions:
+    def __init__(self, scheduling, material_use, outsourcing):
+        self.scheduling = scheduling
+        self.material_use = material_use
+        self.outsourcing = outsourcing
 
 # =====================================================
 # =*= GRAPH ATTENTION NEURAL NETWORK (GaNN) =*=
@@ -540,3 +558,77 @@ class OperationLayer(Module):
         embedding = torch.zeros((operations.shape[0], self.embedding_size), device=operations.device)
         embedding[1:-1] = self.mlp_combined(torch.cat([agg_preds_embeddings, agg_succs_embeddings, agg_resources_embeddings, agg_materials_embeddings, item_embeddings, self_embeddings], dim=-1))
         return embedding
+    
+def EPSIII_GNN(Module):
+    def __init__(self, embedding_size, hidden_channels, nb_embedding_layers, actor_critic_dim):
+        super(EPSIII_GNN, self).__init__()
+        conf = FeatureConfiguration()
+        self.embedding_size = embedding_size
+        self.material_layers = ModuleList()
+        self.resource_layers = ModuleList()
+        self.item_layers = ModuleList()
+        self.operation_layers = ModuleList()
+        self.material_layers.append(MaterialEmbedding(len(conf.material), len(conf.operation), embedding_size))
+        self.resource_layers.append(ResourceEmbedding(len(conf.resource), len(conf.operation), embedding_size))
+        self.item_layers.append(ItemLayer(len(conf.operation), embedding_size, hidden_channels, embedding_size))
+        self.operation_layers.append(OperationLayer(len(conf.operation), embedding_size, embedding_size, embedding_size, hidden_channels, embedding_size))
+        for _ in range(nb_embedding_layers-1):
+            self.material_layers.append(MaterialEmbedding(embedding_size, embedding_size, embedding_size))
+            self.resource_layers.append(ResourceEmbedding(embedding_size, embedding_size, embedding_size))
+            self.item_layers.append(ItemLayer(embedding_size, embedding_size, hidden_channels, embedding_size))
+            self.operation_layers.append(OperationLayer(embedding_size, embedding_size, embedding_size, embedding_size, hidden_channels, embedding_size))
+        self.outsourcing_actor = Sequential(
+            Linear((self.embedding_size * 5) + 2, actor_critic_dim), Tanh(),
+            Linear(actor_critic_dim, actor_critic_dim), Tanh(),
+            Linear(actor_critic_dim, 1)
+        )
+        self.scheduling_actor = Sequential(
+            Linear((self.embedding_size * 6) + 1, actor_critic_dim), Tanh(),
+            Linear(actor_critic_dim, actor_critic_dim), Tanh(),
+            Linear(actor_critic_dim, 1)
+        )
+        self.material_actor = Sequential(
+            Linear((self.embedding_size * 6) + 1, actor_critic_dim), Tanh(),
+            Linear(actor_critic_dim, actor_critic_dim), Tanh(),
+            Linear(actor_critic_dim, 1)
+        )
+        self.critic_mlp = Sequential(
+            Linear((self.embedding_size * 4) + 1, actor_critic_dim), Tanh(),
+            Linear(actor_critic_dim, actor_critic_dim), Tanh(), 
+            Linear(actor_critic_dim, 1)
+        )
+
+    def forward(self, state: State, actions: Actions, related_items, parents, alpha, nb_embedding_layers):
+        for l in range(nb_embedding_layers):
+            state.materials = self.material_layers[l](state.materials, state.operations, state.need_for_materials)
+            state.resources = self.resource_layers[l](state.resources, state.operations, state.need_for_resources, state.same_types)
+            state.items = self.item_layers[l](state.items, parents, state.operations, state.item_assembly, state.operation_assembly)
+            state.operations = self.operation_layers[l](state.operations, related_items, state.materials, state.resources, state.need_for_resources, state.need_for_materials, state.precedences)
+        
+        pooled_materials = global_mean_pool(state.materials, torch.zeros(state.materials.shape[0], dtype=torch.long))
+        pooled_resources = global_mean_pool(state.resources, torch.zeros(state.resources.shape[0], dtype=torch.long))
+        pooled_items = global_mean_pool(state.items, torch.zeros(state.items.shape[0], dtype=torch.long))
+        pooled_operations = global_mean_pool(state.operations, torch.zeros(state.operations.shape[0], dtype=torch.long))
+        state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources, alpha], dim=-1)[0]
+        state_value = self.critic_mlp(state_embedding)
+
+        if len(actions.outsourcing)>0:
+            inputs = torch.zeros((len(actions.outsourcing), (self.embedding_size * 5) + 2))
+            for i, (item_id, val) in enumerate(actions.outsourcing):
+                inputs[i] = torch.cat([state.items[item_id], torch.tensor([val], dtype=torch.float32), state_embedding], dim=-1)
+            action_logits = self.outsourcing_actor(inputs)
+
+        elif len(actions.scheduling)>0:
+            inputs = torch.zeros((len(actions.scheduling), (self.embedding_size * 6) + 1))
+            for i, (operation_id, resource_id) in enumerate(actions.outsourcing):
+                inputs[i] = torch.cat([state.operations[operation_id], state.resources[resource_id], state_embedding], dim=-1)
+            action_logits = self.scheduling_actor(inputs)
+
+        else:
+            inputs = torch.zeros((len(actions.material_use), (self.embedding_size * 6) + 1))
+            for i, (operation_id, material_id) in enumerate(actions.outsourcing):
+                inputs[i] = torch.cat([state.operations[operation_id], state.materials[material_id], state_embedding], dim=-1)
+            action_logits = self.material_actor(inputs)
+
+        action_probs = F.softmax(action_logits, dim=0)
+        return action_probs, state_value
