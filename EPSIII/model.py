@@ -4,6 +4,7 @@ from torch_geometric.data import HeteroData
 from torch.nn import Sequential, Linear, ELU, Tanh, Parameter, LeakyReLU, Module, ModuleList
 import torch.nn.functional as F
 from torch_geometric.nn import global_mean_pool
+from torch_geometric.utils import to_dense_adj
 
 # =====================================================
 # =*= SOLUTION DATA STRUCTURE =*=
@@ -328,6 +329,22 @@ class GraphInstance(HeteroData):
         for feature, value in updates:
             self[key].edge_attr[idx, self.features.need_for_resources[feature]] = value
 
+    def parents(self):
+        adj = to_dense_adj(self.item_assembly().edge_index)[0]
+        nb_items = self.items().size(0)
+        parents = torch.zeros(nb_items, dtype=torch.long)
+        for i in range(nb_items):
+            parents[i] = adj[:,i].nonzero(as_tuple=True)[0]
+        return parents
+
+    def related_items(self):
+        adj = to_dense_adj(self.operation_assembly().edge_index)[0]
+        nb_ops = self.operations().size(0)
+        r_items = torch.zeros(nb_ops, dtype=torch.long)
+        for i in range(nb_ops):
+            r_items[i] = adj[:,i].nonzero(as_tuple=True)[0]
+        return r_items
+    
     def to_state(self):
         state = State(self.items(), 
                       self.operations(), 
