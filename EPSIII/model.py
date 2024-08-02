@@ -166,7 +166,7 @@ class Instance:
 # =*= HYPER-GRAPH DATA STRUCTURE =*=
 # =====================================================
 class State:
-    def __init__(self, items, operations, resources, materials, need_for_materials, need_for_resources, operation_assembly, assembly, precedences, same_types):
+    def __init__(self, items, operations, resources, materials, need_for_materials, need_for_resources, operation_assembly, item_assembly, precedences, same_types):
         self.items = copy.deepcopy(items)
         self.operations = copy.deepcopy(operations)
         self.resources = copy.deepcopy(resources)
@@ -174,7 +174,7 @@ class State:
         self.need_for_resources = copy.deepcopy(need_for_resources)
         self.need_for_materials = copy.deepcopy(need_for_materials)
         self.operation_assembly = operation_assembly
-        self.assembly = assembly
+        self.item_assembly = item_assembly
         self.precedences = precedences
         self.same_types = same_types
 
@@ -418,9 +418,9 @@ class ResourceEmbedding(Module):
         
         embedding = F.elu(norm_self_attention * resources + sum_ops_by_edges + sum_res_by_edges)
         return embedding
-    
+
 class ItemLayer(Module):
-    def __init__(self, in_channels, hidden_channels, out_channels):
+    def __init__(self, operation_dimension, item_dimension, hidden_channels, out_channels):
         super(ItemLayer, self).__init__()
         self.embedding_size = out_channels
         self.mlp_combined = Sequential(
@@ -428,79 +428,115 @@ class ItemLayer(Module):
             Linear(hidden_channels, hidden_channels), ELU(),
             Linear(hidden_channels, out_channels)
         )
-        self.mlp_predecessor = Sequential(
-            Linear(in_channels, hidden_channels), ELU(),
+        self.mlp_operations = Sequential(
+            Linear(operation_dimension, hidden_channels), ELU(),
             Linear(hidden_channels, hidden_channels), ELU(),
             Linear(hidden_channels, out_channels)
         )
-        self.mlp_successor = Sequential(
-            Linear(in_channels, hidden_channels), ELU(),
+        self.mlp_parent = Sequential(
+            Linear(item_dimension, hidden_channels), ELU(),
             Linear(hidden_channels, hidden_channels), ELU(),
             Linear(hidden_channels, out_channels)
         )
-        self.mlp_resources = Sequential(
-            Linear(out_channels, hidden_channels), ELU(),
+        self.mlp_children = Sequential(
+            Linear(item_dimension, hidden_channels), ELU(),
             Linear(hidden_channels, hidden_channels), ELU(),
             Linear(hidden_channels, out_channels)
         )
-        self.mlp_same = Sequential(
-            Linear(in_channels, hidden_channels), ELU(),
+        self.mlp_self = Sequential(
+            Linear(item_dimension, hidden_channels), ELU(),
             Linear(hidden_channels, hidden_channels), ELU(),
             Linear(hidden_channels, out_channels)
         )
 
-    def forward(self, operations, resources, requirement_edges, preds, succs):
-        ops_idx_by_edges = requirement_edges[0]
-        res_embeddings_by_edges = resources[requirement_edges[1]]
-        agg_machine_embeddings = torch.zeros((operations.size(0), resources.size(1)), device=operations.device)
-        agg_machine_embeddings.index_add_(0, ops_idx_by_edges, res_embeddings_by_edges)
-        predecessors = self.mlp_predecessor(operations[preds[1:-1]])
-        successors = self.mlp_successor(operations[succs[1:-1]])
-        same_embeddings = self.mlp_same(operations[1:-1])
-        agg_machine_embeddings = self.mlp_resources(agg_machine_embeddings[1:-1])
-        embedding = torch.zeros((operations.shape[0], self.embedding_size), device=operations.device)
-        embedding[1:-1] = self.mlp_combined(torch.cat([predecessors, successors, agg_machine_embeddings, same_embeddings], dim=-1))
+    def forward(self, items, parents, operations, item_assembly, operation_assembly):
+        self_embeddings = self.mlp_self(items)
+        parent_embeddings = self.mlp_parent(parents)
+
+        parent_idx_by_edge = item_assembly.edge_index[0]
+        children_by_edge = items[item_assembly.edge_index[1]]
+        agg_children_embeddings = torch.zeros((items.size(0), items.size(1)), device=items.device)
+        agg_children_embeddings.index_add_(0, parent_idx_by_edge, children_by_edge) 
+        agg_children_embeddings = self.mlp_children(agg_children_embeddings)
+
+        item_idx_by_edges = operation_assembly.edge_index[0]
+        operations_by_edges = operations[operation_assembly.edge_index[1]]
+        agg_ops_embeddings = torch.zeros((items.size(0), operations.size(1)), device=items.device)
+        agg_ops_embeddings.index_add_(0, item_idx_by_edges, operations_by_edges) 
+        agg_ops_embeddings = self.mlp_operations(agg_ops_embeddings)
+        
+        embedding = torch.zeros((items.shape[0], self.embedding_size), device=items.device)
+        embedding[1:-1] = self.mlp_combined(torch.cat([parent_embeddings, agg_children_embeddings, agg_ops_embeddings, self_embeddings], dim=-1))
         return embedding
     
 class OperationLayer(Module):
-    def __init__(self, in_channels, hidden_channels, out_channels):
+    def __init__(self, operation_dimension, item_dimension, resources_dimension, material_dimension, hidden_channels, out_channels):
         super(OperationLayer, self).__init__()
         self.embedding_size = out_channels
         self.mlp_combined = Sequential(
-            Linear(4 * out_channels, hidden_channels), ELU(),
+            Linear(6 * out_channels, hidden_channels), ELU(),
             Linear(hidden_channels, hidden_channels), ELU(),
             Linear(hidden_channels, out_channels)
         )
-        self.mlp_predecessor = Sequential(
-            Linear(in_channels, hidden_channels), ELU(),
+        self.mlp_items = Sequential(
+            Linear(item_dimension, hidden_channels), ELU(),
             Linear(hidden_channels, hidden_channels), ELU(),
             Linear(hidden_channels, out_channels)
         )
-        self.mlp_successor = Sequential(
-            Linear(in_channels, hidden_channels), ELU(),
+        self.mlp_predecessors = Sequential(
+            Linear(operation_dimension, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+        self.mlp_successors = Sequential(
+            Linear(operation_dimension, hidden_channels), ELU(),
             Linear(hidden_channels, hidden_channels), ELU(),
             Linear(hidden_channels, out_channels)
         )
         self.mlp_resources = Sequential(
-            Linear(out_channels, hidden_channels), ELU(),
+            Linear(resources_dimension, hidden_channels), ELU(),
             Linear(hidden_channels, hidden_channels), ELU(),
             Linear(hidden_channels, out_channels)
         )
-        self.mlp_same = Sequential(
-            Linear(in_channels, hidden_channels), ELU(),
+        self.mlp_materials = Sequential(
+            Linear(material_dimension, hidden_channels), ELU(),
+            Linear(hidden_channels, hidden_channels), ELU(),
+            Linear(hidden_channels, out_channels)
+        )
+        self.mlp_self = Sequential(
+            Linear(operation_dimension, hidden_channels), ELU(),
             Linear(hidden_channels, hidden_channels), ELU(),
             Linear(hidden_channels, out_channels)
         )
 
-    def forward(self, operations, resources, requirement_edges, preds, succs):
-        ops_idx_by_edges = requirement_edges[0]
-        res_embeddings_by_edges = resources[requirement_edges[1]]
-        agg_machine_embeddings = torch.zeros((operations.size(0), resources.size(1)), device=operations.device)
-        agg_machine_embeddings.index_add_(0, ops_idx_by_edges, res_embeddings_by_edges)
-        predecessors = self.mlp_predecessor(operations[preds[1:-1]])
-        successors = self.mlp_successor(operations[succs[1:-1]])
-        same_embeddings = self.mlp_same(operations[1:-1])
-        agg_machine_embeddings = self.mlp_resources(agg_machine_embeddings[1:-1])
+    def forward(self, operations, related_items, materials, resources, need_for_resources, need_for_materials, precedences):
+        self_embeddings = self.mlp_self(operations)
+        item_embeddings = self.mlp_items(related_items)
+
+        operations_idx_by_mat_edge = need_for_materials.edge_index[0]
+        materials_by_edge = materials[need_for_materials.edge_index[1]]
+        agg_materials_embeddings = torch.zeros((operations.size(0), materials.size(1)), device=operations.device)
+        agg_materials_embeddings.index_add_(0, operations_idx_by_mat_edge, materials_by_edge) 
+        agg_materials_embeddings = self.mlp_materials(agg_materials_embeddings)
+
+        operations_idx_by_res_edge = need_for_resources.edge_index[0]
+        resources_by_edge = resources[need_for_resources.edge_index[1]]
+        agg_resources_embeddings = torch.zeros((operations.size(0), resources.size(1)), device=operations.device)
+        agg_resources_embeddings.index_add_(0, operations_idx_by_res_edge, resources_by_edge) 
+        agg_resources_embeddings = self.mlp_resources(agg_resources_embeddings)
+
+        operations_idx_by_pred_edge = precedences.edge_index[0]
+        preds_by_edge = resources[precedences.edge_index[1]]
+        agg_preds_embeddings = torch.zeros((operations.size(0), operations.size(1)), device=operations.device)
+        agg_preds_embeddings.index_add_(0, operations_idx_by_pred_edge, preds_by_edge) 
+        agg_preds_embeddings = self.mlp_predecessors(agg_preds_embeddings)
+
+        operations_idx_by_succs_edge = precedences.edge_index[1]
+        succs_by_edge = resources[precedences.edge_index[0]]
+        agg_succs_embeddings = torch.zeros((operations.size(0), operations.size(1)), device=operations.device)
+        agg_succs_embeddings.index_add_(0, operations_idx_by_succs_edge, succs_by_edge) 
+        agg_succs_embeddings = self.mlp_successors(agg_succs_embeddings)
+
         embedding = torch.zeros((operations.shape[0], self.embedding_size), device=operations.device)
-        embedding[1:-1] = self.mlp_combined(torch.cat([predecessors, successors, agg_machine_embeddings, same_embeddings], dim=-1))
+        embedding[1:-1] = self.mlp_combined(torch.cat([agg_preds_embeddings, agg_succs_embeddings, agg_resources_embeddings, agg_materials_embeddings, item_embeddings, self_embeddings], dim=-1))
         return embedding
