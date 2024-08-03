@@ -359,18 +359,12 @@ class GraphInstance(HeteroData):
         return state
 
 # =====================================================
-# =*= DATA STRUCTURES RELATED TO EPSIII SOLVING =*=
-# =====================================================
-
-class Actions:
-    def __init__(self, scheduling, material_use, outsourcing):
-        self.scheduling = scheduling
-        self.material_use = material_use
-        self.outsourcing = outsourcing
-
-# =====================================================
 # =*= GRAPH ATTENTION NEURAL NETWORK (GaNN) =*=
 # =====================================================
+
+OUTSOURCING = "outsourcing"
+SCHEDULING = "scheduling"
+MATERIAL_USE = "material_use"
 
 class MaterialEmbedding(Module):
     def __init__(self, material_dimension, operation_dimension, embedding_dimension):
@@ -576,76 +570,67 @@ class OperationLayer(Module):
         embedding[1:-1] = self.mlp_combined(torch.cat([agg_preds_embeddings, agg_succs_embeddings, agg_resources_embeddings, agg_materials_embeddings, item_embeddings, self_embeddings], dim=-1))
         return embedding
     
-def EPSIII_GNN(Module):
-    def __init__(self, embedding_size, hidden_channels, nb_embedding_layers, actor_critic_dim):
-        super(EPSIII_GNN, self).__init__()
+def L1_EMBEDDING_GNN(Module):
+    def __init__(self, embedding_size, embedding_hidden_channels, nb_embedding_layers):
+        super(L1_EMBEDDING_GNN, self).__init__()
         conf = FeatureConfiguration()
         self.embedding_size = embedding_size
+        self.nb_embedding_layers = nb_embedding_layers
         self.material_layers = ModuleList()
         self.resource_layers = ModuleList()
         self.item_layers = ModuleList()
         self.operation_layers = ModuleList()
         self.material_layers.append(MaterialEmbedding(len(conf.material), len(conf.operation), embedding_size))
         self.resource_layers.append(ResourceEmbedding(len(conf.resource), len(conf.operation), embedding_size))
-        self.item_layers.append(ItemLayer(len(conf.operation), embedding_size, hidden_channels, embedding_size))
-        self.operation_layers.append(OperationLayer(len(conf.operation), embedding_size, embedding_size, embedding_size, hidden_channels, embedding_size))
-        for _ in range(nb_embedding_layers-1):
+        self.item_layers.append(ItemLayer(len(conf.operation), embedding_size, embedding_hidden_channels, embedding_size))
+        self.operation_layers.append(OperationLayer(len(conf.operation), embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
+        for _ in range(self.nb_embedding_layers-1):
             self.material_layers.append(MaterialEmbedding(embedding_size, embedding_size, embedding_size))
             self.resource_layers.append(ResourceEmbedding(embedding_size, embedding_size, embedding_size))
-            self.item_layers.append(ItemLayer(embedding_size, embedding_size, hidden_channels, embedding_size))
-            self.operation_layers.append(OperationLayer(embedding_size, embedding_size, embedding_size, embedding_size, hidden_channels, embedding_size))
-        self.outsourcing_actor = Sequential(
-            Linear((self.embedding_size * 5) + 2, actor_critic_dim), Tanh(),
-            Linear(actor_critic_dim, actor_critic_dim), Tanh(),
-            Linear(actor_critic_dim, 1)
-        )
-        self.scheduling_actor = Sequential(
-            Linear((self.embedding_size * 6) + 1, actor_critic_dim), Tanh(),
-            Linear(actor_critic_dim, actor_critic_dim), Tanh(),
-            Linear(actor_critic_dim, 1)
-        )
-        self.material_actor = Sequential(
-            Linear((self.embedding_size * 6) + 1, actor_critic_dim), Tanh(),
-            Linear(actor_critic_dim, actor_critic_dim), Tanh(),
-            Linear(actor_critic_dim, 1)
-        )
-        self.critic_mlp = Sequential(
-            Linear((self.embedding_size * 4) + 1, actor_critic_dim), Tanh(),
-            Linear(actor_critic_dim, actor_critic_dim), Tanh(), 
-            Linear(actor_critic_dim, 1)
-        )
+            self.item_layers.append(ItemLayer(embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
+            self.operation_layers.append(OperationLayer(embedding_size, embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
 
-    def forward(self, state: State, actions: Actions, related_items, parents, alpha, nb_embedding_layers):
-        for l in range(nb_embedding_layers):
+    def forward(self, state: State, related_items, parents, alpha):
+        for l in range(self.nb_embedding_layers):
             state.materials = self.material_layers[l](state.materials, state.operations, state.need_for_materials)
             state.resources = self.resource_layers[l](state.resources, state.operations, state.need_for_resources, state.same_types)
             state.items = self.item_layers[l](state.items, parents, state.operations, state.item_assembly, state.operation_assembly)
             state.operations = self.operation_layers[l](state.operations, related_items, state.materials, state.resources, state.need_for_resources, state.need_for_materials, state.precedences)
-        
         pooled_materials = global_mean_pool(state.materials, torch.zeros(state.materials.shape[0], dtype=torch.long))
         pooled_resources = global_mean_pool(state.resources, torch.zeros(state.resources.shape[0], dtype=torch.long))
         pooled_items = global_mean_pool(state.items, torch.zeros(state.items.shape[0], dtype=torch.long))
         pooled_operations = global_mean_pool(state.operations, torch.zeros(state.operations.shape[0], dtype=torch.long))
         state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources, alpha], dim=-1)[0]
-        state_value = self.critic_mlp(state_embedding)
+        return state, state_embedding
 
-        if len(actions.outsourcing)>0:
-            inputs = torch.zeros((len(actions.outsourcing), (self.embedding_size * 5) + 2))
-            for i, (item_id, val) in enumerate(actions.outsourcing):
-                inputs[i] = torch.cat([state.items[item_id], torch.tensor([val], dtype=torch.long), state_embedding], dim=-1)
-            action_logits = self.outsourcing_actor(inputs)
+def L1_ACTOR_CRITIC_GNN(Module):
+    def __init__(self, shared_embedding_layers: L1_EMBEDDING_GNN, actor_critic_hidden_channels, decision_type):
+        super(L1_ACTOR_CRITIC_GNN, self).__init__()
+        self.shared_embedding_layers = shared_embedding_layers
+        self.decision_type = decision_type
+        self.actor_input_size = (self.embedding_size * 5) + 2 if decision_type == OUTSOURCING else (self.embedding_size * 6) + 1
+        self.actor = Sequential(
+            Linear(self.actor_input_size, actor_critic_hidden_channels), Tanh(),
+            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(),
+            Linear(actor_critic_hidden_channels, 1)
+        )
+        self.critic_mlp = Sequential(
+            Linear((self.embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
+            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(), 
+            Linear(actor_critic_hidden_channels, 1)
+        )
 
-        elif len(actions.scheduling)>0:
-            inputs = torch.zeros((len(actions.scheduling), (self.embedding_size * 6) + 1))
-            for i, (operation_id, resource_id) in enumerate(actions.outsourcing):
-                inputs[i] = torch.cat([state.operations[operation_id], state.resources[resource_id], state_embedding], dim=-1)
-            action_logits = self.scheduling_actor(inputs)
-
-        else:
-            inputs = torch.zeros((len(actions.material_use), (self.embedding_size * 6) + 1))
-            for i, (operation_id, material_id) in enumerate(actions.outsourcing):
-                inputs[i] = torch.cat([state.operations[operation_id], state.materials[material_id], state_embedding], dim=-1)
-            action_logits = self.material_actor(inputs)
-
+    def forward(self, state: State, actions, related_items, parents, alpha):
+        state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
+        inputs = torch.zeros((len(actions), self.actor_input_size))
+        for i, (first_id, second_id) in enumerate(actions.outsourcing):
+            if self.decision_type == OUTSOURCING:
+                inputs[i] = torch.cat([state.items[first_id], torch.tensor([second_id], dtype=torch.long), state_embedding], dim=-1)
+            elif self.decision_type == SCHEDULING:
+                inputs[i] = torch.cat([state.operations[first_id], state.resources[second_id], state_embedding], dim=-1)
+            else: 
+                inputs[i] = torch.cat([state.operations[first_id], state.materials[second_id], state_embedding], dim=-1)
+        action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
+        state_value = self.critic_mlp(state_embedding)
         return action_probs, state_value
