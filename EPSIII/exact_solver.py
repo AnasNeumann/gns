@@ -1,7 +1,7 @@
 import argparse
 import pickle
 import os
-from common import set_memory_limit, load_instance, init_several_1D, init_2D, init_several_2D, init_3D
+from common import load_instance, init_several_1D, init_2D, init_several_2D, init_3D
 from model import Instance, Solution
 import pandas as pd
 from ortools.sat.python import cp_model

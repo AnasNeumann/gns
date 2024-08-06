@@ -38,3 +38,6 @@ def init_several_2D(a, b, default_value, nb):
 
 def init_several_3D(a, b, c, default_value, nb):
     return (init_3D(a, b, c, default_value) for _ in range(nb))
+
+def to_bool(s):
+    return s.lower() in ['true', '1', 't', 'y', 'yes']

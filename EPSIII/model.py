@@ -569,7 +569,7 @@ class OperationLayer(Module):
         embedding = torch.zeros((operations.shape[0], self.embedding_size), device=operations.device)
         embedding[1:-1] = self.mlp_combined(torch.cat([agg_preds_embeddings, agg_succs_embeddings, agg_resources_embeddings, agg_materials_embeddings, item_embeddings, self_embeddings], dim=-1))
         return embedding
-    
+  
 def L1_EMBEDDING_GNN(Module):
     def __init__(self, embedding_size, embedding_hidden_channels, nb_embedding_layers):
         super(L1_EMBEDDING_GNN, self).__init__()
