@@ -161,6 +161,7 @@ cython_debug/
 
 documentation/
 documentation/**
-EPSIII/jobs/gns.sh
+EPSIII/jobs/train_gns.sh
 EPSIII/jobs/exact/**
+EPSIII/jobs/gns/**
 _old_code.py
