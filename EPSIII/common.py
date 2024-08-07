@@ -1,6 +1,7 @@
 import pickle
 import os
 import resource
+import torch
 
 def load_instance(path):
     with open(path, 'rb') as file:
@@ -41,3 +42,9 @@ def init_several_3D(a, b, c, default_value, nb):
 
 def to_bool(s):
     return s.lower() in ['true', '1', 't', 'y', 'yes']
+
+def features2tensor(features):
+    return torch.tensor([[f for f in features]], dtype=torch.float)
+
+def id2tensor(id1, id2):
+    return torch.tensor([[id1], [id2]], dtype=torch.long)

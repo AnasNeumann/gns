@@ -5,6 +5,8 @@ from torch.nn import Sequential, Linear, ELU, Tanh, Parameter, LeakyReLU, Module
 import torch.nn.functional as F
 from torch_geometric.nn import global_mean_pool
 from torch_geometric.utils import to_dense_adj
+from torch import Tensor
+from common import features2tensor, id2tensor
 
 # =====================================================
 # =*= SOLUTION DATA STRUCTURE =*=
@@ -248,13 +250,46 @@ class GraphInstance(HeteroData):
         self.current_design_value = []
         self.features = FeatureConfiguration()
 
-    def add_node(self, type, features):
+    def add_node(self, type, features: Tensor):
         self[type].x = torch.cat([self[type].x, features], dim=0) if type in self.node_types else features
 
-    def add_edge(self, node_1, relation, node_2, idx, features):
+    def add_operation(self, *args):
+        self.add_node('operation', features2tensor(args))
+
+    def add_item(self, *args):
+        self.add_node('item', features2tensor(args))
+
+    def add_material(self, *args):
+        self.add_node('material', features2tensor(args))
+
+    def add_resource(self, *args):
+        self.add_node('resource', features2tensor(args))
+
+    def add_edge_no_features(self, node_1, relation, node_2, idx):
+        self[node_1, relation, node_2].edge_index = torch.cat([self[node_1, relation, node_2].edge_index, idx], dim=1) if (node_1, relation, node_2) in self.edge_types else idx
+
+    def add_same_types(self, res_1, res_2):
+        self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_1, res_2))
+
+    def add_item_assembly(self, parent_id, child_id):
+        self.add_edge_no_features('item', 'parent', 'item', id2tensor(parent_id, child_id))
+
+    def add_operation_assembly(self, item_id, operation_id):
+        self.add_edge_no_features('item', 'has', 'operation', id2tensor(item_id, operation_id))
+
+    def add_precedence(self, prec_id, succ_id):
+        self.add_edge_no_features('operation', 'precedes', 'operation', id2tensor(prec_id, succ_id))
+
+    def add_edge_with_features(self, node_1, relation, node_2, idx, features: Tensor):
         self[node_1, relation, node_2].edge_index = torch.cat([self[node_1, relation, node_2].edge_index, idx], dim=1) if (node_1, relation, node_2) in self.edge_types else idx
         self[node_1, relation, node_2].edge_attr = torch.cat([self[node_1, relation, node_2].edge_attr, features], dim=1) if (node_1, relation, node_2) in self.edge_types else features
     
+    def add_need_for_materials(self, operation_id, material_id, features):
+        self.add_edge_no_features('operation', 'needs_mat', 'material', id2tensor(operation_id, material_id), features2tensor(features))
+
+    def add_need_for_resources(self, operation_id, resource_id, features):
+        self.add_edge_no_features('operation', 'needs_res', 'resource', id2tensor(operation_id, resource_id), features2tensor(features))
+
     def precedences(self):
         return self['operation', 'precedes', 'operation']
     
