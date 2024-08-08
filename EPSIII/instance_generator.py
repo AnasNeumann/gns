@@ -1,7 +1,7 @@
 import argparse
 import random
 import pickle
-from model import Instance, get_direct_children, get_direct_parent, get_operations_idx, get_name, require, real_time_scale
+from model import Instance
 from common import init_several_1D, init_several_2D, init_2D, init_1D, init_3D, init_several_3D
 
 PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
@@ -74,14 +74,14 @@ def build_resources(i: Instance):
         for p in range(nb_projects):
             i.quantity_needed[r][p], i.execution_time[r][p] = init_several_1D(i.O_size[p], [-1], 2)
             for o in range(i.O_size[p]):
-                if require(i,p,o,r):
+                if i.require(p,o,r):
                     if i.finite_capacity[r]:
                         i.quantity_needed[r][p][o] = random.randint(0, MAX_QUANTITY_USED)
                         i.execution_time[r][p][o] = 0
                     else:
                         i.quantity_needed[r][p][o] = 0
                         val = MAX_PROCESSING_TIMES_DESIGN if i.in_days[p][o] else MAX_PROCESSING_TIMES_ASSEMBLY if i.in_hours[p][o] else MAX_PROCESSING_TIMES_PROD
-                        i.execution_time[r][p][o] = real_time_scale(i,p,o) * random.randint(1, val)
+                        i.execution_time[r][p][o] = i.real_time_scale(p,o) * random.randint(1, val)
     return i
 
 def build_operations(i: Instance):
@@ -99,7 +99,7 @@ def build_operations(i: Instance):
         i.operation_family[p], i.resource_type_needed[p] = init_several_2D(nb_ops, i.nb_ops_types, [False], 2)
         i.design_value[p] = init_2D(nb_ops, i.nb_settings, [-1])
         for e in range(elts_per_project):
-            first, last = get_operations_idx(i, p, e)
+            first, last = i.get_operations_idx(p, e)
             for idx, o in enumerate(range(first, last)):
                 if idx > 0:
                     i.design_value[p][o] = init_array(i.nb_settings, 0, MAX_SETTINGS_VALUE)
@@ -118,7 +118,7 @@ def build_operations(i: Instance):
                 i.resource_type_needed[p][o][random.randint(minRT, maxRT)] = True
                 if not i.in_days[p][o] and not i.in_hours[p][o] and bias_generator(0.8):
                     i.resource_type_needed[p][o][random.randint(maxRT+1, maxRT+i.nb_material)] = True
-                if not found_unkown_elt and i.external[p][e] and not i.in_days[p][o] and not i.in_hours[p][o] and len(get_direct_children(i,p,e))<=0:
+                if not found_unkown_elt and i.external[p][e] and not i.in_days[p][o] and not i.in_hours[p][o] and len(i.get_children(p,e,True))<=0:
                     found_unkown_elt = True
                     i.resource_type_needed[p][o][maxRT+i.nb_material+UNKOWN_MACHINE_TYPE] = True
                     i.external_cost[p][e] = i.external_cost[p][e] * 2
@@ -126,7 +126,7 @@ def build_operations(i: Instance):
 
 def build_assembly(i: Instance, p, parent, ancestors):
     ancestors.append(parent)
-    for children in get_direct_children(i, p, parent):
+    for children in i.get_children(p, parent, True):
         for ancestor in ancestors:
             i.assembly[p][ancestor][children] = True
         i = build_assembly(i, p, children, list(ancestors))
@@ -149,8 +149,8 @@ def build_elements(i: Instance):
             i.direct_assembly[p][random.randint(0,e-1)][e] = True
         i = build_assembly(i, p, 0, [])
         for e in range(elts_per_project):
-            has_children = get_direct_children(i, p, e)
-            outsourcable = e>0 and (i.external[p][get_direct_parent(i,p,e)] or ((not has_children and bias_generator(0.05)) or (has_children and bias_generator(0.25))))
+            has_children = i.get_children(p, e, True)
+            outsourcable = e>0 and (i.external[p][i.get_direct_parent(p,e)] or ((not has_children and bias_generator(0.05)) or (has_children and bias_generator(0.25))))
             if outsourcable:
                 i.external[p][e] = True
                 i.outsourcing_time[p][e] = random.randint(MIN_TIME, MAX_TIME)
@@ -219,5 +219,5 @@ if __name__ == '__main__':
             folder = "train" if i<=nb_train else "test"
             with open('./instances/'+folder+'/'+size_folder+'/instance_'+str(i)+'.pkl', 'wb') as f:
                 pickle.dump(instance, f)
-            print("\t Instance #"+get_name(instance)+" saved successfully!")
+            print("\t Instance #"+instance.get_name()+" saved successfully!")
         print("End size "+size_folder+"("+str(SIZE)+")...")

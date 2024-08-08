@@ -3,7 +3,7 @@ import pickle
 from torch.multiprocessing import Pool, set_start_method
 import os
 from model import Instance, GraphInstance, L1_ACTOR_CRITIC_GNN, L1_EMBEDDING_GNN
-from common import load_instance, to_bool
+from common import load_instance, to_bool, features2tensor, id2tensor
 import torch
 torch.autograd.set_detect_anomaly(True)
 
@@ -15,15 +15,15 @@ LEARNING_RATE = 2e-4
 PARRALLEL = True
 DEVICE = None
 PPO_CONF = {
-    "validation_rate": 10, 
-    "switch_batch": 20, 
+    "validation_rate": 10,
+    "switch_batch": 20,
     "train_iterations": 1000, 
     "opt_epochs": 3,
     "batch_size": 20,
     "clip_ratio": 0.2,
-    "policy_loss": 1.0, 
-    "value_loss": 0.5, 
-    "entropy": 0.01, 
+    "policy_loss": 1.0,
+    "value_loss": 0.5,
+    "entropy": 0.01,
     "discount_factor": 1.0,
     "bias_variance_tradeoff": 1.0,
     'validation_ratio': 0.1
@@ -67,9 +67,81 @@ def init_new_models():
 # =*= TRANSLATE INSTANCE TO GRAPH =*=
 # =====================================================
 
+def build_item(i: Instance, graph: GraphInstance, p, e, last_parent_design, last_parent_physical, head):
+    design_time, physical_time = i.item_processing_time(p, e)
+    children_design_time = 0
+    max_children_time = 0
+    childrens = i.get_children(p, e, False)
+    for children in childrens:
+        cdt, cpt = i.item_processing_time(p, children)
+        children_design_time += cdt
+        max_children_time = cdt+cpt if (cdt+cpt > max_children_time) else max_children_time
+    parents_design_time = 0
+    parents_physical_time = 0
+    ancestors = i.get_ancestors(p, e)
+    for ancestor in ancestors:
+            adt, apt = i.item_processing_time(p, ancestor)
+            parents_physical_time += apt
+            parents_design_time += adt
+    total_end = design_time + parents_design_time + physical_time + max_children_time
+    item_id = graph.add_item(e, head, i.external[p][e], -1, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, children_design_time, parents_design_time, total_end)
+    op_start = parents_design_time
+    start, end = i.get_operations_idx(p,e)
+    pred = last_parent_design
+    last_design = last_parent_design
+    last_physical = last_parent_physical
+    for o in range(start, end):
+        minutes = not (i.in_hours[p][o] or i.in_days[p][o])
+        succ = pred + 2 if o<end-1 else last_parent_physical
+        # TODO changer calcul du temps d'une opération => ne pas dupliquer par RT (prendre le max)
+        op_id = graph.add_operation(o, i.is_design[p][o], i.simultaneous[p][o], minutes, i.in_hours[p][o], i.in_days[p][o], pred, succ, i.operation_time(p,o), i.required_rt(p,o), -1, op_start, op_start+op_time)
+        pred = op_id
+        if i.is_design[p][o]:
+            last_design = op_id
+        else:
+            last_physical = op_id
+        graph.add_operation_assembly(item_id, op_id)
+        # 7. Create material use links
+        '''
+        'status': 0,
+        'execution_time': 1,
+        'quantity_needed': 2
+        '''
+        # 8. Create needs for resources links
+        '''
+        'status': 0,
+        'basic_processing_time': 1,
+        'current_processing_time': 2,
+        'start_time': 3,
+        'end_time': 4
+        '''
+    for children in i.get_children(p, e, True):
+        graph, child_id = build_item(i, graph, p, children, last_design, last_physical, False)
+        graph.add_item_assembly(item_id, child_id)
+    return graph, item_id
+
 def translate(i: Instance):
     graph = GraphInstance()
-    # TODO
+    for rt in range(i.nb_HR_types):
+        resources = i.resources_by_type(rt)
+        operations = i.operations_by_resource_type(rt)
+        res_idx = []
+        for r in resources:
+            if i.finite_capacity[r]:
+                res_id = graph.add_resource(r, 0, 0, 0, len(operations), len(resources))
+                if len(res_idx)>0:
+                    for other_id in res_idx:
+                        graph.add_same_types(other_id, res_id)
+                res_idx.append(res_id)
+            else:
+                remaining_quantity_needed = 0
+                for p, o in operations:
+                    remaining_quantity_needed += i.quantity_needed[r][p][o]
+                graph.add_material(r, i.init_quantity[r], i.purchase_time[r], remaining_quantity_needed)
+            res_idx += 1
+    for p in range(i.get_nb_projects()):
+        head = i.project_head(p)
+        graph = build_item(i, graph, p, head, -1, -1, True)
     return graph
 
 # =====================================================

@@ -6,7 +6,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import global_mean_pool
 from torch_geometric.utils import to_dense_adj
 from torch import Tensor
-from common import features2tensor, id2tensor
+from common import features2tensor, id2tensor, init_3D
 
 # =====================================================
 # =*= SOLUTION DATA STRUCTURE =*=
@@ -85,10 +85,11 @@ class Instance:
     def get_name(self):
         return self.size+'_'+str(self.id)
 
-    def get_direct_children(self, p, e):
+    def get_children(self, p, e, direct=True):
+        data = self.direct_assembly if direct else self.assembly
         children = []
         for e2 in range(self.E_size[p]):
-            if self.direct_assembly[p][e][e2]:
+            if data[p][e][e2]:
                 children.append(e2)
         return children
 
@@ -98,23 +99,64 @@ class Instance:
                 return e2
         return -1
 
+    def get_ancestors(self, p, e):
+        ancestors = []
+        for e2 in range(self.E_size[p]):
+            if self.assembly[p][e][e2]:
+                ancestors.append(e2)
+        return ancestors
+    
     def get_operations_idx(self, p, e):
         start = 0
         for e2 in range(0, e):
             start = start + self.EO_size[p][e2]    
         return start, start+self.EO_size[p][e]
+    
+    def operation_time(self, p, o):
+        time = 0
+        resources = self.required_resources(p,o)
+        for r in resources:
+            if self.finite_capacity[r]:
+                time += self.execution_time[r, p, o]
+        return time
+
+    def item_processing_time(self, p, e):
+        start, end = self.get_operations_idx(p,e)
+        design_time = 0
+        physical_time = 0
+        for o in range(start, end):
+            if self.is_design[p][o]:
+                design_time += self.operation_time(p,o)
+            else:
+                physical_time += self.operation_time(p,o)
+        return design_time, physical_time
 
     def require(self, p, o, r):
         for rt in range(self.nb_resource_types):
             if self.resource_family[r][rt]:
                 return self.resource_type_needed[p][o][rt]
         return False
+    
+    def required_rt(self, p, o):
+        rts = []
+        for rt in range(self.nb_resource_types):
+            if self.resource_type_needed[p][o][rt]:
+                rts.append(rt)
+        return rts
 
     def real_time_scale(self, p, o):
         return 60*self.H if self.in_days[p][o] else 60 if self.in_hours[p][o] else 1
 
     def get_nb_projects(self):
         return len(self.E_size)
+    
+    def operations_by_resource_type(self, rt):
+        operations = []
+        for p in range(self.get_nb_projects()):
+            for o in range(self.O_size[p]):
+                if self.resource_type_needed[p][o][rt]:
+                    operations.append((p, o))
+        return operations
 
     def project_head(self, p):
         for e in range(self.E_size[p]):
@@ -185,7 +227,7 @@ class State:
 class FeatureConfiguration:
     def __init__(self):
         self.operation = {
-            'physical': 0,
+            'design': 0,
             'sync': 1,
             'timescale_minutes': 2,
             'timescale_hours': 3,
@@ -212,11 +254,10 @@ class FeatureConfiguration:
         }
         self.item = {
             'head': 0,
-            'outsourced_yet': 1,
+            'external': 1,
             'outsourced': 2,
             'outsourcing_cost': 3,
             'outsourcing_time': 4,
-            'deadline': 5,
             'remaining_physical_time': 5,
             'remaining_design_time': 6,
             'parents': 7,
@@ -253,23 +294,34 @@ class GraphInstance(HeteroData):
     def add_node(self, type, features: Tensor):
         self[type].x = torch.cat([self[type].x, features], dim=0) if type in self.node_types else features
 
-    def add_operation(self, *args):
+    def add_operation(self, o, *args):
+        self.operations_g2i.append(o)
         self.add_node('operation', features2tensor(args))
+        return len(self.operations_g2i)-1
 
-    def add_item(self, *args):
+    def add_item(self, i, *args):
+        self.items_g2i.append(i)
         self.add_node('item', features2tensor(args))
+        return len(self.items_g2i)-1
 
-    def add_material(self, *args):
+    def add_material(self, m, *args):
+        self.materials_g2i.append(m)
         self.add_node('material', features2tensor(args))
+        return len(self.materials_g2i)-1
 
-    def add_resource(self, *args):
+    def add_resource(self, r, nb_settings, *args):
+        self.resources_g2i.append(r)
+        self.current_design_value.append([-1 for _ in range(nb_settings)])
+        self.current_operation_type.append(-1)
         self.add_node('resource', features2tensor(args))
+        return len(self.resources_g2i)-1
 
     def add_edge_no_features(self, node_1, relation, node_2, idx):
         self[node_1, relation, node_2].edge_index = torch.cat([self[node_1, relation, node_2].edge_index, idx], dim=1) if (node_1, relation, node_2) in self.edge_types else idx
 
     def add_same_types(self, res_1, res_2):
         self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_1, res_2))
+        self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_2, res_1))
 
     def add_item_assembly(self, parent_id, child_id):
         self.add_edge_no_features('item', 'parent', 'item', id2tensor(parent_id, child_id))
