@@ -67,15 +67,20 @@ def init_new_models():
 # =*= TRANSLATE INSTANCE TO GRAPH =*=
 # =====================================================
 
-def build_item(i: Instance, graph: GraphInstance, p, e, last_parent_design, last_parent_physical, head):
+def build_item(i: Instance, graph: GraphInstance, p, e, head):
     design_time, physical_time = i.item_processing_time(p, e)
     children_design_time = 0
     max_children_time = 0
     childrens = i.get_children(p, e, False)
+    childrens_physical_operations =0
     for children in childrens:
         cdt, cpt = i.item_processing_time(p, children)
         children_design_time += cdt
         max_children_time = cdt+cpt if (cdt+cpt > max_children_time) else max_children_time
+        start_c, end_c = i.get_operations_idx(p, children)
+        for child_op in range(start_c, end_c):
+            if not i.is_design[p][child_op]:
+                childrens_physical_operations += 1
     parents_design_time = 0
     parents_physical_time = 0
     ancestors = i.get_ancestors(p, e)
@@ -87,36 +92,19 @@ def build_item(i: Instance, graph: GraphInstance, p, e, last_parent_design, last
     item_id = graph.add_item(e, head, i.external[p][e], -1, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, children_design_time, parents_design_time, total_end)
     op_start = parents_design_time
     start, end = i.get_operations_idx(p,e)
-    pred = last_parent_design
-    last_design = last_parent_design
-    last_physical = last_parent_physical
     for o in range(start, end):
+        succs = end-(o+1)
         minutes = not (i.in_hours[p][o] or i.in_days[p][o])
-        succ = pred + 2 if o<end-1 else last_parent_physical
-        # TODO changer calcul du temps d'une opération => ne pas dupliquer par RT (prendre le max)
-        op_id = graph.add_operation(o, i.is_design[p][o], i.simultaneous[p][o], minutes, i.in_hours[p][o], i.in_days[p][o], pred, succ, i.operation_time(p,o), i.required_rt(p,o), -1, op_start, op_start+op_time)
-        pred = op_id
-        if i.is_design[p][o]:
-            last_design = op_id
-        else:
-            last_physical = op_id
+        operation_time = i.operation_time(p,o)
+        op_id = graph.add_operation(o, i.is_design[p][o], i.simultaneous[p][o], minutes, i.in_hours[p][o], i.in_days[p][o], succs, childrens_physical_operations + succs, operation_time, i.required_rt(p,o), -1, op_start, op_start+operation_time)
         graph.add_operation_assembly(item_id, op_id)
-        # 7. Create material use links
-        '''
-        'status': 0,
-        'execution_time': 1,
-        'quantity_needed': 2
-        '''
-        # 8. Create needs for resources links
-        '''
-        'status': 0,
-        'basic_processing_time': 1,
-        'current_processing_time': 2,
-        'start_time': 3,
-        'end_time': 4
-        '''
+        for r in i.required_resources(p,o):
+            if i.finite_capacity[r]:
+                graph.add_need_for_resources(op_id, graph.resource_i2g(r), [0, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
+            else:
+                graph.add_need_for_materials(op_id, graph.material_i2g(r), [0, op_start, i.quantity_needed[r][p][o]])
     for children in i.get_children(p, e, True):
-        graph, child_id = build_item(i, graph, p, children, last_design, last_physical, False)
+        graph, child_id = build_item(i, graph, p, children, False)
         graph.add_item_assembly(item_id, child_id)
     return graph, item_id
 
@@ -141,7 +129,7 @@ def translate(i: Instance):
             res_idx += 1
     for p in range(i.get_nb_projects()):
         head = i.project_head(p)
-        graph = build_item(i, graph, p, head, -1, -1, True)
+        graph = build_item(i, graph, p, head, True)
     return graph
 
 # =====================================================

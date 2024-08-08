@@ -114,10 +114,13 @@ class Instance:
     
     def operation_time(self, p, o):
         time = 0
-        resources = self.required_resources(p,o)
-        for r in resources:
-            if self.finite_capacity[r]:
-                time += self.execution_time[r, p, o]
+        rts = self.required_rt(p,o)
+        for rt in rts:
+            time_rt = 0
+            for r in self.resources_by_type(rt):
+                if self.finite_capacity[r]:
+                    time_rt = max(time_rt, self.execution_time[r, p, o])
+            time += time_rt
         return time
 
     def item_processing_time(self, p, e):
@@ -432,6 +435,30 @@ class GraphInstance(HeteroData):
             r_items[i] = adj[:,i].nonzero(as_tuple=True)[0]
         return r_items
     
+    def resource_i2g(self, r):
+        for res_graph_id, res_instance_id in enumerate(self.resources_g2i):
+            if res_instance_id == r:
+                return res_graph_id
+        return -1
+    
+    def material_i2g(self, m):
+        for mat_graph_id, mat_instance_id in enumerate(self.materials_g2i):
+            if mat_instance_id == m:
+                return mat_graph_id
+        return -1
+    
+    def item_i2g(self, i):
+        for item_graph_id, item_instance_id in enumerate(self.items_g2i):
+            if item_instance_id == i:
+                return item_graph_id
+        return -1
+    
+    def operation_i2g(self, o):
+        for operation_graph_id, operation_instance_id in enumerate(self.operations_g2i):
+            if operation_instance_id == o:
+                return operation_graph_id
+        return -1
+
     def to_state(self):
         state = State(self.items(), 
                       self.operations(), 
