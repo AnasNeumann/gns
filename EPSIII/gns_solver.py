@@ -3,7 +3,7 @@ import pickle
 from torch.multiprocessing import Pool, set_start_method
 import os
 from model import Instance, GraphInstance, L1_ACTOR_CRITIC_GNN, L1_EMBEDDING_GNN
-from common import load_instance, to_bool, features2tensor, id2tensor
+from common import load_instance, to_bool, features2tensor, id2tensor, to_binary
 import torch
 torch.autograd.set_detect_anomaly(True)
 
@@ -36,6 +36,9 @@ GNN_CONF = {
 AC_CONF = {
     'hidden_channels': 64
 }
+NOT_YET = -1
+YES = 1
+NO = 0
 
 # =====================================================
 # =*= MODEL LOADING METHOD =*=
@@ -76,7 +79,7 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head):
     for children in childrens:
         cdt, cpt = i.item_processing_time(p, children)
         children_design_time += cdt
-        max_children_time = cdt+cpt if (cdt+cpt > max_children_time) else max_children_time
+        max_children_time = max(cdt+cpt, max_children_time)
         start_c, end_c = i.get_operations_idx(p, children)
         for child_op in range(start_c, end_c):
             if not i.is_design[p][child_op]:
@@ -88,25 +91,27 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head):
             adt, apt = i.item_processing_time(p, ancestor)
             parents_physical_time += apt
             parents_design_time += adt
-    total_end = design_time + parents_design_time + physical_time + max_children_time
-    item_id = graph.add_item(e, head, i.external[p][e], -1, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, children_design_time, parents_design_time, total_end)
+    estimated_end = design_time + parents_design_time + physical_time + max_children_time
+    status = NOT_YET if i.external[p][e] else NO 
+    item_id = graph.add_item(p, e, head, i.external[p][e], status, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, children_design_time, parents_design_time, estimated_end)
     op_start = parents_design_time
     start, end = i.get_operations_idx(p,e)
     for o in range(start, end):
         succs = end-(o+1)
         minutes = not (i.in_hours[p][o] or i.in_days[p][o])
         operation_time = i.operation_time(p,o)
-        op_id = graph.add_operation(o, i.is_design[p][o], i.simultaneous[p][o], minutes, i.in_hours[p][o], i.in_days[p][o], succs, childrens_physical_operations + succs, operation_time, i.required_rt(p,o), -1, op_start, op_start+operation_time)
+        op_id = graph.add_operation(p, o, i.is_design[p][o], i.simultaneous[p][o], minutes, i.in_hours[p][o], i.in_days[p][o], succs, childrens_physical_operations + succs, operation_time, i.required_rt(p,o), status, op_start, op_start+operation_time)
         graph.add_operation_assembly(item_id, op_id)
         for r in i.required_resources(p,o):
             if i.finite_capacity[r]:
-                graph.add_need_for_resources(op_id, graph.resource_i2g(r), [0, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
+                graph.add_need_for_resources(op_id, graph.resource_i2g[r], [0, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
             else:
-                graph.add_need_for_materials(op_id, graph.material_i2g(r), [0, op_start, i.quantity_needed[r][p][o]])
+                graph.add_need_for_materials(op_id, graph.material_i2g[r], [0, op_start, i.quantity_needed[r][p][o]])
     for children in i.get_children(p, e, True):
-        graph, child_id = build_item(i, graph, p, children, False)
+        graph, child_id, estimated_end_child = build_item(i, graph, p, children, False)
         graph.add_item_assembly(item_id, child_id)
-    return graph, item_id
+        estimated_end = max(estimated_end, estimated_end_child)
+    return graph, item_id, estimated_end
 
 def translate(i: Instance):
     graph = GraphInstance()
@@ -127,18 +132,143 @@ def translate(i: Instance):
                     remaining_quantity_needed += i.quantity_needed[r][p][o]
                 graph.add_material(r, i.init_quantity[r], i.purchase_time[r], remaining_quantity_needed)
             res_idx += 1
+    graph.resources_i2g = graph.build_i2g_1D(graph.resources_g2i)
+    graph.operations_i2g = graph.build_i2g_1D(graph.materials_g2i)
     for p in range(i.get_nb_projects()):
         head = i.project_head(p)
-        graph = build_item(i, graph, p, head, True)
-    return graph
+        graph, _, lower_bound = build_item(i, graph, p, head, True)
+    graph.operations_i2g = graph.build_i2g_2D(graph.operations_g2i)
+    graph.items_i2g = graph.build_i2g_2D(graph.items_g2i)
+    return graph, lower_bound
 
 # =====================================================
 # =*= EXECUTE ONE INSTANCE =*=
 # =====================================================
 
-def solve_one(instance: Instance, graph: GraphInstance, shared_GNN: L1_EMBEDDING_GNN, outsourcing_actor: L1_ACTOR_CRITIC_GNN, scheduling_actor: L1_ACTOR_CRITIC_GNN, material_actor: L1_ACTOR_CRITIC_GNN, path, save=False):
-    # TODO solve and save results
-    pass
+def obective_value(cmax, cost, cmax_weight):
+    cmax_weight = int(100 * cmax_weight)
+    cost_weight = 100 - cmax_weight
+    return cmax*cmax_weight + cost*cost_weight
+
+def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item):
+    actions = []
+    status = graph.item(item, 'outsourced')
+    if graph.item(item, 'external') == YES and status == NOT_YET:
+        actions.extend([(item, YES), (item, NO)])
+    elif graph.item(item, 'external') == NO or status == NO:
+        for child in graph.get_direct_children(instance, item):
+            actions.extend(reccursive_outourcing_actions(instance, graph, child))
+    return actions
+
+def check_time(instance: Instance, current_time, hours=True, days=True):
+    must_be = 60*instance.H if days else 60 if hours else 1
+    return current_time % must_be == 0
+
+def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_id, p, o, required_types_of_resources, res_by_types, current_time):
+    actions = []
+    can_be_executed = False
+    if check_time(instance, current_time, instance.in_hours[p][o], instance.in_days[p][o]): 
+        # TODO 1/2 Check precedence (finished or not existing)
+        for rt in required_types_of_resources[p][o]:
+            for r in res_by_types[rt]:
+                res_id = graph.resources_i2g[r]
+                # TODO 2/2 DONT FORGET OP THAT NEED TO BE SYNC
+                if(graph.resource(res_id, 'available_time') <= current_time):
+                    actions.append((operation_id, res_id))
+                pass
+    return actions, can_be_executed
+
+def reccursive_scheduling_actions(instance: Instance, graph: GraphInstance, item, required_types_of_resources, res_by_types, current_time):
+    actions = []
+    operations = []
+    if graph.item(item, 'external') == NO or graph.item(item, 'outsourced') == NO:
+        has_children_to_operate = False
+        p, e = graph.items_g2i[item]
+        start, end = instance.get_operations_idx(p, e)
+        start_design = start
+        for o in range(start, end):
+            if instance.is_design[p][o]:
+                start_design = o
+                operation_id = graph.operations_i2g[p][o]
+                actions_o, can_be_executed = check_scheduling_action(instance, graph, operation_id, p, o, required_types_of_resources, res_by_types, current_time)
+                actions.extend(actions_o)
+                if can_be_executed:
+                    operations.append(operation_id)
+        if not actions:
+            for child_i in instance.get_children(p, e, direct=True): 
+                child = graph.items_i2g[p][child_i]
+                p_actions, p_operations = reccursive_scheduling_actions(instance, graph, child, current_time)
+                if p_actions:
+                    has_children_to_operate = True
+                actions.extend(p_actions)
+                actions.extend(p_operations)
+        if not has_children_to_operate:
+            for o in range(start_design+1, end):
+                operation_id = graph.operations_i2g[p][o]
+                actions_o, can_be_executed = check_scheduling_action(instance, graph, p, o, required_types_of_resources, res_by_types, current_time)
+                actions.extend(actions_o)
+                if can_be_executed:
+                    operations.append(operation_id)
+    return actions, operations
+
+def get_outourcing_actions(instance: Instance, graph: GraphInstance):
+    actions = []
+    for project_head in graph.project_heads:
+        actions.extend(reccursive_outourcing_actions(instance, graph, project_head))
+    return actions
+
+def get_scheduling_actions(instance: Instance, graph: GraphInstance, required_types_of_resources, res_by_types, current_time):
+    actions = []
+    operations = []
+    for project_head in graph.project_heads:
+        p_actions, p_operations = reccursive_scheduling_actions(instance, graph, project_head, required_types_of_resources, res_by_types, current_time)
+        actions.extend(p_actions)
+        operations.extend(p_operations)
+    return actions, operations
+
+def get_material_use_actions(instance: Instance, graph: GraphInstance, operations, required_types_of_materials, res_by_types, current_time):
+    actions = []
+    for operation in operations:
+        # TODO
+        pass
+    return actions
+
+def get_feasible_actions(instance: Instance, graph: GraphInstance, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
+    actions = get_outourcing_actions(instance, graph)
+    type = OUTSOURCING
+    if not actions:
+        actions, operations = get_scheduling_actions(instance, graph, required_types_of_resources, res_by_types, current_time)
+        type = SCHEDULING
+    if not actions and len(operations)>0: 
+        actions = get_material_use_actions(instance, graph, operations, required_types_of_materials, res_by_types, current_time)
+        type = MATERIAL_USE
+    return actions, type
+
+def build_required_resources(i: Instance):
+    required_types_of_resources = [[] for _ in range(i.get_nb_projects())]
+    required_types_of_materials = [[] for _ in range(i.get_nb_projects())]
+    res_by_types = [[] for _ in range(i.nb_resource_types)]
+    for r in range(i.nb_resources):
+        res_by_types[i.get_resource_familly(r)].append(r)
+    for p in range(i.get_nb_projects()):
+        nb_ops = i.O_size[p]
+        required_types_of_resources[p] = [[] for _ in range(nb_ops)]
+        required_types_of_materials[p] = [[] for _ in range(nb_ops)]
+        for o in range(nb_ops):
+            for rt in i.required_rt(p, o):
+                if i.finite_capacity[i.resources_by_type(rt)[0]]:
+                    required_types_of_resources[p][o].append(rt)
+                else:
+                    required_types_of_materials[p][o].append(rt)
+    return required_types_of_resources, required_types_of_materials, res_by_types
+
+def solve_one(instance: Instance, shared_GNN: L1_EMBEDDING_GNN, outsourcing_actor: L1_ACTOR_CRITIC_GNN, scheduling_actor: L1_ACTOR_CRITIC_GNN, material_actor: L1_ACTOR_CRITIC_GNN, path, train = False, save=False):
+    graph, current_cmax = translate(instance)
+    required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
+    current_time = 0
+    current_cost = 0
+    actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
+    return current_cmax, current_cost
 
 # =====================================================
 # =*= PPO TRAINING PROCESS =*=
@@ -195,6 +325,5 @@ if __name__ == '__main__':
         print("Loading "+INSTANCE_PATH+"...")
         instance = load_instance(INSTANCE_PATH)
         shared_GNN, outsourcing_actor, scheduling_actor, material_actor = load_trained_models()
-        graph = translate(instance)
-        solve_one(instance, graph, shared_GNN, outsourcing_actor, scheduling_actor, material_actor, SOLUTION_PATH, save=True)
+        solve_one(instance, shared_GNN, outsourcing_actor, scheduling_actor, material_actor, SOLUTION_PATH, train=False, save=True)
     print("===* END OF FILE *===")

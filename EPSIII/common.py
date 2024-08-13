@@ -18,6 +18,9 @@ def load_instances(path):
     print("end of loading!")
     return instances
 
+def to_binary(booleanVal):
+    return 1 if booleanVal else 0
+
 def set_memory_limit(max_ram_bytes):
     _, hard = resource.getrlimit(resource.RLIMIT_AS)
     resource.setrlimit(resource.RLIMIT_AS, (max_ram_bytes * 1024 * 1024 * 1024, hard))
@@ -44,6 +47,9 @@ def to_bool(s):
     return s.lower() in ['true', '1', 't', 'y', 'yes']
 
 def features2tensor(features):
+    for f in features:
+        if isinstance(f, bool):
+            f = to_binary(f)
     return torch.tensor([[f for f in features]], dtype=torch.float)
 
 def id2tensor(id1, id2):

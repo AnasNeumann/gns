@@ -53,8 +53,8 @@ class Instance:
         self.EO_size = kwargs.get('EO_size', []) #p, e
 
         # Resources
-        self.resource_family = kwargs.get('resource_family', []) #r,rt
-        self.finite_capacity = kwargs.get('finite_capacity', []) #r
+        self.resource_family = kwargs.get('resource_family', []) #r,rt (boolean)
+        self.finite_capacity = kwargs.get('finite_capacity', []) #r (boolean)
         self.design_setup = kwargs.get('design_setup', []) #r, s
         self.operation_setup = kwargs.get('operation_setup', []) #r
         self.execution_time = kwargs.get('execution_time', []) #r, p, o
@@ -65,22 +65,22 @@ class Instance:
         self.quantity_needed = kwargs.get('quantity_needed', []) #r, p, o
 
         # Items
-        self.assembly = kwargs.get('assembly', []) #p, e1, e2
-        self.direct_assembly = kwargs.get('direct_assembly', []) #p, e1, e2
-        self.external = kwargs.get('external', []) #p, e
+        self.assembly = kwargs.get('assembly', []) #p, e1, e2 (boolean)
+        self.direct_assembly = kwargs.get('direct_assembly', []) #p, e1, e2 (boolean)
+        self.external = kwargs.get('external', []) #p, e (boolean)
         self.outsourcing_time = kwargs.get('outsourcing_time', []) #p, e
         self.external_cost = kwargs.get('external_cost', []) #p, e 
 
         # Operations
-        self.operation_family = kwargs.get('operation_family', []) #p, o, ot
-        self.simultaneous = kwargs.get('simultaneous', []) #p, o
-        self.resource_type_needed = kwargs.get('resource_type_needed', []) #p, o, rt
-        self.in_hours = kwargs.get('in_hours', []) #p, o
-        self.in_days = kwargs.get('in_days', []) #p, o
-        self.is_design = kwargs.get('is_design', []) #p, o
+        self.operation_family = kwargs.get('operation_family', []) #p, o, ot (boolean)
+        self.simultaneous = kwargs.get('simultaneous', []) #p, o (boolean)
+        self.resource_type_needed = kwargs.get('resource_type_needed', []) #p, o, rt (boolean)
+        self.in_hours = kwargs.get('in_hours', []) #p, o (boolean)
+        self.in_days = kwargs.get('in_days', []) #p, o (boolean)
+        self.is_design = kwargs.get('is_design', []) #p, o (boolean)
         self.design_value = kwargs.get('design_value', []) #p, o, s
-        self.operations_by_element = kwargs.get('operations_by_element', []) #p, e, o
-        self.precedence = kwargs.get('precedence', []) #p, e, o1, o2
+        self.operations_by_element = kwargs.get('operations_by_element', []) #p, e, o (boolean)
+        self.precedence = kwargs.get('precedence', []) #p, e, o1, o2 (boolean)
     
     def get_name(self):
         return self.size+'_'+str(self.id)
@@ -290,22 +290,31 @@ class GraphInstance(HeteroData):
         self.items_g2i = []
         self.resources_g2i = []
         self.materials_g2i = []
+
+        self.operations_i2g = []
+        self.items_i2g = []
+        self.resources_i2g = []
+        self.materials_i2g = []
         self.current_operation_type = []
         self.current_design_value = []
+        self.project_heads = []
         self.features = FeatureConfiguration()
 
     def add_node(self, type, features: Tensor):
         self[type].x = torch.cat([self[type].x, features], dim=0) if type in self.node_types else features
 
-    def add_operation(self, o, *args):
-        self.operations_g2i.append(o)
+    def add_operation(self, p, o, *args):
+        self.operations_g2i.append((p, o))
         self.add_node('operation', features2tensor(args))
         return len(self.operations_g2i)-1
 
-    def add_item(self, i, *args):
-        self.items_g2i.append(i)
+    def add_item(self, p, i, *args):
+        self.items_g2i.append((p, i))
         self.add_node('item', features2tensor(args))
-        return len(self.items_g2i)-1
+        id = len(self.items_g2i)-1
+        if args[self.features.item['head']] == 1:
+            self.project_heads.append(id)
+        return id
 
     def add_material(self, m, *args):
         self.materials_g2i.append(m)
@@ -434,30 +443,28 @@ class GraphInstance(HeteroData):
         for i in range(nb_ops):
             r_items[i] = adj[:,i].nonzero(as_tuple=True)[0]
         return r_items
+
+    def build_i2g_2D(self, g2i):
+        nb_project = max(val[0] for val in g2i) + 1
+        i2g = [[] for _ in range(nb_project)]
+        for position, (project, op_or_item) in enumerate(g2i):
+            while len(i2g[project]) <= op_or_item:
+                i2g[project].append(-1)
+            i2g[project][op_or_item] = position
+        return i2g
     
-    def resource_i2g(self, r):
-        for res_graph_id, res_instance_id in enumerate(self.resources_g2i):
-            if res_instance_id == r:
-                return res_graph_id
-        return -1
-    
-    def material_i2g(self, m):
-        for mat_graph_id, mat_instance_id in enumerate(self.materials_g2i):
-            if mat_instance_id == m:
-                return mat_graph_id
-        return -1
-    
-    def item_i2g(self, i):
-        for item_graph_id, item_instance_id in enumerate(self.items_g2i):
-            if item_instance_id == i:
-                return item_graph_id
-        return -1
-    
-    def operation_i2g(self, o):
-        for operation_graph_id, operation_instance_id in enumerate(self.operations_g2i):
-            if operation_instance_id == o:
-                return operation_graph_id
-        return -1
+    def build_i2g_1D(self, g2i):
+        i2g = [0] * len(g2i)
+        for id in range(len(g2i)):
+            i2g[g2i[id]] = id
+        return i2g
+
+    def get_direct_children(self, instance, item_id):
+        p, e = self.items_g2i[item_id]
+        children = []
+        for child in instance.get_children(p,e,direct=True):
+            children.append(self.items_i2g[p][child])
+        return children
 
     def to_state(self):
         state = State(self.items(), 
