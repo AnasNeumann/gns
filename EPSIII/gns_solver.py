@@ -3,14 +3,19 @@ import pickle
 from torch.multiprocessing import Pool, set_start_method
 import os
 from model import Instance, GraphInstance, L1_ACTOR_CRITIC_GNN, L1_EMBEDDING_GNN
-from common import load_instance, to_bool, features2tensor, id2tensor, to_binary
+from common import load_instance, to_bool, features2tensor, id2tensor, to_binary, init_several_1D
 import torch
 torch.autograd.set_detect_anomaly(True)
+import random
+import multiprocessing
 
 PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 OUTSOURCING = "outsourcing"
 SCHEDULING = "scheduling"
 MATERIAL_USE = "material_use"
+OUTSOURCING_AGENT = 0
+SCHEDULING_AGENT = 1
+MATERIAL_AGENT = 2
 LEARNING_RATE = 2e-4
 PARRALLEL = True
 DEVICE = None
@@ -39,14 +44,15 @@ AC_CONF = {
 NOT_YET = -1
 YES = 1
 NO = 0
+instances = []
 
 # =====================================================
 # =*= MODEL LOADING METHOD =*=
 # =====================================================
 
-def save_models(models):
-    for model, name in models:
-        torch.save(model.state_dict(), './models/'+name+'_weights.pth')
+def save_models(agents):
+    for agent, name in agents:
+        torch.save(agent.state_dict(), './models/'+name+'_weights.pth')
 
 def load_trained_models():
     shared_GNN = L1_EMBEDDING_GNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
@@ -57,14 +63,14 @@ def load_trained_models():
     outsourcing_actor.load_state_dict(torch.load('./models/outsourcing_weights.pth'))
     scheduling_actor.load_state_dict(torch.load('./models/scheduling_weights.pth'))
     material_actor.load_state_dict(torch.load('./models/material_weights.pth'))
-    return (shared_GNN, 'gnn'), (outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')
+    return [(shared_GNN, 'gnn'), (outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 def init_new_models():
     shared_GNN = L1_EMBEDDING_GNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
     outsourcing_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], OUTSOURCING)
     scheduling_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], SCHEDULING)
     material_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], MATERIAL_USE)
-    return (shared_GNN, 'gnn'), (outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')
+    return [(shared_GNN, 'gnn'), (outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 # =====================================================
 # =*= TRANSLATE INSTANCE TO GRAPH =*=
@@ -167,7 +173,7 @@ def translate(i: Instance):
     return graph, lower_bound
 
 # =====================================================
-# =*= EXECUTE ONE INSTANCE =*=
+# =*= SEARCH FOR FEASIBLE ACTIONS =*=
 # =====================================================
 
 def obective_value(cmax, cost, cmax_weight):
@@ -294,6 +300,10 @@ def get_feasible_actions(instance: Instance, graph: GraphInstance, required_type
         type = MATERIAL_USE
     return actions, type
 
+# =====================================================
+# =*= EXECUTE ONE INSTANCE =*=
+# =====================================================
+
 def build_required_resources(i: Instance):
     required_types_of_resources = [[] for _ in range(i.get_nb_projects())]
     required_types_of_materials = [[] for _ in range(i.get_nb_projects())]
@@ -312,20 +322,33 @@ def build_required_resources(i: Instance):
                     required_types_of_materials[p][o].append(rt)
     return required_types_of_resources, required_types_of_materials, res_by_types
 
-def solve_one(instance: Instance, shared_GNN: L1_EMBEDDING_GNN, outsourcing_actor: L1_ACTOR_CRITIC_GNN, scheduling_actor: L1_ACTOR_CRITIC_GNN, material_actor: L1_ACTOR_CRITIC_GNN, path, train = False, save=False):
+def solve_one(instance: Instance, agents, path="", train=False, save=False):
     graph, current_cmax = translate(instance)
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     current_time = 0
     current_cost = 0
+    rewards, values = torch.Tensor([]), torch.Tensor([])
+    probabilities, states, actions, actions_idx = [],[],[],[]
+    # TODO Solving / Scheduling algorithm
     actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
-    return current_cmax, current_cost
+    if train:
+        return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards]
+    else:
+        return current_cmax, current_cost 
 
-# =====================================================
-# =*= PPO TRAINING PROCESS =*=
-# =====================================================
+# ====================================================================
+# =*= PPO TRAINING PROCESS FOR MULTI-AGENTS WITH SHARED PARAMETERS =*=
+# ====================================================================
+
+def search_instance(id) -> Instance:
+    global instances
+    for instance in instances:
+        if instance.id == id:
+            return instance
+    return None
 
 def load_training_dataset():
-    instances = []
+    global instances
     for size in PROBLEM_SIZES:
         problems = []
         path = './instances/train/'+size+'/'
@@ -338,9 +361,143 @@ def load_training_dataset():
     print("end of loading!")
     return instances
 
-def train(instances, shared_GNN: L1_EMBEDDING_GNN, outsourcing_actor: L1_ACTOR_CRITIC_GNN, scheduling_actor: L1_ACTOR_CRITIC_GNN, material_actor: L1_ACTOR_CRITIC_GNN):
-    # TODO train models based on instances then save models
-    save_models([shared_GNN, outsourcing_actor, scheduling_actor, material_actor])
+def calculate_returns(rewards, gamma=PPO_CONF['discount_factor']):
+    R = 0
+    returns = []
+    for r in reversed(rewards):
+        R = r + gamma * R
+        returns.insert(0, R)
+    return torch.tensor(returns, dtype=torch.float32)
+
+def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_factor'], lam=PPO_CONF['bias_variance_tradeoff']):
+    GAE = 0
+    advantages = []
+    for t in reversed(range(len(rewards))):
+        delta = rewards[t] - values[t]
+        if t<len(rewards)-1:
+            delta = delta + (gamma * values[t+1])
+        GAE = delta + gamma * lam * GAE
+        advantages.insert(0, GAE)
+    return advantages
+
+def PPO_loss(agent, old_probs, states, actions, actions_idx, advantages, old_values, returns, instances_idx, e=PPO_CONF['clip_ratio']):
+    new_log_probs = torch.Tensor([])
+    old_log_probs = torch.Tensor([])
+    entropies = torch.Tensor([])
+    id = -1
+    instance = None
+    related_items = []
+    parents = [] # changer par une liste locale (sur le batch des related items et parents)
+    for i in range(len(states)):
+        if instances_idx[id] != id:
+            id = instances_idx[id]
+            instance = search_instance(i)
+        p,_ = agent(states[i], actions[i], related_items, parents, instance.w_makespan)
+        a = actions_idx[i]
+        entropies = torch.cat((entropies, torch.sum(-p*torch.log(p+1e-8), dim=-1)))
+        new_log_probs = torch.cat((new_log_probs, torch.log(p[a]+1e-8)))
+        old_log_probs = torch.cat((old_log_probs, torch.log(old_probs[i][a]+1e-8)))
+    ratio = torch.exp(new_log_probs - old_log_probs)
+    clipped_ratio = torch.clamp(ratio, 1-e, 1+e)
+    policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
+    value_loss = torch.mean(torch.stack([(V_old - r) ** 2 for V_old, r in zip(old_values, returns)]))
+    entropy_loss = torch.mean(entropies)
+    print("\t\t value loss - "+str(value_loss))
+    print("\t\t policy loss - "+str(policy_loss)) 
+    print("\t\t entropy loss - "+str(entropy_loss)) 
+    return (PPO_CONF['policy_loss']*policy_loss) + (PPO_CONF['value_loss']*value_loss) - (entropy_loss*PPO_CONF['entropy'])
+
+def PPO_optimize(optimizer, loss):
+    optimizer.zero_grad()
+    loss.backward(retain_graph=False)
+    optimizer.step()
+
+def async_solve(init_args):
+    agents, instance = init_args
+    total_ops = 0
+    for j in instance['jobs']:
+        total_ops += len(j)
+    print("\t start solving instance: "+str(instance['id'])+"...")
+    result = solve_one(instance, agents, train=True)
+    print("\t end solving instance: "+str(instance['id'])+"!")
+    return result
+
+def async_batch(agents, batch, epochs, num_processes, optimizers):
+    all_probabilities, all_states, all_actions, all_actions_idx, all_instances_idx = init_several_1D(3, [], 5)
+    with Pool(num_processes) as pool:
+        results = pool.map(async_solve, [(agents, instance) for instance in batch])
+    all_rewards, all_values, probabilities, states, actions, actions_idx, instances_idx = zip(*results)
+    for i in range(len(batch)):
+        for agent in range(len(agents)):
+            all_probabilities[agent].extend(probabilities[i][agent])
+            all_states[agent].extend(states[i][agent])
+            all_actions[agent].extend(actions[i][agent])
+            all_actions_idx[agent].extend(actions_idx[i][agent])
+            all_instances_idx[agent].extend(instances_idx)
+    all_returns = [[ri for r in agent_rewards for ri in calculate_returns(r)] for agent_rewards in all_rewards]
+    advantages = []
+    flattened_values = []
+    for agent in agent:
+        advantages.append(torch.Tensor([gae for r, v in zip(all_rewards[agent], all_values[agent]) for gae in generalized_advantage_estimate(r, v)]))
+        flattened_values.append([v for vals in all_values[agent] for v in vals])
+    for e in range(epochs):
+        print("\t Optimization epoch: "+str(e+1)+"/"+str(epochs))
+        for id, (agent, name) in enumerate(agent):
+            print("\t\t Optimizing agent: "+name+"...")
+            loss = PPO_loss(agent, all_probabilities[id], all_states[id], all_actions[id], all_actions_idx[id], advantages[id], flattened_values[id], all_returns[id], all_instances_idx[id])
+            PPO_optimize(optimizers[id], loss)
+
+def train(agents, iterations=PPO_CONF['train_iterations'], batch_size=PPO_CONF['batch_size'], epochs=PPO_CONF['opt_epochs'], validation_rate=PPO_CONF['validation_rate']):
+    global instances
+    optimizers = [torch.optim.Adam(agent.parameters(), lr=LEARNING_RATE) for agent,_ in agents]
+    for agent,_ in agents:
+        agent.train()
+        if DEVICE == "cuda":
+            agent.to(DEVICE)
+    random.shuffle(instances)
+    num_val = int(len(instances) * PPO_CONF['validation_ratio'])
+    train_instances, val_instances = instances[num_val:], instances[:num_val]
+    num_processes = multiprocessing.cpu_count() if PARRALLEL else 1
+    print("Running on "+str(num_processes)+" TPUs in parallel...")
+    for iteration in range(iterations):
+        print("PPO iteration: "+str(iteration+1)+"/"+str(iterations)+":")
+        if iteration % PPO_CONF['switch_batch'] == 0:
+            print("\t Time to sample new batch of size "+str(batch_size)+"...")
+            current_batch = random.sample(train_instances, batch_size)
+        async_batch(agents, current_batch, epochs, num_processes, optimizers)
+        if iteration % validation_rate == 0:
+            print("\t Time to validate the loss...")
+            validate(agents, val_instances, num_processes)
+    save_models(agents)
+    print("<======***--| END OF TRAINING |--***======>")
+
+def validate(agents, val_instances, num_processes):
+    for agent,_ in agents:
+        agent.eval()
+    with torch.no_grad():
+        all_probabilities, all_states, all_actions, all_actions_idx, all_instances_idx = init_several_1D(3, [], 5)
+        with Pool(num_processes) as pool:
+            results = pool.map(async_solve, [(agents, instance) for instance in val_instances])
+        all_rewards, all_values, probabilities, states, actions, actions_idx, instances_idx = zip(*results)
+        for i in range(len(val_instances)):
+            for agent in range(len(agents)):
+                all_probabilities[agent].extend(probabilities[i][agent])
+                all_states[agent].extend(states[i][agent])
+                all_actions[agent].extend(actions[i][agent])
+                all_actions_idx[agent].extend(actions_idx[i][agent])
+                all_instances_idx[agent].extend(instances_idx)
+        all_returns = [[ri for r in agent_rewards for ri in calculate_returns(r)] for agent_rewards in all_rewards]
+        advantages = []
+        flattened_values = []
+        for agent in agent:
+            advantages.append(torch.Tensor([gae for r, v in zip(all_rewards[agent], all_values[agent]) for gae in generalized_advantage_estimate(r, v)]))
+            flattened_values.append([v for vals in all_values[agent] for v in vals])
+        for id, (agent, name) in enumerate(agent):
+            print("\t\t Evaluating agent: "+name+"...")
+            loss = PPO_loss(agent, all_probabilities[id], all_states[id], all_actions[id], all_actions_idx[id], advantages[id], flattened_values[id], all_returns[id], instances_idx[id])
+            print(f'\t Average Loss = {loss:.4f}')
+    for agent,_ in agents:
+        agent.train()
 
 # =====================================================
 # =*= MAIN CODE =*=
@@ -362,18 +519,17 @@ if __name__ == '__main__':
         set_start_method('spawn')
     except RuntimeError:
         pass
+    DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"Execution device: {DEVICE}...")
     if to_bool(args.train):
         print("LOAD DATASET TO TRAIN MODELS")
         instances = load_training_dataset()
         print("TRAIN MODELS WITH PPO")
-        shared_GNN, outsourcing_actor, scheduling_actor, material_actor = init_new_models()
-        train(instances, shared_GNN, outsourcing_actor, scheduling_actor, material_actor)
+        train(init_new_models())
     else:
         print("SOLVE A TARGET INSTANCE")
         INSTANCE_PATH = './instances/test/'+args.size+'/instance_'+args.id+'.pkl'
         SOLUTION_PATH = './instances/test/'+args.size+'/solution_'+args.id+'.csv'
-        print("Loading "+INSTANCE_PATH+"...")
         instance = load_instance(INSTANCE_PATH)
-        shared_GNN, outsourcing_actor, scheduling_actor, material_actor = load_trained_models()
-        solve_one(instance, shared_GNN, outsourcing_actor, scheduling_actor, material_actor, SOLUTION_PATH, train=False, save=True)
+        solve_one(instance, load_trained_models(), SOLUTION_PATH, train=False, save=True)
     print("===* END OF FILE *===")
