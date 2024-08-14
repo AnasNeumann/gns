@@ -171,19 +171,53 @@ class Instance:
             if(is_head):
                 return e
         return -1
+    
+    def preds_or_succs(self, p, e, start, end, o, design_only=False, physical_only=False, preds=True):
+        operations = []
+        for other in range(start, end):
+            if other!=o and (not design_only or self.is_design[p][other]) \
+                and (not physical_only or not self.is_design[p][other]) \
+                and ((not preds and self.precedence[p][e][other][o]) or (preds or self.precedence[p][e][o][other])):
+                operations.append(other)
+        return operations
+    
+    def last_design_operations(self, p, e):
+        ops = []
+        start, end = self.get_operations_idx(p, e)
+        for o in range(start, end):
+            if self.is_design[p][o]:
+                succs = self.preds_or_succs(p, e, start, end, o, design_only=True, physical_only=False, preds=False)
+                if len(succs) <= 0:
+                    ops.append(o)
+        return ops
+
+    def first_operations(self, p, e):
+        ops = []
+        start, end = self.get_operations_idx(p, e)
+        for o in range(start, end):
+            preds = self.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=False, preds=True)
+            if len(preds) <= 0:
+                ops.append(o)
+        return ops
+
+    def first_physical_operations(self, p, e):
+        ops = []
+        start, end = self.get_operations_idx(p, e)
+        for o in range(start, end):
+            if not self.is_design[p][o]:
+                preds = self.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=True, preds=True)
+                if len(preds) <= 0:
+                    ops.append(o)
+        return ops
 
     def last_operations(self, p, e):
-        last_ops = []
+        ops = []
         start, end = self.get_operations_idx(p, e)
-        for o1 in range(start, end):
-            is_last = True
-            for o2 in range(start, end):
-                if self.precedence[p][e][o2][o1] and o2 != o1:
-                    is_last = False
-                    break
-            if is_last:
-                last_ops.append(o1)
-        return last_ops
+        for o in range(start, end):
+            succs = self.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=False, preds=False)
+            if len(succs) <= 0:
+                ops.append(o)
+        return ops
 
     def required_resources(self, p, o):
         resources = []
