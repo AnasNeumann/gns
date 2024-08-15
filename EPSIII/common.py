@@ -54,3 +54,9 @@ def features2tensor(features):
 
 def id2tensor(id1, id2):
     return torch.tensor([[id1], [id2]], dtype=torch.long)
+
+def search_object_by_id(objects, id):
+    for obj in objects:
+        if obj['id'] == id:
+            return obj
+    return None
