@@ -44,7 +44,6 @@ AC_CONF = {
 NOT_YET = -1
 YES = 1
 NO = 0
-instances = []
 
 # =====================================================
 # =*= MODEL LOADING METHOD =*=
@@ -340,15 +339,14 @@ def solve_one(instance: Instance, agents, path="", train=False, save=False):
 # =*= PPO TRAINING PROCESS FOR MULTI-AGENTS WITH SHARED PARAMETERS =*=
 # ====================================================================
 
-def search_instance(id) -> Instance:
-    global instances
+def search_instance(instances, id) -> Instance:
     for instance in instances:
         if instance.id == id:
             return instance
     return None
 
 def load_training_dataset():
-    global instances
+    instances = [] 
     for size in PROBLEM_SIZES:
         problems = []
         path = './instances/train/'+size+'/'
@@ -380,18 +378,20 @@ def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_fac
         advantages.insert(0, GAE)
     return advantages
 
-def PPO_loss(agent, old_probs, states, actions, actions_idx, advantages, old_values, returns, instances_idx, e=PPO_CONF['clip_ratio']):
+def PPO_loss(instances, agent, old_probs, states, actions, actions_idx, advantages, old_values, returns, instances_idx, all_related_items, all_parents, e=PPO_CONF['clip_ratio']):
     new_log_probs = torch.Tensor([])
     old_log_probs = torch.Tensor([])
     entropies = torch.Tensor([])
     id = -1
     instance = None
     related_items = []
-    parents = [] # changer par une liste locale (sur le batch des related items et parents)
+    parents = []
     for i in range(len(states)):
         if instances_idx[id] != id:
             id = instances_idx[id]
-            instance = search_instance(i)
+            instance = search_instance(instances, id)
+            related_items = search_instance(all_related_items, id)['related_item']
+            parents = search_instance(all_parents, id)['parent']
         p,_ = agent(states[i], actions[i], related_items, parents, instance.w_makespan)
         a = actions_idx[i]
         entropies = torch.cat((entropies, torch.sum(-p*torch.log(p+1e-8), dim=-1)))
@@ -422,18 +422,21 @@ def async_solve(init_args):
     print("\t end solving instance: "+str(instance['id'])+"!")
     return result
 
-def async_batch(agents, batch, epochs, num_processes, optimizers):
+def async_batch(instances, agents, batch, epochs, num_processes, optimizers):
     all_probabilities, all_states, all_actions, all_actions_idx, all_instances_idx = init_several_1D(3, [], 5)
+    all_related_items, all_parents = [], []
     with Pool(num_processes) as pool:
         results = pool.map(async_solve, [(agents, instance) for instance in batch])
-    all_rewards, all_values, probabilities, states, actions, actions_idx, instances_idx = zip(*results)
+    all_rewards, all_values, probabilities, states, actions, actions_idx, instances_idx, related_items, parents = zip(*results)
     for i in range(len(batch)):
+        all_parents.append({'id': instances_idx[0][0], 'parents': parents[i]})
+        all_related_items.append({'id': instances_idx[0][0], 'related_items': related_items[i]})
         for agent in range(len(agents)):
             all_probabilities[agent].extend(probabilities[i][agent])
             all_states[agent].extend(states[i][agent])
             all_actions[agent].extend(actions[i][agent])
             all_actions_idx[agent].extend(actions_idx[i][agent])
-            all_instances_idx[agent].extend(instances_idx)
+            all_instances_idx[agent].extend(instances_idx[agent])
     all_returns = [[ri for r in agent_rewards for ri in calculate_returns(r)] for agent_rewards in all_rewards]
     advantages = []
     flattened_values = []
@@ -444,11 +447,10 @@ def async_batch(agents, batch, epochs, num_processes, optimizers):
         print("\t Optimization epoch: "+str(e+1)+"/"+str(epochs))
         for id, (agent, name) in enumerate(agent):
             print("\t\t Optimizing agent: "+name+"...")
-            loss = PPO_loss(agent, all_probabilities[id], all_states[id], all_actions[id], all_actions_idx[id], advantages[id], flattened_values[id], all_returns[id], all_instances_idx[id])
+            loss = PPO_loss(instances, agent, all_probabilities[id], all_states[id], all_actions[id], all_actions_idx[id], advantages[id], flattened_values[id], all_returns[id], all_instances_idx[id], all_related_items, all_parents)
             PPO_optimize(optimizers[id], loss)
 
-def train(agents, iterations=PPO_CONF['train_iterations'], batch_size=PPO_CONF['batch_size'], epochs=PPO_CONF['opt_epochs'], validation_rate=PPO_CONF['validation_rate']):
-    global instances
+def train(instances, agents, iterations=PPO_CONF['train_iterations'], batch_size=PPO_CONF['batch_size'], epochs=PPO_CONF['opt_epochs'], validation_rate=PPO_CONF['validation_rate']):
     optimizers = [torch.optim.Adam(agent.parameters(), lr=LEARNING_RATE) for agent,_ in agents]
     for agent,_ in agents:
         agent.train()
@@ -464,22 +466,25 @@ def train(agents, iterations=PPO_CONF['train_iterations'], batch_size=PPO_CONF['
         if iteration % PPO_CONF['switch_batch'] == 0:
             print("\t Time to sample new batch of size "+str(batch_size)+"...")
             current_batch = random.sample(train_instances, batch_size)
-        async_batch(agents, current_batch, epochs, num_processes, optimizers)
+        async_batch(instances, agents, current_batch, epochs, num_processes, optimizers)
         if iteration % validation_rate == 0:
             print("\t Time to validate the loss...")
             validate(agents, val_instances, num_processes)
     save_models(agents)
     print("<======***--| END OF TRAINING |--***======>")
 
-def validate(agents, val_instances, num_processes):
+def validate(agents, instances, num_processes):
     for agent,_ in agents:
         agent.eval()
     with torch.no_grad():
         all_probabilities, all_states, all_actions, all_actions_idx, all_instances_idx = init_several_1D(3, [], 5)
+        all_related_items, all_parents = [], []
         with Pool(num_processes) as pool:
-            results = pool.map(async_solve, [(agents, instance) for instance in val_instances])
-        all_rewards, all_values, probabilities, states, actions, actions_idx, instances_idx = zip(*results)
-        for i in range(len(val_instances)):
+            results = pool.map(async_solve, [(agents, instance) for instance in instances])
+        all_rewards, all_values, probabilities, states, actions, actions_idx, instances_idx, related_items, parents = zip(*results)
+        for i in range(len(instances)):
+            all_parents.append({'id': instances_idx[0][0], 'parents': parents[i]})
+            all_related_items.append({'id': instances_idx[0][0], 'related_items': related_items[i]})
             for agent in range(len(agents)):
                 all_probabilities[agent].extend(probabilities[i][agent])
                 all_states[agent].extend(states[i][agent])
@@ -494,7 +499,7 @@ def validate(agents, val_instances, num_processes):
             flattened_values.append([v for vals in all_values[agent] for v in vals])
         for id, (agent, name) in enumerate(agent):
             print("\t\t Evaluating agent: "+name+"...")
-            loss = PPO_loss(agent, all_probabilities[id], all_states[id], all_actions[id], all_actions_idx[id], advantages[id], flattened_values[id], all_returns[id], instances_idx[id])
+            loss = PPO_loss(instances, agent, all_probabilities[id], all_states[id], all_actions[id], all_actions_idx[id], advantages[id], flattened_values[id], all_returns[id], instances_idx[id], all_related_items, all_parents)
             print(f'\t Average Loss = {loss:.4f}')
     for agent,_ in agents:
         agent.train()
@@ -525,7 +530,7 @@ if __name__ == '__main__':
         print("LOAD DATASET TO TRAIN MODELS")
         instances = load_training_dataset()
         print("TRAIN MODELS WITH PPO")
-        train(init_new_models())
+        train(instances, init_new_models())
     else:
         print("SOLVE A TARGET INSTANCE")
         INSTANCE_PATH = './instances/test/'+args.size+'/instance_'+args.id+'.pkl'
