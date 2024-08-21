@@ -300,7 +300,7 @@ class FeatureConfiguration:
             'parents': 7,
             'children': 8,
             'parents_physical_time': 9,
-            'children_design_time': 10,
+            'children_time': 10,
             'start_time': 11,
             'end_time': 12
         }

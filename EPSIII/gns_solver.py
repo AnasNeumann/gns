@@ -77,14 +77,14 @@ def init_new_models():
 
 def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
     design_time, physical_time = i.item_processing_time(p, e)
-    children_design_time = 0
+    children_time = 0
     max_children_time = 0
-    childrens = i.get_children(p, e, False)
-    childrens_physical_operations =0
+    childrens = i.get_children(p, e, direct=False)
+    childrens_physical_operations = 0
     for children in childrens:
         cdt, cpt = i.item_processing_time(p, children)
-        children_design_time += cdt
-        max_children_time = max(cdt+cpt, max_children_time)
+        children_time += cdt+cpt
+        max_children_time = max(children_time, max_children_time)
         start_c, end_c = i.get_operations_idx(p, children)
         for child_op in range(start_c, end_c):
             if not i.is_design[p][child_op]:
@@ -98,7 +98,7 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
             parents_design_time += adt
     estimated_end = design_time + parents_design_time + physical_time + max_children_time
     status = NOT_YET if i.external[p][e] else NO 
-    item_id = graph.add_item(p, e, head, i.external[p][e], status, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, children_design_time, parents_design_time, estimated_end)
+    item_id = graph.add_item(p, e, head, i.external[p][e], status, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, children_time, parents_design_time, estimated_end)
     op_start = parents_design_time
     start, end = i.get_operations_idx(p,e)
     for o in range(start, end):
@@ -109,9 +109,9 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
         graph.add_operation_assembly(item_id, op_id)
         for r in i.required_resources(p,o):
             if i.finite_capacity[r]:
-                graph.add_need_for_resources(op_id, graph.resource_i2g[r], [0, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
+                graph.add_need_for_resources(op_id, graph.resource_i2g[r], [NO, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
             else:
-                graph.add_need_for_materials(op_id, graph.material_i2g[r], [0, op_start, i.quantity_needed[r][p][o]])
+                graph.add_need_for_materials(op_id, graph.material_i2g[r], [NO, op_start, i.quantity_needed[r][p][o]])
     for children in i.get_children(p, e, True):
         graph, child_id, estimated_end_child = build_item(i, graph, p, children, head=False)
         graph.add_item_assembly(item_id, child_id)
@@ -197,7 +197,7 @@ def check_time(instance: Instance, current_time, hours=True, days=True):
 def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_id, p, e, start, end, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     actions = []
     can_be_executed = False
-    if check_time(instance, current_time, instance.in_hours[p][o], instance.in_days[p][o]): 
+    if graph.operation(operation_id, 'remaining_resources')>0 and check_time(instance, current_time, instance.in_hours[p][o], instance.in_days[p][o]): 
         preds = instance.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=False, preds=True)
         still_has_preds_to_execute = False
         for pred in preds:
@@ -232,13 +232,14 @@ def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_
                     can_be_executed = True
     return actions, can_be_executed
 
-def reccursive_scheduling_actions(instance: Instance, graph: GraphInstance, item, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
+def reccursive_scheduling_actions(instance: Instance, graph: GraphInstance, item_id, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     actions = []
     operations = []
-    if graph.item(item, 'external') == NO or graph.item(item, 'outsourced') == NO:
-        p, e = graph.items_g2i[item]
+    if graph.item(item_id, 'external') == NO or graph.item(item_id, 'outsourced') == NO:
+        p, e = graph.items_g2i[item_id]
         start, end = instance.get_operations_idx(p, e)
         start_design = start
+        remaining_physical_time = graph.item(item_id, 'remaining_physical_time')
         for o in range(start, end):
             if instance.is_design[p][o]:
                 start_design = o
@@ -247,13 +248,13 @@ def reccursive_scheduling_actions(instance: Instance, graph: GraphInstance, item
                 actions.extend(actions_o)
                 if can_be_executed:
                     operations.append(operation_id)
-        if not actions: # no design operations left
+        if not actions and (remaining_physical_time==0 or (start_design+1)==end): # item not terminal and no design operations left
             for child_i in instance.get_children(p, e, direct=True): 
                 child = graph.items_i2g[p][child_i]
                 p_actions, p_operations = reccursive_scheduling_actions(instance, graph, child, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
                 actions.extend(p_actions)
                 actions.extend(p_operations)
-        if not actions: # no children to execute
+        if remaining_physical_time > 0 and not actions: # item not terminal and no children to execute
             for o in range(start_design+1, end):
                 operation_id = graph.operations_i2g[p][o]
                 actions_o, can_be_executed = check_scheduling_action(instance, graph, p, e, start, end, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
@@ -331,6 +332,8 @@ def solve_one(instance: Instance, agents, path="", train=False, save=False):
     rewards, values = torch.Tensor([]), torch.Tensor([])
     probabilities, states, actions, actions_idx = [],[],[],[]
     # TODO Solving / Scheduling algorithm
+    # TODO required_types_of_resources and required_types_of_materials will be updated
+    # TODO remove instance.operation_time(p,o) to item remaining time
     actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
