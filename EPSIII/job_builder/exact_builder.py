@@ -30,5 +30,5 @@ if __name__ == '__main__':
             f.write("pip install --upgrade pip --no-index\n")
             f.write("pip install --no-index -r "+BASIC_PATH+"requirements.txt\n")
             f.write("python "+BASIC_PATH+"EPSIII/exact_solver.py --size="+size+" --number="+str(instance)+"\n")
-            f.write("deactivate\n")
+            f.write("desactivate\n")
             f.close()
