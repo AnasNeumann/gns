@@ -2,7 +2,7 @@ import argparse
 import pickle
 from torch.multiprocessing import Pool, set_start_method
 import os
-from model import Instance, GraphInstance, L1_ACTOR_CRITIC_GNN, L1_EMBEDDING_GNN
+from model import Instance, GraphInstance, L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor
 from common import load_instance, to_bool, init_several_1D, search_object_by_id
 import torch
 torch.autograd.set_detect_anomaly(True)
@@ -55,21 +55,21 @@ def save_models(agents):
         torch.save(agent.state_dict(), BASIC_PATH+'models/'+name+'_weights.pth')
 
 def load_trained_models():
-    shared_GNN = L1_EMBEDDING_GNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
+    shared_GNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
     shared_GNN.load_state_dict(torch.load(BASIC_PATH+'models/gnn_weights.pth'))
-    outsourcing_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], OUTSOURCING)
-    scheduling_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], SCHEDULING)
-    material_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], MATERIAL_USE)
+    outsourcing_actor = L1_OutousrcingActor(shared_GNN, AC_CONF['hidden_channels'], OUTSOURCING)
+    scheduling_actor = L1_SchedulingActor(shared_GNN, AC_CONF['hidden_channels'], SCHEDULING)
+    material_actor = L1_MaterialActor(shared_GNN, AC_CONF['hidden_channels'], MATERIAL_USE)
     outsourcing_actor.load_state_dict(torch.load(BASIC_PATH+'models/outsourcing_weights.pth'))
     scheduling_actor.load_state_dict(torch.load(BASIC_PATH+'models/scheduling_weights.pth'))
     material_actor.load_state_dict(torch.load(BASIC_PATH+'models/material_weights.pth'))
     return [(shared_GNN, 'gnn'), (outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 def init_new_models():
-    shared_GNN = L1_EMBEDDING_GNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
-    outsourcing_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], OUTSOURCING)
-    scheduling_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], SCHEDULING)
-    material_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], MATERIAL_USE)
+    shared_GNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
+    outsourcing_actor = L1_OutousrcingActor(shared_GNN, AC_CONF['hidden_channels'], OUTSOURCING)
+    scheduling_actor = L1_SchedulingActor(shared_GNN, AC_CONF['hidden_channels'], SCHEDULING)
+    material_actor = L1_MaterialActor(shared_GNN, AC_CONF['hidden_channels'], MATERIAL_USE)
     return [(shared_GNN, 'gnn'), (outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 # =====================================================

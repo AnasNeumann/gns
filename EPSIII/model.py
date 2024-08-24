@@ -724,10 +724,10 @@ class OperationLayer(Module):
         embedding = torch.zeros((operations.shape[0], self.embedding_size), device=operations.device)
         embedding[1:-1] = self.mlp_combined(torch.cat([agg_preds_embeddings, agg_succs_embeddings, agg_resources_embeddings, agg_materials_embeddings, item_embeddings, self_embeddings], dim=-1))
         return embedding
-  
-def L1_EMBEDDING_GNN(Module):
+
+def L1_EmbbedingGNN(Module):
     def __init__(self, embedding_size, embedding_hidden_channels, nb_embedding_layers):
-        super(L1_EMBEDDING_GNN, self).__init__()
+        super(L1_EmbbedingGNN, self).__init__()
         conf = FeatureConfiguration()
         self.embedding_size = embedding_size
         self.nb_embedding_layers = nb_embedding_layers
@@ -758,12 +758,11 @@ def L1_EMBEDDING_GNN(Module):
         state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources, alpha], dim=-1)[0]
         return state, state_embedding
 
-def L1_ACTOR_CRITIC_GNN(Module):
-    def __init__(self, shared_embedding_layers: L1_EMBEDDING_GNN, actor_critic_hidden_channels, decision_type):
-        super(L1_ACTOR_CRITIC_GNN, self).__init__()
+def L1_OutousrcingActor(Module):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, actor_critic_hidden_channels):
+        super(L1_OutousrcingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
-        self.decision_type = decision_type
-        self.actor_input_size = (self.embedding_size * 5) + 2 if decision_type == OUTSOURCING else (self.embedding_size * 6) + 1
+        self.actor_input_size = (self.embedding_size * 5) + 2
         self.actor = Sequential(
             Linear(self.actor_input_size, actor_critic_hidden_channels), Tanh(),
             Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(),
@@ -778,13 +777,60 @@ def L1_ACTOR_CRITIC_GNN(Module):
     def forward(self, state: State, actions, related_items, parents, alpha):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
         inputs = torch.zeros((len(actions), self.actor_input_size))
-        for i, (first_id, second_id) in enumerate(actions.outsourcing):
-            if self.decision_type == OUTSOURCING:
-                inputs[i] = torch.cat([state.items[first_id], torch.tensor([second_id], dtype=torch.long), state_embedding], dim=-1)
-            elif self.decision_type == SCHEDULING:
-                inputs[i] = torch.cat([state.operations[first_id], state.resources[second_id], state_embedding], dim=-1)
-            else: 
-                inputs[i] = torch.cat([state.operations[first_id], state.materials[second_id], state_embedding], dim=-1)
+        for i, (item_id, outsourcing_choice) in enumerate(actions.outsourcing):
+            inputs[i] = torch.cat([state.items[item_id], torch.tensor([outsourcing_choice], dtype=torch.long), state_embedding], dim=-1)
+        action_logits = self.actor(inputs)
+        action_probs = F.softmax(action_logits, dim=0)
+        state_value = self.critic_mlp(state_embedding)
+        return action_probs, state_value
+    
+def L1_SchedulingActor(Module):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, actor_critic_hidden_channels):
+        super(L1_SchedulingActor, self).__init__()
+        self.shared_embedding_layers = shared_embedding_layers
+        self.actor_input_size = (self.embedding_size * 6) + 1
+        self.actor = Sequential(
+            Linear(self.actor_input_size, actor_critic_hidden_channels), Tanh(),
+            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(),
+            Linear(actor_critic_hidden_channels, 1)
+        )
+        self.critic_mlp = Sequential(
+            Linear((self.embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
+            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(), 
+            Linear(actor_critic_hidden_channels, 1)
+        )
+
+    def forward(self, state: State, actions, related_items, parents, alpha):
+        state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
+        inputs = torch.zeros((len(actions), self.actor_input_size))
+        for i, (operation_id, resource_id) in enumerate(actions.outsourcing):
+            inputs[i] = torch.cat([state.operations[operation_id], state.resources[resource_id], state_embedding], dim=-1)
+        action_logits = self.actor(inputs)
+        action_probs = F.softmax(action_logits, dim=0)
+        state_value = self.critic_mlp(state_embedding)
+        return action_probs, state_value
+
+def L1_MaterialActor(Module):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, actor_critic_hidden_channels):
+        super(L1_MaterialActor, self).__init__()
+        self.shared_embedding_layers = shared_embedding_layers
+        self.actor_input_size = (self.embedding_size * 6) + 1
+        self.actor = Sequential(
+            Linear(self.actor_input_size, actor_critic_hidden_channels), Tanh(),
+            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(),
+            Linear(actor_critic_hidden_channels, 1)
+        )
+        self.critic_mlp = Sequential(
+            Linear((self.embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
+            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(), 
+            Linear(actor_critic_hidden_channels, 1)
+        )
+
+    def forward(self, state: State, actions, related_items, parents, alpha):
+        state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
+        inputs = torch.zeros((len(actions), self.actor_input_size))
+        for i, (operation_id, material_id) in enumerate(actions.outsourcing):
+            inputs[i] = torch.cat([state.operations[operation_id], state.materials[material_id], state_embedding], dim=-1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
