@@ -444,32 +444,32 @@ def async_solve_batch(agents, batch, num_processes, train=True, epochs=-1, optim
     with Pool(num_processes) as pool:
         results = pool.map(async_solve_one, [(agents, instance) for instance in batch])
     all_rewards, all_values, probabilities, states, actions, actions_idx, instances_idx, related_items, parents = zip(*results)
-    for i in range(len(batch)):
-        all_parents.append({'id': instances_idx[0][0], 'parents': parents[i]})
-        all_related_items.append({'id': instances_idx[0][0], 'related_items': related_items[i]})
-        for agent in range(len(agents)):
-            all_probabilities[agent].extend(probabilities[i][agent])
-            all_states[agent].extend(states[i][agent])
-            all_actions[agent].extend(actions[i][agent])
-            all_actions_idx[agent].extend(actions_idx[i][agent])
-            all_instances_idx[agent].extend(instances_idx[i][agent])
+    for instance in range(len(batch)):
+        all_parents.append({'id': instances_idx[0][0], 'parents': parents[instance]})
+        all_related_items.append({'id': instances_idx[0][0], 'related_items': related_items[instance]})
+        for agent_id in range(len(agents)):
+            all_probabilities[agent_id].extend(probabilities[instance][agent_id])
+            all_states[agent_id].extend(states[instance][agent_id])
+            all_actions[agent_id].extend(actions[instance][agent_id])
+            all_actions_idx[agent_id].extend(actions_idx[instance][agent_id])
+            all_instances_idx[agent_id].extend(instances_idx[instance][agent_id])
     all_returns = [[ri for r in agent_rewards for ri in calculate_returns(r)] for agent_rewards in all_rewards]
     advantages = []
     flattened_values = []
-    for agent in agents:
-        advantages.append(torch.Tensor([gae for r, v in zip(all_rewards[agent], all_values[agent]) for gae in generalized_advantage_estimate(r, v)]))
-        flattened_values.append([v for vals in all_values[agent] for v in vals])
+    for agent_id, _ in enumerate(agents):
+        advantages.append(torch.Tensor([gae for r, v in zip(all_rewards[agent_id], all_values[agent_id]) for gae in generalized_advantage_estimate(r, v)]))
+        flattened_values.append([v for vals in all_values[agent_id] for v in vals])
     if train and epochs>0:
         for e in range(epochs):
             print("\t Optimization epoch: "+str(e+1)+"/"+str(epochs))
-            for id, (agent, name) in enumerate(agent):
+            for agent_id, (agent, name) in enumerate(agent):
                 print("\t\t Optimizing agent: "+name+"...")
-                loss = PPO_loss(batch, agent, all_probabilities[id], all_states[id], all_actions[id], all_actions_idx[id], advantages[id], flattened_values[id], all_returns[id], all_instances_idx[id], all_related_items, all_parents)
+                loss = PPO_loss(batch, agent, all_probabilities[agent_id], all_states[agent_id], all_actions[agent_id], all_actions_idx[agent_id], advantages[agent_id], flattened_values[agent_id], all_returns[agent_id], all_instances_idx[agent_id], all_related_items, all_parents)
                 PPO_optimize(optimizers[id], loss)
     else:
-        for id, (agent, name) in enumerate(agent):
+        for agent_id, (agent, name) in enumerate(agents):
             print("\t\t Evaluating agent: "+name+"...")
-            loss = PPO_loss(batch, agent, all_probabilities[id], all_states[id], all_actions[id], all_actions_idx[id], advantages[id], flattened_values[id], all_returns[id], all_instances_idx[id], all_related_items, all_parents)
+            loss = PPO_loss(batch, agent, all_probabilities[agent_id], all_states[agent_id], all_actions[agent_id], all_actions_idx[agent_id], advantages[agent_id], flattened_values[agent_id], all_returns[agent_id], all_instances_idx[agent_id], all_related_items, all_parents)
             print(f'\t Average Loss = {loss:.4f}')
 
 def train(instances, agents, iterations=PPO_CONF['train_iterations'], batch_size=PPO_CONF['batch_size'], epochs=PPO_CONF['opt_epochs'], validation_rate=PPO_CONF['validation_rate']):
