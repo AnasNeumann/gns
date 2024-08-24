@@ -325,7 +325,7 @@ def build_required_resources(i: Instance):
                     required_types_of_materials[p][o].append(rt)
     return required_types_of_resources, required_types_of_materials, res_by_types
 
-def solve_one(instance: Instance, agents, path="", train=False, save=False):
+def solve_one(instance: Instance, agents, path="", train=False):
     start_time = systime.time()
     graph, current_cmax = translate(instance)
     parents = graph.parents()
@@ -525,14 +525,14 @@ if __name__ == '__main__':
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Execution device: {DEVICE}...")
     if to_bool(args.train):
-        print("LOAD DATASET TO TRAIN MODELS")
+        print("LOAD DATASET TO TRAIN MODELS...")
         instances = load_training_dataset()
-        print("TRAIN MODELS WITH PPO")
+        print("TRAIN MODELS WITH PPO...")
         train(instances, init_new_models())
     else:
-        print("SOLVE A TARGET INSTANCE")
+        print("SOLVE TARGET INSTANCE "+args.size+"_"+args.id+"...")
         INSTANCE_PATH = BASIC_PATH+'instances/test/'+args.size+'/instance_'+args.id+'.pkl'
         SOLUTION_PATH = BASIC_PATH+'instances/test/'+args.size+'/solution_gns_'+args.id+'.csv'
         instance = load_instance(INSTANCE_PATH)
-        solve_one(instance, load_trained_models(), SOLUTION_PATH, train=False, save=True)
+        solve_one(instance, load_trained_models(), SOLUTION_PATH, train=False)
     print("===* END OF FILE *===")
