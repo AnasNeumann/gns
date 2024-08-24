@@ -12,9 +12,9 @@ import pandas as pd
 import time as systime
 
 PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
-OUTSOURCING = 1
-SCHEDULING = 2
-MATERIAL_USE = 3
+OUTSOURCING = 0
+SCHEDULING = 1
+MATERIAL_USE = 2
 AGENT = 0
 LEARNING_RATE = 2e-4
 PARRALLEL = True
@@ -51,6 +51,7 @@ BASIC_PATH = "./"
 # =====================================================
 
 def save_models(agents):
+    torch.save(agents[0].shared_embedding_layers.state_dict(), BASIC_PATH+'models/gnn_weights.pth')
     for agent, name in agents:
         torch.save(agent.state_dict(), BASIC_PATH+'models/'+name+'_weights.pth')
 
@@ -63,14 +64,14 @@ def load_trained_models():
     outsourcing_actor.load_state_dict(torch.load(BASIC_PATH+'models/outsourcing_weights.pth'))
     scheduling_actor.load_state_dict(torch.load(BASIC_PATH+'models/scheduling_weights.pth'))
     material_actor.load_state_dict(torch.load(BASIC_PATH+'models/material_weights.pth'))
-    return [(shared_GNN, 'gnn'), (outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
+    return [(outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 def init_new_models():
     shared_GNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
     outsourcing_actor = L1_OutousrcingActor(shared_GNN, AC_CONF['hidden_channels'])
     scheduling_actor = L1_SchedulingActor(shared_GNN, AC_CONF['hidden_channels'])
     material_actor = L1_MaterialActor(shared_GNN, AC_CONF['hidden_channels'])
-    return [(shared_GNN, 'gnn'), (outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
+    return [(outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 # =====================================================
 # =*= TRANSLATE INSTANCE TO GRAPH =*=
@@ -326,6 +327,9 @@ def build_required_resources(i: Instance):
 def policy(probabilities, greedy=True):
     return torch.argmax(probabilities.view(-1)).item() if greedy else torch.multinomial(probabilities.view(-1), 1).item()
 
+def reward(a, cost_old, cost_new, makespan_old, makespan_new):
+    return a * (cost_old - cost_new) + (1-a) * (makespan_old - makespan_new) # Check the logic of this
+
 def solve_one(instance: Instance, agents, path="", train=False):
     start_time = systime.time()
     graph, current_cmax = translate(instance)
@@ -333,21 +337,21 @@ def solve_one(instance: Instance, agents, path="", train=False):
     utilization = [0 for _ in graph.resources()]
     related_items = graph.related_items()
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
-    current_time = 0
+    t = 0
     current_cost = 0
-    rewards, values = torch.Tensor([]), torch.Tensor([])
-    probabilities, states, actions, actions_idx = [],[],[],[]
+    rewards, values = [torch.Tensor([]) for _ in agents], [torch.Tensor([]) for _ in agents]
+    probabilities, states, actions, actions_idx = [[] for _ in agents], [[] for _ in agents], [[] for _ in agents], [[] for _ in agents]
     terminate = False
     while not terminate:
-        poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
+        poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, t)
         if len(actions)>0:
             probs, state_value = agents[actions_type][AGENT](graph.to_state(), actions, related_items, parents, instance.w_makespan)
-            states.append(graph.to_state())
-            values = torch.cat((values, torch.Tensor([state_value.detach()])))
-            actions.append(poss_actions)
-            probabilities.append(probs.detach())
+            states[actions_type].append(graph.to_state())
+            values[actions_type] = torch.cat((values[actions_type], torch.Tensor([state_value.detach()])))
+            actions[actions_type].append(poss_actions)
+            probabilities[actions_type].append(probs.detach())
             idx = policy(probs, greedy=(not train))
-            actions_idx.append(idx)
+            actions_idx[actions_type].append(idx)
             if actions_type == OUTSOURCING:
                 item_id, outsourcing_choice = poss_actions[idx]
                 if outsourcing_choice == YES:
@@ -403,6 +407,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 3. Need for an operation to be also available at this time
             '''
             pass
+        reward()
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
     else:
