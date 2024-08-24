@@ -501,7 +501,7 @@ class GraphInstance(HeteroData):
         return children
 
     def to_state(self):
-        state = State(self.items(), 
+        return State(self.items(), 
                       self.operations(), 
                       self.resources(), 
                       self.materials(), 
@@ -511,7 +511,6 @@ class GraphInstance(HeteroData):
                       self.item_assembly(), 
                       self.precedences(), 
                       self.same_types())
-        return state
 
 # =====================================================
 # =*= GRAPH ATTENTION NEURAL NETWORK (GaNN) =*=

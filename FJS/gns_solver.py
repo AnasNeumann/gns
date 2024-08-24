@@ -379,7 +379,7 @@ def solve(model, instance, train=False):
     actions = []
     while nb_operations_to_schedule > 0 and not error:
         poss_actions = possible_actions(graph, time)
-        if(len(poss_actions)>0):
+        if len(poss_actions)>0:
             probs, state_value = model(copy.deepcopy(graph), poss_actions, xpreds, xsuccs)
             states.append(copy.deepcopy(graph))
             values = torch.cat((values, torch.Tensor([state_value.detach()])))

@@ -12,12 +12,10 @@ import pandas as pd
 import time as systime
 
 PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
-OUTSOURCING = "outsourcing"
-SCHEDULING = "scheduling"
-MATERIAL_USE = "material_use"
-OUTSOURCING_AGENT = 0
-SCHEDULING_AGENT = 1
-MATERIAL_AGENT = 2
+OUTSOURCING = 1
+SCHEDULING = 2
+MATERIAL_USE = 3
+AGENT = 0
 LEARNING_RATE = 2e-4
 PARRALLEL = True
 DEVICE = None
@@ -325,20 +323,86 @@ def build_required_resources(i: Instance):
                     required_types_of_materials[p][o].append(rt)
     return required_types_of_resources, required_types_of_materials, res_by_types
 
+def policy(probabilities, greedy=True):
+    return torch.argmax(probabilities.view(-1)).item() if greedy else torch.multinomial(probabilities.view(-1), 1).item()
+
 def solve_one(instance: Instance, agents, path="", train=False):
     start_time = systime.time()
     graph, current_cmax = translate(instance)
     parents = graph.parents()
+    utilization = [0 for _ in graph.resources()]
     related_items = graph.related_items()
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     current_time = 0
     current_cost = 0
     rewards, values = torch.Tensor([]), torch.Tensor([])
     probabilities, states, actions, actions_idx = [],[],[],[]
-    # TODO Solving / Scheduling algorithm
-    # TODO required_types_of_resources and required_types_of_materials will be updated
-    # TODO remove instance.operation_time(p,o) to item remaining time
-    actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
+    terminate = False
+    while not terminate:
+        poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
+        if len(actions)>0:
+            probs, state_value = agents[actions_type][AGENT](graph.to_state(), actions, related_items, parents, instance.w_makespan)
+            states.append(graph.to_state())
+            values = torch.cat((values, torch.Tensor([state_value.detach()])))
+            actions.append(poss_actions)
+            probabilities.append(probs.detach())
+            idx = policy(probs, greedy=(not train))
+            actions_idx.append(idx)
+            if actions_type == OUTSOURCING:
+                item_id, outsourcing_choice = poss_actions[idx]
+                if outsourcing_choice == YES:
+                    ''' TODO
+                        1. Update features of item_id and children: deadline, start time, outsourced, and remaining time
+                        2. Update features of parent of item_id: deadline, children
+                        3. Check if new deadline are more the current Cmax
+                        4. Update total cost
+                        5. Remove related operations and links between resources and related operations 
+                    '''
+                    pass
+                else:
+                    ''' TODO
+                        1. Update only one feature: item outsourced value
+                    '''
+                    pass
+            elif actions_type == SCHEDULING:
+                operation_id, resource_id = poss_actions[idx]
+                ''' TODO
+                    1. Update the object "required_types_of_resources"
+                    2. Remove instance.operation_time(p,o) to item remaining time when executed
+                    3. Update features of the requirement link: execution time and end time
+                    4. Update the array fo all resources: utilization (not the ratio)
+                    5. Update features of similar resources: remaining operations, status
+                    6. Update the resource: available time, nb executed operations, remaining operations
+                    7. Update feature of operation: remaining processing time and type of resources also end time
+                    8. Update feature of related item: deadline, remaining times (physical or not)
+                    9. Update feature of parents of item: remaining children processing time, end time
+                    10. Update feature of children of item: remaining physical time, start time and end time
+                    11. Check Cmax change for reward
+                '''
+                p, o = graph.operations_g2i(operation_id)
+                if instance.simultaneous[p][o]:
+                    ''' TODO
+                        1. Run the model on all other resources [what for ???]
+                        2. Repeat feature updates for other material and resources 
+                    '''
+                    pass
+                pass
+            else:
+                operation_id, material_id = poss_actions[idx]
+                ''' TODO
+                    1. Update features of material use link: status and use time
+                    2. Update features of the material: remaining quantity and remaining demand
+                    3. Update the object "required_types_of_materials" 
+                    4. Update the operation feature: reamining types of material
+                '''
+                pass
+        else:
+            ''' TODO
+                1. Update features of all resources: ratio based on utilization and new time (last step)
+                2. Search for the nearest next time where a resource (still needed) is available or a material (still needed) quantity arrives
+                3. Need for an operation to be also available at this time
+            '''
+            pass
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
     else:
