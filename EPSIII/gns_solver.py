@@ -8,6 +8,8 @@ import torch
 torch.autograd.set_detect_anomaly(True)
 import random
 import multiprocessing
+import pandas as pd
+import time as systime
 
 PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 OUTSOURCING = "outsourcing"
@@ -57,9 +59,9 @@ def save_models(agents):
 def load_trained_models():
     shared_GNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
     shared_GNN.load_state_dict(torch.load(BASIC_PATH+'models/gnn_weights.pth'))
-    outsourcing_actor = L1_OutousrcingActor(shared_GNN, AC_CONF['hidden_channels'], OUTSOURCING)
-    scheduling_actor = L1_SchedulingActor(shared_GNN, AC_CONF['hidden_channels'], SCHEDULING)
-    material_actor = L1_MaterialActor(shared_GNN, AC_CONF['hidden_channels'], MATERIAL_USE)
+    outsourcing_actor = L1_OutousrcingActor(shared_GNN, AC_CONF['hidden_channels'])
+    scheduling_actor = L1_SchedulingActor(shared_GNN, AC_CONF['hidden_channels'])
+    material_actor = L1_MaterialActor(shared_GNN, AC_CONF['hidden_channels'])
     outsourcing_actor.load_state_dict(torch.load(BASIC_PATH+'models/outsourcing_weights.pth'))
     scheduling_actor.load_state_dict(torch.load(BASIC_PATH+'models/scheduling_weights.pth'))
     material_actor.load_state_dict(torch.load(BASIC_PATH+'models/material_weights.pth'))
@@ -67,9 +69,9 @@ def load_trained_models():
 
 def init_new_models():
     shared_GNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
-    outsourcing_actor = L1_OutousrcingActor(shared_GNN, AC_CONF['hidden_channels'], OUTSOURCING)
-    scheduling_actor = L1_SchedulingActor(shared_GNN, AC_CONF['hidden_channels'], SCHEDULING)
-    material_actor = L1_MaterialActor(shared_GNN, AC_CONF['hidden_channels'], MATERIAL_USE)
+    outsourcing_actor = L1_OutousrcingActor(shared_GNN, AC_CONF['hidden_channels'])
+    scheduling_actor = L1_SchedulingActor(shared_GNN, AC_CONF['hidden_channels'])
+    material_actor = L1_MaterialActor(shared_GNN, AC_CONF['hidden_channels'])
     return [(shared_GNN, 'gnn'), (outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 # =====================================================
@@ -175,11 +177,6 @@ def translate(i: Instance):
 # =====================================================
 # =*= SEARCH FOR FEASIBLE ACTIONS =*=
 # =====================================================
-
-def obective_value(cmax, cost, cmax_weight):
-    cmax_weight = int(100 * cmax_weight)
-    cost_weight = 100 - cmax_weight
-    return cmax*cmax_weight + cost*cost_weight
 
 def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item):
     actions = []
@@ -305,6 +302,11 @@ def get_feasible_actions(instance: Instance, graph: GraphInstance, required_type
 # =*= EXECUTE ONE INSTANCE =*=
 # =====================================================
 
+def objective_value(cmax, cost, cmax_weight):
+    cmax_weight = int(100 * cmax_weight)
+    cost_weight = 100 - cmax_weight
+    return cmax*cmax_weight + cost*cost_weight
+
 def build_required_resources(i: Instance):
     required_types_of_resources = [[] for _ in range(i.get_nb_projects())]
     required_types_of_materials = [[] for _ in range(i.get_nb_projects())]
@@ -324,6 +326,7 @@ def build_required_resources(i: Instance):
     return required_types_of_resources, required_types_of_materials, res_by_types
 
 def solve_one(instance: Instance, agents, path="", train=False, save=False):
+    start_time = systime.time()
     graph, current_cmax = translate(instance)
     parents = graph.parents()
     related_items = graph.related_items()
@@ -339,6 +342,13 @@ def solve_one(instance: Instance, agents, path="", train=False, save=False):
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
     else:
+        solutions_df = pd.DataFrame({
+            'index': [instance.id],
+            'value': [objective_value(current_cmax, current_cost, instance.w_makespan)/100], 
+            'computing_time': [systime.time()-start_time]
+        })
+        print(solutions_df)
+        solutions_df.to_csv(path, index=False)
         return current_cmax, current_cost 
 
 # ====================================================================
