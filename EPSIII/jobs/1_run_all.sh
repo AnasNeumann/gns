@@ -10,33 +10,57 @@ slurm() {
 
 for arg in "${args[@]}"; do
     case $arg in
-        "s")
-            echo "Running small instances..."
+        "exact_s")
+            echo "Running small instances with exact solver..."
             slurm "./exact/s"
             ;;
-        "m")
-            echo "Running medium instances..."
+        "exact_m")
+            echo "Running medium instances with exact solver..."
             slurm "./exact/m"
             ;;
-        "l")
-            echo "Running large instances..."
+        "exact_l")
+            echo "Running large instances with exact solver..."
             slurm "./exact/l"
             ;;
-        "xl")
-            echo "Running extra-large instances..."
+        "exact_xl")
+            echo "Running extra-large instances with exact solver..."
             slurm "./exact/xl"
             ;;
-        "xxl")
-            echo "Running XXL instances..."
+        "exact_xxl")
+            echo "Running XXL instances with exact solver..."
             slurm "./exact/xxl"
             ;;
-        "xxxl")
-            echo "Running 3XL instances..."
+        "exact_xxxl")
+            echo "Running 3XL instances with exact solver..."
             slurm "./exact/xxxl/"
             ;;
-        "gns")
-            echo "Running the unique GNS job..."
-            slurm "./gns.sh"
+        "gns_s")
+            echo "Running small instances with GNS solver..."
+            slurm "./gns/s"
+            ;;
+        "gns_m")
+            echo "Running medium instances with GNS solver..."
+            slurm "./gns/m"
+            ;;
+        "gns_l")
+            echo "Running large instances with GNS solver..."
+            slurm "./gns/l"
+            ;;
+        "gns_xl")
+            echo "Running extra-large instances with GNS solver..."
+            slurm "./gns/xl"
+            ;;
+        "gns_xxl")
+            echo "Running XXL instances with GNS solver..."
+            slurm "./gns/xxl"
+            ;;
+        "gns_xxxl")
+            echo "Running 3XL instances with GNS solver..."
+            slurm "./gns/xxxl/"
+            ;;
+        "train")
+            echo "Running the unique training GNS job..."
+            slurm "./train_gns.sh"
             ;;
     esac
 done

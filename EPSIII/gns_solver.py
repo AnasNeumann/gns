@@ -44,6 +44,7 @@ AC_CONF = {
 NOT_YET = -1
 YES = 1
 NO = 0
+BASIC_PATH = "./"
 
 # =====================================================
 # =*= MODEL LOADING METHOD =*=
@@ -51,17 +52,17 @@ NO = 0
 
 def save_models(agents):
     for agent, name in agents:
-        torch.save(agent.state_dict(), './models/'+name+'_weights.pth')
+        torch.save(agent.state_dict(), BASIC_PATH+'models/'+name+'_weights.pth')
 
 def load_trained_models():
     shared_GNN = L1_EMBEDDING_GNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
-    shared_GNN.load_state_dict(torch.load('./models/gnn_weights.pth'))
+    shared_GNN.load_state_dict(torch.load(BASIC_PATH+'models/gnn_weights.pth'))
     outsourcing_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], OUTSOURCING)
     scheduling_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], SCHEDULING)
     material_actor = L1_ACTOR_CRITIC_GNN(shared_GNN, AC_CONF['hidden_channels'], MATERIAL_USE)
-    outsourcing_actor.load_state_dict(torch.load('./models/outsourcing_weights.pth'))
-    scheduling_actor.load_state_dict(torch.load('./models/scheduling_weights.pth'))
-    material_actor.load_state_dict(torch.load('./models/material_weights.pth'))
+    outsourcing_actor.load_state_dict(torch.load(BASIC_PATH+'models/outsourcing_weights.pth'))
+    scheduling_actor.load_state_dict(torch.load(BASIC_PATH+'models/scheduling_weights.pth'))
+    material_actor.load_state_dict(torch.load(BASIC_PATH+'models/material_weights.pth'))
     return [(shared_GNN, 'gnn'), (outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 def init_new_models():
@@ -354,7 +355,7 @@ def load_training_dataset():
     instances = [] 
     for size in PROBLEM_SIZES:
         problems = []
-        path = './instances/train/'+size+'/'
+        path = BASIC_PATH+'instances/train/'+size+'/'
         for i in os.listdir(path):
             if i.endswith('.pkl'):
                 file_path = os.path.join(path, i)
@@ -499,6 +500,7 @@ if __name__ == '__main__':
     parser.add_argument("--id", help="Id of the solved instance", required=False)
     parser.add_argument("--train", help="Do you want to load a pre-trained model", required=True)
     parser.add_argument("--mode", help="Execution mode (either prod or test)", required=True)
+    parser.add_argument("--path", help="Saving path on the server", required=True)
     args = parser.parse_args()
     print(f"Execution mode: {args.mode}...")
     if args.mode == 'test':
@@ -509,6 +511,7 @@ if __name__ == '__main__':
         set_start_method('spawn')
     except RuntimeError:
         pass
+    BASIC_PATH = args.path
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Execution device: {DEVICE}...")
     if to_bool(args.train):
@@ -518,8 +521,8 @@ if __name__ == '__main__':
         train(instances, init_new_models())
     else:
         print("SOLVE A TARGET INSTANCE")
-        INSTANCE_PATH = './instances/test/'+args.size+'/instance_'+args.id+'.pkl'
-        SOLUTION_PATH = './instances/test/'+args.size+'/solution_'+args.id+'.csv'
+        INSTANCE_PATH = BASIC_PATH+'instances/test/'+args.size+'/instance_'+args.id+'.pkl'
+        SOLUTION_PATH = BASIC_PATH+'instances/test/'+args.size+'/solution_gns_'+args.id+'.csv'
         instance = load_instance(INSTANCE_PATH)
         solve_one(instance, load_trained_models(), SOLUTION_PATH, train=False, save=True)
     print("===* END OF FILE *===")

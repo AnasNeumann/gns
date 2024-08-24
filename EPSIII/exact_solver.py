@@ -9,6 +9,7 @@ import time as systime
 
 MAX_COMPUTING_HOURS = 3
 MAX_RAM = 6
+BASIC_PATH = './'
 
 def init_vars(model: cp_model.CpModel, i: Instance):
     s = Solution()
@@ -392,9 +393,11 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII exact solver")
     parser.add_argument("--size", help="Size of the solved instance", required=True)
     parser.add_argument("--id", help="Id of the solved instance", required=True)
+    parser.add_argument("--path", help="Saving path on the server", required=True)
     args = parser.parse_args()
-    INSTANCE_PATH = './instances/test/'+args.size+'/instance_'+args.id+'.pkl'
-    SOLUTION_PATH = './instances/test/'+args.size+'/solution_'+args.id+'.csv'
+    BASIC_PATH = args.path
+    INSTANCE_PATH = BASIC_PATH+'instances/test/'+args.size+'/instance_'+args.id+'.pkl'
+    SOLUTION_PATH = BASIC_PATH+'instances/test/'+args.size+'/solution_exact_'+args.id+'.csv'
     print("Loading "+INSTANCE_PATH+"...")
     instance = load_instance(INSTANCE_PATH)
     print("===* START SOLVING *===")
