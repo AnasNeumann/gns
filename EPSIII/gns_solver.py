@@ -181,12 +181,15 @@ def translate(i: Instance):
 
 def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item):
     actions = []
-    status = graph.item(item, 'outsourced')
-    if graph.item(item, 'external') == YES and status == NOT_YET:
-        actions.extend([(item, YES), (item, NO)])
-    elif graph.item(item, 'external') == NO or status == NO:
-        for child in graph.get_direct_children(instance, item):
-            actions.extend(reccursive_outourcing_actions(instance, graph, child))
+    external = graph.item(item, 'external')
+    decision_made = graph.item(item, 'outsourced')
+    available = graph.item(item, 'is_possible')
+    if available:
+        if external==YES and decision_made==NOT_YET:
+            actions.extend([(item, YES), (item, NO)])
+        elif external==NO or decision_made==NO:
+            for child in graph.get_direct_children(instance, item):
+                actions.extend(reccursive_outourcing_actions(instance, graph, child))
     return actions
 
 def check_time(instance: Instance, current_time, hours=True, days=True):
@@ -196,45 +199,45 @@ def check_time(instance: Instance, current_time, hours=True, days=True):
 def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_id, p, e, start, end, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     actions = []
     can_be_executed = False
-    if graph.operation(operation_id, 'remaining_resources')>0 and check_time(instance, current_time, instance.in_hours[p][o], instance.in_days[p][o]): 
-        preds = instance.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=False, preds=True)
-        still_has_preds_to_execute = False
-        for pred in preds:
-            if graph.operation(graph.operations_i2g[p][pred], 'remaining_resources') > 0:
-                still_has_preds_to_execute = True
-                break
-        if not still_has_preds_to_execute:
-            sync_available = True
-            sync_actions = []
-            if not instance.simultaneous[p][o]:
+    if  graph.operation(operation_id, 'is_possible') == YES and graph.operation(operation_id, 'remaining_resources')>0 and check_time(instance, current_time, instance.in_hours[p][o], instance.in_days[p][o]): 
+        #preds = instance.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=False, preds=True)
+        #still_has_preds_to_execute = False
+        #for pred in preds:
+        #    if graph.operation(graph.operations_i2g[p][pred], 'remaining_resources') > 0:
+        #        still_has_preds_to_execute = True
+        #        break
+        #if not still_has_preds_to_execute:
+        sync_available = True
+        sync_actions = []
+        if not instance.simultaneous[p][o]:
+            can_be_executed = True
+        for rt in required_types_of_resources[p][o]:
+            for r in res_by_types[rt]:
+                res_id = graph.resources_i2g[r]
+                if not instance.simultaneous[p][o] and graph.resource(res_id, 'available_time') <= current_time:
+                    actions.append((operation_id, res_id))
+                if instance.simultaneous[p][o]:
+                    if graph.resource(res_id, 'available_time') <= current_time:
+                        sync_actions.append((operation_id, res_id))
+                    else:
+                        sync_available = False
+                        break
+        if instance.simultaneous[p][o] and sync_available:
+            for rt in required_types_of_materials[p][o]:
+                for m in res_by_types[rt]:
+                    mat_id = graph.materials_i2g[m]
+                    if instance.purchase_time[m] > current_time and graph.material(mat_id, 'quantity') < instance.quantity_needed[m][p][o]:
+                        sync_available = False
+                        break
+            if sync_available:
+                actions.extend(sync_actions)
                 can_be_executed = True
-            for rt in required_types_of_resources[p][o]:
-                for r in res_by_types[rt]:
-                    res_id = graph.resources_i2g[r]
-                    if not instance.simultaneous[p][o] and graph.resource(res_id, 'available_time') <= current_time:
-                        actions.append((operation_id, res_id))
-                    if instance.simultaneous[p][o]:
-                        if graph.resource(res_id, 'available_time') <= current_time:
-                            sync_actions.append((operation_id, res_id))
-                        else:
-                            sync_available = False
-                            break
-            if instance.simultaneous[p][o] and sync_available:
-                for rt in required_types_of_materials[p][o]:
-                    for m in res_by_types[rt]:
-                        mat_id = graph.materials_i2g[m]
-                        if instance.purchase_time[m] > current_time and graph.material(mat_id, 'quantity') < instance.quantity_needed[m][p][o]:
-                            sync_available = False
-                            break
-                if sync_available:
-                    actions.extend(sync_actions)
-                    can_be_executed = True
     return actions, can_be_executed
 
 def reccursive_scheduling_actions(instance: Instance, graph: GraphInstance, item_id, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     actions = []
     operations = []
-    if graph.item(item_id, 'external') == NO or graph.item(item_id, 'outsourced') == NO:
+    if graph.item(item_id, 'is_possible') == YES and (graph.item(item_id, 'external') == NO or graph.item(item_id, 'outsourced') == NO):
         p, e = graph.items_g2i[item_id]
         start, end = instance.get_operations_idx(p, e)
         start_design = start
@@ -384,6 +387,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 else:
                     ''' TODO
                         1. Update only one feature: item outsourced value (no also dates!)
+                        2. Make children available for test
                     '''
                     pass
             elif actions_type == SCHEDULING:
@@ -434,6 +438,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
                     available_time = graph.resource(operation_id, 'available_time')
                     if available_time>t and (next<0 or next>available_time):
                         next = available_time
+                        # TODO Available time operation must be in the right time scale
             if next>t:
                 t = next
                 for res_id in graph.loop_resources():
