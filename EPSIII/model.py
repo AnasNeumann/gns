@@ -112,6 +112,12 @@ class Instance:
             start = start + self.EO_size[p][e2]    
         return start, start+self.EO_size[p][e]
     
+    def get_operation_type(self, p, o):
+        for ot in self.nb_ops_types:
+            if self.operation_family[p][o][ot]:
+                return ot
+        return -1
+    
     def operation_time(self, p, o):
         time = 0
         rts = self.required_rt(p,o)
@@ -273,9 +279,9 @@ class FeatureConfiguration:
             'total_successors': 6,
             'remaining_time': 7,
             'remaining_resources': 8,
-            'outsourced': 9,
             'available_time': 10,
-            'end_time': 11
+            'end_time': 11,
+            'is_possible': 12
         }
         self.resource = {
             'utilization_ratio': 0,
@@ -302,7 +308,8 @@ class FeatureConfiguration:
             'parents_physical_time': 9,
             'children_time': 10,
             'start_time': 11,
-            'end_time': 12
+            'end_time': 12,
+            'is_possible': 13
         }
         self.need_for_resources = {
             'status': 0,
@@ -427,6 +434,16 @@ class GraphInstance(HeteroData):
     def resource(self, id, feature):
         return self['resource'].x[id][self.features.resource[feature]].item()
     
+    def need_for_material(self, operation_id, material_id, feature):
+        key = ('operation', 'needs_mat', 'material')
+        idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == material_id)
+        return self[key].edge_attr[idx, self.features.need_for_materials[feature]]
+    
+    def need_for_resource(self, operation_id, resource_id, feature):
+        key = ('operation', 'needs_res', 'resource')
+        idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == resource_id)
+        return self[key].edge_attr[idx, self.features.need_for_resources[feature]]
+
     def item(self, id, feature):
         return self['item'].x[id][self.features.item[feature]].item()
     
@@ -451,13 +468,13 @@ class GraphInstance(HeteroData):
             self['operation'].x[id][self.features.operation[feature]] = value
 
     def update_need_for_material(self, operation_id, material_id, updates):
-        key = (operation_id, 'needs_mat', material_id)
+        key = ('operation', 'needs_mat', 'material')
         idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == material_id)
         for feature, value in updates:
             self[key].edge_attr[idx, self.features.need_for_materials[feature]] = value
 
     def update_need_for_resource(self, operation_id, resource_id, updates):
-        key = (operation_id, 'needs_res', resource_id)
+        key = ('operation', 'needs_res', 'resource')
         idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == resource_id)
         for feature, value in updates:
             self[key].edge_attr[idx, self.features.need_for_resources[feature]] = value
@@ -499,6 +516,18 @@ class GraphInstance(HeteroData):
         for child in instance.get_children(p,e,direct=True):
             children.append(self.items_i2g[p][child])
         return children
+    
+    def loop_resources(self):
+        return range(self['resource'].x.size(0))
+    
+    def loop_items(self):
+        return range(self['item'].x.size(0))
+    
+    def loop_operations(self):
+        return range(self['operation'].x.size(0))
+    
+    def loop_materials(self):
+        return range(self['material'].x.size(0))
 
     def to_state(self):
         return State(self.items(), 

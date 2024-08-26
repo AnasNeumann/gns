@@ -100,14 +100,16 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
             parents_design_time += adt
     estimated_end = design_time + parents_design_time + physical_time + max_children_time
     status = NOT_YET if i.external[p][e] else NO 
-    item_id = graph.add_item(p, e, head, i.external[p][e], status, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, children_time, parents_design_time, estimated_end)
+    item_possible = YES if head else NOT_YET
+    item_id = graph.add_item(p, e, head, i.external[p][e], status, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, children_time, parents_design_time, estimated_end, item_possible)
     op_start = parents_design_time
     start, end = i.get_operations_idx(p,e)
     for o in range(start, end):
         succs = end-(o+1)
         minutes = not (i.in_hours[p][o] or i.in_days[p][o])
         operation_time = i.operation_time(p,o)
-        op_id = graph.add_operation(p, o, i.is_design[p][o], i.simultaneous[p][o], minutes, i.in_hours[p][o], i.in_days[p][o], succs, childrens_physical_operations + succs, operation_time, i.required_rt(p,o), status, op_start, op_start+operation_time)
+        operation_possible = YES if item_possible and (o == start) else NOT_YET
+        op_id = graph.add_operation(p, o, i.is_design[p][o], i.simultaneous[p][o], minutes, i.in_hours[p][o], i.in_days[p][o], succs, childrens_physical_operations + succs, operation_time, i.required_rt(p,o), op_start, op_start+operation_time, operation_possible)
         graph.add_operation_assembly(item_id, op_id)
         for r in i.required_resources(p,o):
             if i.finite_capacity[r]:
@@ -328,23 +330,37 @@ def policy(probabilities, greedy=True):
     return torch.argmax(probabilities.view(-1)).item() if greedy else torch.multinomial(probabilities.view(-1), 1).item()
 
 def reward(a, cost_old, cost_new, makespan_old, makespan_new):
-    return a * (cost_old - cost_new) + (1-a) * (makespan_old - makespan_new) # Check the logic of this
+    return a * (cost_old - cost_new) + (1-a) * (makespan_old - makespan_new)
+
+def update_processing_time(instance: Instance, graph: GraphInstance, op_id, res_id):
+    p, o = graph.operations_g2i(op_id)
+    r = graph.resources_g2i[res_id]
+    processing_time =  graph.need_for_resource(op_id, res_id, 'basic_processing_time')
+    op_setup_time = 0 if instance.get_operation_type(p, o) == graph.current_operation_type[res_id] else instance.operation_setup[r]
+    for d in instance.nb_settings:
+        dtime = 0 if graph.current_design_value[res_id][d] == instance.design_value[p][o][d] else instance.design_setup[r][d] 
+        op_setup_time = op_setup_time + dtime
+    return processing_time + op_setup_time
 
 def solve_one(instance: Instance, agents, path="", train=False):
     start_time = systime.time()
     graph, current_cmax = translate(instance)
+    old_cmax = current_cmax
     parents = graph.parents()
-    utilization = [0 for _ in graph.resources()]
+    utilization = [0 for _ in graph.loop_resources()]
     related_items = graph.related_items()
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     t = 0
-    current_cost = 0
+    current_cost, old_cost = 0
     rewards, values = [torch.Tensor([]) for _ in agents], [torch.Tensor([]) for _ in agents]
     probabilities, states, actions, actions_idx = [[] for _ in agents], [[] for _ in agents], [[] for _ in agents], [[] for _ in agents]
     terminate = False
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, t)
         if len(actions)>0:
+            if actions_type == SCHEDULING:
+                for op_id, res_id in poss_actions:
+                    graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
             probs, state_value = agents[actions_type][AGENT](graph.to_state(), actions, related_items, parents, instance.w_makespan)
             states[actions_type].append(graph.to_state())
             values[actions_type] = torch.cat((values[actions_type], torch.Tensor([state_value.detach()])))
@@ -360,12 +376,14 @@ def solve_one(instance: Instance, agents, path="", train=False):
                         2. Update features of parent of item_id: deadline, children
                         3. Check if new deadline are more the current Cmax
                         4. Update total cost
-                        5. Remove related operations and links between resources and related operations 
+                        5. Remove related operations and links between resources and related operations
+                        6. If Yes, update next operations [parent physical] available time (outsourcing time of a parent integrate children time)
+                        7. Remove children
                     '''
                     pass
                 else:
                     ''' TODO
-                        1. Update only one feature: item outsourced value
+                        1. Update only one feature: item outsourced value (no also dates!)
                     '''
                     pass
             elif actions_type == SCHEDULING:
@@ -382,6 +400,11 @@ def solve_one(instance: Instance, agents, path="", train=False):
                     9. Update feature of parents of item: remaining children processing time, end time
                     10. Update feature of children of item: remaining physical time, start time and end time
                     11. Check Cmax change for reward
+                    12. Update next operations (and children item) available time
+                    13. Change (if last design) children available time to date as a next operation 
+                    14. Update related item start time (first operation) and end time (last operation)
+                    15. Update current_operation_type and current_design_value
+                    16. Update Utilization array
                 '''
                 p, o = graph.operations_g2i(operation_id)
                 if instance.simultaneous[p][o]:
@@ -401,13 +424,21 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 '''
                 pass
         else:
-            ''' TODO
-                1. Update features of all resources: ratio based on utilization and new time (last step)
-                2. Search for the nearest next time where a resource (still needed) is available or a material (still needed) quantity arrives
-                3. Need for an operation to be also available at this time
-            '''
-            pass
-        reward()
+            next = -1
+            for resource_id in graph.loop_resources():
+                available_time = graph.resource(resource_id, 'available_time')
+                if available_time>t and (next<0 or next>available_time):
+                    next = available_time
+            for operation_id in graph.loop_operations():
+                if graph.resource(operation_id, 'is_possible') == YES and graph.resource(operation_id, 'remaining_resources') >0:
+                    available_time = graph.resource(operation_id, 'available_time')
+                    if available_time>t and (next<0 or next>available_time):
+                        next = available_time
+            if next>t:
+                t = next
+                for res_id in graph.loop_resources():
+                   graph.resource(res_id, 'utilization_ratio') = utilization[res_id] / t
+        reward(instance.w_makespan, old_cost, current_cost, old_cmax, current_cmax)
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
     else:
