@@ -447,6 +447,18 @@ class GraphInstance(HeteroData):
     def item(self, id, feature):
         return self['item'].x[id][self.features.item[feature]].item()
     
+    def del_edge(self, graph, edge_type, id_1, id_2):
+        edges_idx = graph[edge_type].edge_index
+        mask = ~((edges_idx[0] == id_1) & (edges_idx[1] == id_2))
+        self[edge_type].edge_index = edges_idx[:, mask]
+        self[edge_type].edge_attr = graph[edge_type].edge_attr[mask]
+    
+    def del_need_for_resource(self, op_idx, res_idx):
+        self.del_edge(('operation', 'needs_res', 'resource'), op_idx, res_idx)
+
+    def del_need_for_material(self, op_idx, mat_idx):
+        self.del_edge(('operation', 'needs_mat', 'material'), op_idx, mat_idx)
+
     def update_operation(self, id, updates):
         for feature, value in updates:
             self['operation'].x[id][self.features.operation[feature]] = value

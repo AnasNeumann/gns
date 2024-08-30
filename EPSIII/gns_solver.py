@@ -81,11 +81,13 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
     design_time, physical_time = i.item_processing_time(p, e)
     children_time = 0
     max_children_time = 0
+    total_children_time = 0
     childrens = i.get_children(p, e, direct=False)
     childrens_physical_operations = 0
     for children in childrens:
         cdt, cpt = i.item_processing_time(p, children)
         children_time += cdt+cpt
+        total_children_time += children_time
         max_children_time = max(children_time, max_children_time)
         start_c, end_c = i.get_operations_idx(p, children)
         for child_op in range(start_c, end_c):
@@ -101,7 +103,7 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
     estimated_end = design_time + parents_design_time + physical_time + max_children_time
     status = NOT_YET if i.external[p][e] else NO 
     item_possible = YES if head else NOT_YET
-    item_id = graph.add_item(p, e, head, i.external[p][e], status, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, children_time, parents_design_time, estimated_end, item_possible)
+    item_id = graph.add_item(p, e, head, i.external[p][e], status, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, total_children_time, parents_design_time, estimated_end, item_possible)
     op_start = parents_design_time
     start, end = i.get_operations_idx(p,e)
     for o in range(start, end):
@@ -345,6 +347,54 @@ def update_processing_time(instance: Instance, graph: GraphInstance, op_id, res_
         op_setup_time = op_setup_time + dtime
     return processing_time + op_setup_time
 
+def next_possible_time(instance: Instance, current_time, p, o):
+    scale = 60*instance.H if instance.in_days[p][o] else 60 if instance.in_hours[p][o] else 1
+    if current_time % scale == 0:
+        return current_time
+    else:
+        return ((current_time // scale) + 1) * scale
+
+def outsource_item(graph: GraphInstance, instance: Instance, item_id, t):
+    end_date = t + graph.item(item_id, 'outsourcing_time')
+    cost = graph.item(item_id, 'outsourcing_cost')
+    graph.update_item(item_id, [
+        ('outsourced', YES),
+        ('remaining_physical_time', 0),
+        ('remaining_design_time', 0),
+        ('children_time', 0),
+        ('start_time', t),
+        ('end_time', end_date)])
+    p, e = graph.items_g2i(item_id)
+    start, end = instance.get_operations_idx(p, e)
+    for o in range(start, end):
+        op_id = graph.operations_i2g[p][o]
+        available_time = next_possible_time(instance, t, p, o)
+        graph.update_item(op_id, [
+            ('remaining_resources', 0),
+            ('remaining_time', 0),
+            ('end_time', end_date),
+            ('available_time', available_time),
+            ('is_possible', YES)]) 
+        for r in instance.required_resources(p, o):
+            if instance.finite_capacity[r]:
+                res_id = graph.resources_i2g[r]
+                graph.del_need_for_resource(op_id, res_id)
+                graph.update_resource(res_id, [
+                    ('remaining_operations', graph.resource(res_id, 'remaining_operations' -1))
+                ])
+            else:
+                mat_id = graph.materials_i2g[r]
+                quantity_needed = graph.need_for_material(op_id, mat_id, 'quantity_needed')
+                graph.del_need_for_material(op_id, mat_id)
+                graph.update_material(mat_id, [
+                    ('remaining_demand', graph.material(mat_id, 'remaining_demand') - quantity_needed)
+                ])
+    for child in instance.get_children(p, e):
+        child_time, child_cost = outsource_item(graph, instance, graph.items_i2g[p][child], t)
+        cost += child_cost
+        end_date = max(t, child_time)
+    return end_date, cost
+
 def solve_one(instance: Instance, agents, path="", train=False):
     start_time = systime.time()
     graph, current_cmax = translate(instance)
@@ -374,22 +424,27 @@ def solve_one(instance: Instance, agents, path="", train=False):
             if actions_type == OUTSOURCING:
                 item_id, outsourcing_choice = poss_actions[idx]
                 if outsourcing_choice == YES:
-                    ''' TODO
-                        1. Update features of item_id and children: deadline, start time, outsourced, and remaining time
-                        2. Update features of parent of item_id: deadline, children
-                        3. Check if new deadline are more the current Cmax
-                        4. Update total cost
-                        5. Remove related operations and links between resources and related operations
-                        6. If Yes, update next operations [parent physical] available time (outsourcing time of a parent integrate children time)
-                        7. Remove children
-                    '''
-                    pass
+                    end_date, local_price = outsource_item(graph, instance, item_id, t)
+                    p, e = graph.items_g2i(item_id)
+                    approximate_time = instance.item_processing_time(p, e)
+                    for parent in instance.get_ancestors(p, e):
+                        parent_id = graph.items_i2g[p][parent]
+                        max_parent_end = max(end_date, graph.item(parent_id, 'end_time'))
+                        graph.update_item(parent_id, [
+                            ('children_time', graph.item(parent_id, 'children_time')-approximate_time),
+                            ('end_time', max_parent_end)
+                        ])
+                        for o in instance.first_physical_operations(p, e):
+                            op_id = graph.operations_i2g[p][o]
+                            available_time = next_possible_time(instance, end_date, p, o)
+                            graph.update_operation(op_id, [('is_possible', YES), ('available_time', available_time)])
+                    current_cost += local_price  
+                    current_cmax = max(current_cmax, max_parent_end)
                 else:
-                    ''' TODO
-                        1. Update only one feature: item outsourced value (no also dates!)
-                        2. Make children available for test
-                    '''
-                    pass
+                    graph.update_item(item_id, [('outsourced', NO)])
+                    p, e = graph.items_g2i(item_id)
+                    for child in instance.get_children(p, e):
+                        graph.update_item(graph.items_i2g[p][child], [('is_possible', YES), ('available_time', end_date)])
             elif actions_type == SCHEDULING:
                 operation_id, resource_id = poss_actions[idx]
                 ''' TODO
@@ -420,11 +475,15 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 pass
             else:
                 operation_id, material_id = poss_actions[idx]
+                quantity_needed = graph.need_for_material(material_id, 'quantity_needed')
+                current_quantity = graph.material(material_id, 'quantity')
+                graph.update_need_for_material(operation_id, material_id, [('status', YES), ('execution_time', t)])
+                graph.update_material(material_id, [('quantity', max(0, current_quantity-quantity_needed))])
+                required_types_of_materials
+                # Change time_before_arrival by arrival time!!
                 ''' TODO
-                    1. Update features of material use link: status and use time
-                    2. Update features of the material: remaining quantity and remaining demand
-                    3. Update the object "required_types_of_materials" 
-                    4. Update the operation feature: reamining types of material
+                    1. Update the object "required_types_of_materials" 
+                    2. Update the next operation if remaining type of resources is zero!
                 '''
                 pass
         else:
@@ -434,8 +493,8 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 if available_time>t and (next<0 or next>available_time):
                     next = available_time
             for operation_id in graph.loop_operations():
-                if graph.resource(operation_id, 'is_possible') == YES and graph.resource(operation_id, 'remaining_resources') >0:
-                    available_time = graph.resource(operation_id, 'available_time')
+                if graph.operation(operation_id, 'is_possible') == YES and graph.operation(operation_id, 'remaining_resources') >0:
+                    available_time = graph.operation(operation_id, 'available_time')
                     if available_time>t and (next<0 or next>available_time):
                         next = available_time
                         # TODO Available time operation must be in the right time scale
@@ -444,6 +503,8 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 for res_id in graph.loop_resources():
                    graph.resource(res_id, 'utilization_ratio') = utilization[res_id] / t
         reward(instance.w_makespan, old_cost, current_cost, old_cmax, current_cmax)
+        old_cost = current_cost
+        old_cmax = current_cmax
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
     else:
@@ -570,7 +631,7 @@ def async_solve_batch(agents, batch, num_processes, train=True, epochs=-1, optim
             for agent_id, (agent, name) in enumerate(agent):
                 print("\t\t Optimizing agent: "+name+"...")
                 loss = PPO_loss(batch, agent, all_probabilities[agent_id], all_states[agent_id], all_actions[agent_id], all_actions_idx[agent_id], advantages[agent_id], flattened_values[agent_id], all_returns[agent_id], all_instances_idx[agent_id], all_related_items, all_parents)
-                PPO_optimize(optimizers[id], loss)
+                PPO_optimize(optimizers[agent_id], loss)
     else:
         for agent_id, (agent, name) in enumerate(agents):
             print("\t\t Evaluating agent: "+name+"...")
