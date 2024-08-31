@@ -284,7 +284,7 @@ def get_scheduling_actions(instance: Instance, graph: GraphInstance, required_ty
 def get_material_use_actions(instance: Instance, graph: GraphInstance, operations, required_types_of_materials, res_by_types, current_time):
     actions = []
     for operation_id in operations:
-        p, o = graph.operations_g2i(operation_id)
+        p, o = graph.operations_g2i[operation_id]
         for rt in required_types_of_materials[p][o]:
             for m in res_by_types[rt]:
                 mat_id = graph.materials_i2g[m]
@@ -337,7 +337,7 @@ def reward(a, cost_old, cost_new, makespan_old, makespan_new):
     return a * (cost_old - cost_new) + (1-a) * (makespan_old - makespan_new)
 
 def update_processing_time(instance: Instance, graph: GraphInstance, op_id, res_id):
-    p, o = graph.operations_g2i(op_id)
+    p, o = graph.operations_g2i[op_id]
     r = graph.resources_g2i[res_id]
     processing_time =  graph.need_for_resource(op_id, res_id, 'basic_processing_time')
     op_setup_time = 0 if instance.get_operation_type(p, o) == graph.current_operation_type[res_id] else instance.operation_setup[r]
@@ -363,7 +363,7 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id, t):
         ('children_time', 0),
         ('start_time', t),
         ('end_time', end_date)])
-    p, e = graph.items_g2i(item_id)
+    p, e = graph.items_g2i[item_id]
     start, end = instance.get_operations_idx(p, e)
     for o in range(start, end):
         op_id = graph.operations_i2g[p][o]
@@ -398,11 +398,14 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id, t):
 
 def apply_use_material(graph: GraphInstance, instance: Instance, operation_id, material_id, required_types_of_materials, current_time):
     p, o = graph.operations_g2i[operation_id]
-    rt = instance.get_resource_familly(graph.materials_g2i(operation_id))
+    rt = instance.get_resource_familly(graph.materials_g2i[operation_id])
     quantity_needed = graph.need_for_material(material_id, 'quantity_needed')
     current_quantity = graph.material(material_id, 'remaining_init_quantity')
     waiting_demand = graph.material(material_id, 'remaining_demand') 
-    graph.update_need_for_material(operation_id, material_id, [('status', YES), ('execution_time', current_time)])
+    graph.update_need_for_material(operation_id, material_id, [
+        ('status', YES), 
+        ('execution_time', current_time)
+    ])
     graph.update_material(material_id, [
         ('remaining_init_quantity', max(0, current_quantity - quantity_needed)),
         ('remaining_demand', waiting_demand - quantity_needed)
@@ -420,16 +423,28 @@ def apply_use_material(graph: GraphInstance, instance: Instance, operation_id, m
     return graph, required_types_of_materials
 
 def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, resource_id, required_types_of_resources, current_time):
-    return graph, required_types_of_resources
+    operation_end = -1
+    ''' TODO
+        1. RESOURCE available_time executed_operations remaining_operations 
+        2. SIMILARE RESOURCES remaining_operations
+        3. OPERATION end_time remaining_resources remaining_time
+        4. NEED_FOR_RESOURCES (cut some links) + status start_time end_time
+        5. PARENT children_time
+        6. CHILDREN parents_physical_time
+        7. ITEM start_time end_time remaining_physical_time or remaining_design_time
+        8. GRAPH current_operation_type current_design_value
+        9. GENERAL utilization required_types_of_resources
+    '''
+    return graph, required_types_of_resources, operation_end
 
 def try_to_open_next_operations(graph: GraphInstance, instance: Instance, next_operations, operation_id, available_time): 
     if graph.operation(operation_id, 'remaining_resources')==0 and graph.operation(operation_id, 'remaining_materials')==0:
-        p, o = graph.operations_g2i(operation_id)
+        p, o = graph.operations_g2i[operation_id]
         e = instance.get_item_of_operation(p, o)
         for next in next_operations[p][o]:
             next_id = graph.operations_i2g[p][next]
             graph.update_operation(next_id, [
-                ('available_time', available_time),
+                ('available_time', next_possible_time(instance, available_time, p, next)),
                 ('is_possible', YES)
             ])
         if instance.is_last_design(p, e, o):
@@ -469,7 +484,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 item_id, outsourcing_choice = poss_actions[idx]
                 if outsourcing_choice == YES:
                     end_date, local_price = outsource_item(graph, instance, item_id, t)
-                    p, e = graph.items_g2i(item_id)
+                    p, e = graph.items_g2i[item_id]
                     approximate_d_time, approximate_p_time = instance.item_processing_time(p, e)
                     for parent in instance.get_ancestors(p, e):
                         parent_id = graph.items_i2g[p][parent]
@@ -486,37 +501,33 @@ def solve_one(instance: Instance, agents, path="", train=False):
                     current_cmax = max(current_cmax, max_parent_end)
                 else:
                     graph.update_item(item_id, [('outsourced', NO)])
-                    p, e = graph.items_g2i(item_id)
+                    p, e = graph.items_g2i[item_id]
                     for child in instance.get_children(p, e):
                         graph.update_item(graph.items_i2g[p][child], [('is_possible', YES), ('available_time', end_date)])
             elif actions_type == SCHEDULING:
-                operation_id, resource_id = poss_actions[idx]
-                ''' TODO
-                    1. Update the object "required_types_of_resources"
-                    2. Remove instance.operation_time(p,o) to item remaining time when executed
-                    3. Update features of the requirement link: execution time and end time
-                    4. Update the array fo all resources: utilization (not the ratio)
-                    5. Update features of similar resources: remaining operations, status
-                    6. Update the resource: available time, nb executed operations, remaining operations
-                    7. Update feature of operation: remaining processing time and type of resources also end time
-                    8. Update feature of related item: deadline, remaining times (physical or not)
-                    9. Update feature of parents of item: remaining children processing time, end time
-                    10. Update feature of children of item: remaining physical time, start time and end time
-                    11. Check Cmax change for reward
-                    12. Update next operations (and children item) available time
-                    13. Change (if last design) children available time to date as a next operation 
-                    14. Update related item start time (first operation) and end time (last operation)
-                    15. Update current_operation_type and current_design_value
-                    16. Update Utilization array
-                '''
-                p, o = graph.operations_g2i(operation_id)
+                operation_id, resource_id = poss_actions[idx]                
+                graph, required_types_of_resources, operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, t)
+                p, o = graph.operations_g2i[operation_id]
                 if instance.simultaneous[p][o]:
-                    ''' TODO
-                        1. Run the model on all other resources [what for ???]
-                        2. Repeat feature updates for other material and resources 
-                    '''
-                    pass
-                pass
+                    for rt in instance.required_rt(p, o):
+                        if rt != instance.get_resource_familly(graph.resources_g2i[resource_id]):
+                            found = False
+                            for r in instance.resources_by_type(rt):
+                                if instance.finite_capacity[r]:
+                                    other_resource_id = graph.resources_i2g[r]
+                                    if graph.resource(other_resource_id, 'available_time') <= t:
+                                        graph, required_types_of_resources, op_end = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, t)
+                                        operation_end = max(operation_end, op_end)
+                                        found = True
+                                        break
+                                else:
+                                    graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, graph.materials_i2g[r], required_types_of_materials, t)
+                                    found = True
+                                    break
+                            if not found:
+                                print("ERROR WHILE TRYING TO SYNC OPERATION - Resource type "+str(rt)+" not available...")
+                graph = try_to_open_next_operations(graph, instance, next_operations, operation_id, operation_end)
+                current_cmax = max(current_cmax, operation_end)
             else:
                 operation_id, material_id = poss_actions[idx]
                 graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
