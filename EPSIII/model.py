@@ -118,6 +118,18 @@ class Instance:
                 return ot
         return -1
     
+    def get_resource_tpye(self, r):
+        for rt in self.nb_resource_types:
+            if self.resource_family[r][rt]:
+                return rt
+        return -1
+    
+    def get_item_of_operation(self, p, o):
+        for e in range(self.E_size[p]):
+            if self.operations_by_element[p][e][o]:
+                return e
+        return -1
+
     def operation_time(self, p, o):
         time = 0
         rts = self.required_rt(p,o)
@@ -183,7 +195,17 @@ class Instance:
         for other in range(start, end):
             if other!=o and (not design_only or self.is_design[p][other]) \
                 and (not physical_only or not self.is_design[p][other]) \
-                and ((not preds and self.precedence[p][e][other][o]) or (preds or self.precedence[p][e][o][other])):
+                and ((not preds and self.precedence[p][e][other][o]) or (preds and self.precedence[p][e][o][other])):
+                operations.append(other)
+        return operations
+    
+    def succs(self, p, e, o, design_only=False, physical_only=False):
+        operations = []
+        start, end = self.get_operations_idx(p, e)
+        for other in range(start, end):
+            if other!=o and (not design_only or self.is_design[p][other]) \
+                and (not physical_only or not self.is_design[p][other]) \
+                and self.precedence[p][e][other][o]:
                 operations.append(other)
         return operations
     
@@ -202,6 +224,15 @@ class Instance:
         start, end = self.get_operations_idx(p, e)
         for o in range(start, end):
             preds = self.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=False, preds=True)
+            if len(preds) <= 0:
+                ops.append(o)
+        return ops
+    
+    def first_design_operations(self, p, e):
+        ops = []
+        start, end = self.get_operations_idx(p, e)
+        for o in range(start, end):
+            preds = self.preds_or_succs(p, e, start, end, o, design_only=True, physical_only=False, preds=True)
             if len(preds) <= 0:
                 ops.append(o)
         return ops
@@ -250,6 +281,35 @@ class Instance:
             if self.resource_family[r][rt]:
                 resources.append(r)
         return resources
+    
+    def is_last_design(self, p, e, o):
+        for o2 in self.last_design_operations(p, e):
+            if o2 == o:
+                return True
+        return False
+
+    def is_last_operation(self, p, e, o):
+        for o2 in self.last_operations(p, e):
+            if o2 == o:
+                return True
+        return False
+
+    def next_operations(self, p, e, o):
+        operations = []
+        if self.is_design[p][o]:
+            operations.extend(self.succs(p, e, o, design_only=True, physical_only=False))
+            if self.is_last_design(p, e, o):
+                for child in self.get_children(p, e, direct=True):
+                    operations.extend(self.first_design_operations(p, child))
+                pass
+        else:
+            operations.extend(self.succs(p, e, o, design_only=False, physical_only=True))
+        if self.is_last_operation(p, e, o):
+            operations.extend(self.first_physical_operations(p, self.get_direct_parent(p, e)))
+        return operations
+    
+    def build_next_operations(self):
+        return [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in self.O_size[p]] for p in len(self.O_size)]
 
 # =====================================================
 # =*= HYPER-GRAPH DATA STRUCTURE =*=
@@ -272,16 +332,16 @@ class FeatureConfiguration:
         self.operation = {
             'design': 0,
             'sync': 1,
-            'timescale_minutes': 2,
-            'timescale_hours': 3,
-            'timescale_days': 4,
-            'direct_successors': 5,
-            'total_successors': 6,
-            'remaining_time': 7,
-            'remaining_resources': 8,
-            'available_time': 10,
-            'end_time': 11,
-            'is_possible': 12
+            'timescale_hours': 2,
+            'timescale_days': 3,
+            'direct_successors': 4,
+            'total_successors': 5,
+            'remaining_time': 6,
+            'remaining_resources': 7,
+            'remaining_materials': 8,
+            'available_time': 9,
+            'end_time': 10,
+            'is_possible': 11
         }
         self.resource = {
             'utilization_ratio': 0,
@@ -291,8 +351,8 @@ class FeatureConfiguration:
             'similar_resources': 4
         }
         self.material = {
-            'quantity': 0,
-            'time_before_arrival': 1,
+            'remaining_init_quantity': 0,
+            'arrival_time': 1,
             'remaining_demand': 2
         }
         self.item = {
@@ -336,6 +396,7 @@ class GraphInstance(HeteroData):
         self.items_i2g = []
         self.resources_i2g = []
         self.materials_i2g = []
+
         self.current_operation_type = []
         self.current_design_value = []
         self.project_heads = []
@@ -507,7 +568,7 @@ class GraphInstance(HeteroData):
             r_items[i] = adj[:,i].nonzero(as_tuple=True)[0]
         return r_items
 
-    def build_i2g_2D(self, g2i):
+    def build_i2g_2D(self, g2i): # items and operations
         nb_project = max(val[0] for val in g2i) + 1
         i2g = [[] for _ in range(nb_project)]
         for position, (project, op_or_item) in enumerate(g2i):
@@ -516,8 +577,8 @@ class GraphInstance(HeteroData):
             i2g[project][op_or_item] = position
         return i2g
     
-    def build_i2g_1D(self, g2i):
-        i2g = [0] * len(g2i)
+    def build_i2g_1D(self, g2i, size): # resources and materials
+        i2g = [-1] * size
         for id in range(len(g2i)):
             i2g[g2i[id]] = id
         return i2g
