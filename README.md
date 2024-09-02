@@ -73,12 +73,12 @@ Requirements operation->resource: {'edge_index': tensor([[ 1,  2,  2,  3,  3,  4
 ## Testing the EPSIII project (GNS solver / after generating instances and solving them optimally)
 Training the models using Multi-agents Proximal Policy Optimization
 ```bash
-python EPSIII/gns.solver.py --train=true --mode=test --path=./EPSIII/
+python EPSIII/gns_solver.py --train=true --mode=test --path=./EPSIII/
 ```
 
 Testing trained models on one instance
 ```bash
-python EPSIII/gns.solver.py --train=false --mode=test --path=./EPSIII/ --size=s --id=151
+python EPSIII/gns_solver.py --train=false --mode=test --path=./EPSIII/ --size=s --id=151
 ```
 
 => Change mode to "prod" to use GPU/TPU, more training, and parallel computing

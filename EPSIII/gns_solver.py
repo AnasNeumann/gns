@@ -58,9 +58,9 @@ def save_models(agents):
 def load_trained_models():
     shared_GNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
     shared_GNN.load_state_dict(torch.load(BASIC_PATH+'models/gnn_weights.pth'))
-    outsourcing_actor = L1_OutousrcingActor(shared_GNN, AC_CONF['hidden_channels'])
-    scheduling_actor = L1_SchedulingActor(shared_GNN, AC_CONF['hidden_channels'])
-    material_actor = L1_MaterialActor(shared_GNN, AC_CONF['hidden_channels'])
+    outsourcing_actor = L1_OutousrcingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    scheduling_actor = L1_SchedulingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    material_actor = L1_MaterialActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     outsourcing_actor.load_state_dict(torch.load(BASIC_PATH+'models/outsourcing_weights.pth'))
     scheduling_actor.load_state_dict(torch.load(BASIC_PATH+'models/scheduling_weights.pth'))
     material_actor.load_state_dict(torch.load(BASIC_PATH+'models/material_weights.pth'))
@@ -68,9 +68,9 @@ def load_trained_models():
 
 def init_new_models():
     shared_GNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
-    outsourcing_actor = L1_OutousrcingActor(shared_GNN, AC_CONF['hidden_channels'])
-    scheduling_actor = L1_SchedulingActor(shared_GNN, AC_CONF['hidden_channels'])
-    material_actor = L1_MaterialActor(shared_GNN, AC_CONF['hidden_channels'])
+    outsourcing_actor = L1_OutousrcingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    scheduling_actor = L1_SchedulingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    material_actor = L1_MaterialActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     return [(outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 # =====================================================
@@ -121,7 +121,7 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
         graph.add_operation_assembly(item_id, op_id)
         for r in i.required_resources(p,o):
             if i.finite_capacity[r]:
-                graph.add_need_for_resources(op_id, graph.resource_i2g[r], [NO, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
+                graph.add_need_for_resources(op_id, graph.resources_i2g[r], [NO, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
             else:
                 graph.add_need_for_materials(op_id, graph.material_i2g[r], [NO, op_start, i.quantity_needed[r][p][o]])
     for children in i.get_children(p, e, True):
@@ -163,16 +163,14 @@ def translate(i: Instance):
         for r in resources:
             if i.finite_capacity[r]:
                 res_id = graph.add_resource(r, 0, 0, 0, len(operations), len(resources))
-                if len(res_idx)>0:
-                    for other_id in res_idx:
-                        graph.add_same_types(other_id, res_id)
+                for other_id in res_idx:
+                    graph.add_same_types(other_id, res_id)
                 res_idx.append(res_id)
             else:
                 remaining_quantity_needed = 0
                 for p, o in operations:
                     remaining_quantity_needed += i.quantity_needed[r][p][o]
                 graph.add_material(r, i.init_quantity[r], i.purchase_time[r], remaining_quantity_needed)
-            res_idx += 1
     graph.resources_i2g = graph.build_i2g_1D(graph.resources_g2i, i.nb_resources)
     graph.operations_i2g = graph.build_i2g_1D(graph.materials_g2i, i.nb_resources)
     for p in range(i.get_nb_projects()):
@@ -583,7 +581,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
             if next>t:
                 t = next
                 for res_id in graph.loop_resources():
-                   graph.resource(res_id, 'utilization_ratio') = utilization[res_id] / t
+                   graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
         reward(instance.w_makespan, old_cost, current_cost, old_cmax, current_cmax)
         old_cost = current_cost
         old_cmax = current_cmax
@@ -782,5 +780,6 @@ if __name__ == '__main__':
         INSTANCE_PATH = BASIC_PATH+'instances/test/'+args.size+'/instance_'+args.id+'.pkl'
         SOLUTION_PATH = BASIC_PATH+'instances/test/'+args.size+'/solution_gns_'+args.id+'.csv'
         instance = load_instance(INSTANCE_PATH)
-        solve_one(instance, load_trained_models(), SOLUTION_PATH, train=False)
+        agents = init_new_models() if args.mode == 'test' else load_trained_models() 
+        solve_one(instance, agents, SOLUTION_PATH, train=False)
     print("===* END OF FILE *===")

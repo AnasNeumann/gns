@@ -137,7 +137,7 @@ class Instance:
             time_rt = 0
             for r in self.resources_by_type(rt):
                 if self.finite_capacity[r]:
-                    time_rt = max(time_rt, self.execution_time[r, p, o])
+                    time_rt = max(time_rt, self.execution_time[r][p][o])
             time += time_rt
         return time
 
@@ -384,9 +384,8 @@ class FeatureConfiguration:
             'quantity_needed': 2
         }
 
-class GraphInstance(HeteroData):
+class GraphInstance():
     def __init__(self):
-        super()
         self.operations_g2i = []
         self.items_g2i = []
         self.resources_g2i = []
@@ -401,9 +400,10 @@ class GraphInstance(HeteroData):
         self.current_design_value = []
         self.project_heads = []
         self.features = FeatureConfiguration()
+        self.graph = HeteroData()
 
     def add_node(self, type, features: Tensor):
-        self[type].x = torch.cat([self[type].x, features], dim=0) if type in self.node_types else features
+        self.graph[type].x = torch.cat([self.graph[type].x, features], dim=0) if type in self.graph.node_types else features
 
     def add_operation(self, p, o, *args):
         self.operations_g2i.append((p, o))
@@ -431,7 +431,7 @@ class GraphInstance(HeteroData):
         return len(self.resources_g2i)-1
 
     def add_edge_no_features(self, node_1, relation, node_2, idx):
-        self[node_1, relation, node_2].edge_index = torch.cat([self[node_1, relation, node_2].edge_index, idx], dim=1) if (node_1, relation, node_2) in self.edge_types else idx
+        self.graph[node_1, relation, node_2].edge_index = torch.cat([self.graph[node_1, relation, node_2].edge_index, idx], dim=1) if (node_1, relation, node_2) in self.graph.edge_types else idx
 
     def add_same_types(self, res_1, res_2):
         self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_1, res_2))
@@ -447,72 +447,73 @@ class GraphInstance(HeteroData):
         self.add_edge_no_features('operation', 'precedes', 'operation', id2tensor(prec_id, succ_id))
 
     def add_edge_with_features(self, node_1, relation, node_2, idx, features: Tensor):
-        self[node_1, relation, node_2].edge_index = torch.cat([self[node_1, relation, node_2].edge_index, idx], dim=1) if (node_1, relation, node_2) in self.edge_types else idx
-        self[node_1, relation, node_2].edge_attr = torch.cat([self[node_1, relation, node_2].edge_attr, features], dim=1) if (node_1, relation, node_2) in self.edge_types else features
+        exists = (node_1, relation, node_2) in self.graph.edge_types
+        self.graph[node_1, relation, node_2].edge_index = torch.cat([self.graph[node_1, relation, node_2].edge_index, idx], dim=1) if exists else idx
+        self.graph[node_1, relation, node_2].edge_attrs = torch.cat([self.graph[node_1, relation, node_2].edge_attrs, features], dim=1) if exists else features
     
     def add_need_for_materials(self, operation_id, material_id, features):
-        self.add_edge_no_features('operation', 'needs_mat', 'material', id2tensor(operation_id, material_id), features2tensor(features))
+        self.add_edge_with_features('operation', 'needs_mat', 'material', id2tensor(operation_id, material_id), features2tensor(features))
 
     def add_need_for_resources(self, operation_id, resource_id, features):
-        self.add_edge_no_features('operation', 'needs_res', 'resource', id2tensor(operation_id, resource_id), features2tensor(features))
+        self.add_edge_with_features('operation', 'needs_res', 'resource', id2tensor(operation_id, resource_id), features2tensor(features))
 
     def precedences(self):
-        return self['operation', 'precedes', 'operation']
+        return self.graph['operation', 'precedes', 'operation']
     
     def item_assembly(self):
-        return self['item', 'parent', 'item']
+        return self.graph['item', 'parent', 'item']
     
     def operation_assembly(self):
-        return self['item', 'has', 'operation']
+        return self.graph['item', 'has', 'operation']
     
     def need_for_resources(self):
-        return self['operation', 'needs_res', 'resource']
+        return self.graph['operation', 'needs_res', 'resource']
     
     def need_for_materials(self):
-        return self['operation', 'needs_mat', 'material']
+        return self.graph['operation', 'needs_mat', 'material']
     
     def same_types(self):
-        return self['resource', 'same', 'resource']
+        return self.graph['resource', 'same', 'resource']
     
     def operations(self):
-        return self['operation'].x
+        return self.graph['operation'].x
     
     def items(self):
-        return self['item'].x
+        return self.graph['item'].x
     
     def resources(self):
-        return self['resource'].x
+        return self.graph['resource'].x
     
     def materials(self):
-        return self['material'].x
+        return self.graph['material'].x
 
     def operation(self, id, feature):
-        return self['operation'].x[id][self.features.operation[feature]].item()
+        return self.graph['operation'].x[id][self.features.operation[feature]].item()
 
     def material(self, id, feature):
-        return self['material'].x[id][self.features.material[feature]].item()
+        return self.graph['material'].x[id][self.features.material[feature]].item()
     
     def resource(self, id, feature):
-        return self['resource'].x[id][self.features.resource[feature]].item()
+        return self.graph['resource'].x[id][self.features.resource[feature]].item()
     
     def need_for_material(self, operation_id, material_id, feature):
         key = ('operation', 'needs_mat', 'material')
-        idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == material_id)
-        return self[key].edge_attr[idx, self.features.need_for_materials[feature]]
+        idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
+        return self.graph[key].edge_attrs[idx, self.features.need_for_materials[feature]]
     
     def need_for_resource(self, operation_id, resource_id, feature):
         key = ('operation', 'needs_res', 'resource')
-        idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == resource_id)
-        return self[key].edge_attr[idx, self.features.need_for_resources[feature]]
+        idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
+        return self.graph[key].edge_attrs[idx, self.features.need_for_resources[feature]]
 
     def item(self, id, feature):
-        return self['item'].x[id][self.features.item[feature]].item()
+        return self.graph['item'].x[id][self.features.item[feature]].item()
     
-    def del_edge(self, graph, edge_type, id_1, id_2):
-        edges_idx = graph[edge_type].edge_index
+    def del_edge(self, edge_type, id_1, id_2):
+        edges_idx = self.graph[edge_type].edge_index
         mask = ~((edges_idx[0] == id_1) & (edges_idx[1] == id_2))
-        self[edge_type].edge_index = edges_idx[:, mask]
-        self[edge_type].edge_attr = graph[edge_type].edge_attr[mask]
+        self.graph[edge_type].edge_index = edges_idx[:, mask]
+        self.graph[edge_type].edge_attrs = self.graph[edge_type].edge_attrs[mask]
     
     def del_need_for_resource(self, op_idx, res_idx):
         self.del_edge(('operation', 'needs_res', 'resource'), op_idx, res_idx)
@@ -522,51 +523,51 @@ class GraphInstance(HeteroData):
 
     def update_operation(self, id, updates):
         for feature, value in updates:
-            self['operation'].x[id][self.features.operation[feature]] = value
+            self.graph['operation'].x[id][self.features.operation[feature]] = value
         
     def update_resource(self, id, updates):
         for feature, value in updates:
-            self['resource'].x[id][self.features.resource[feature]] = value
+            self.graph['resource'].x[id][self.features.resource[feature]] = value
 
     def inc_resource(self, id, updates):
         for feature, value in updates:
-            self['resource'].x[id][self.features.resource[feature]] += value
+            self.graph['resource'].x[id][self.features.resource[feature]] += value
     
     def update_material(self, id, updates):
         for feature, value in updates:
-            self['material'].x[id][self.features.material[feature]] = value
+            self.graph['material'].x[id][self.features.material[feature]] = value
 
     def inc_material(self, id, updates):
         for feature, value in updates:
-            self['material'].x[id][self.features.material[feature]] += value
+            self.graph['material'].x[id][self.features.material[feature]] += value
     
     def update_item(self, id, updates):
         for feature, value in updates:
-            self['item'].x[id][self.features.item[feature]] = value
+            self.graph['item'].x[id][self.features.item[feature]] = value
 
     def inc_item(self, id, updates):
         for feature, value in updates:
-            self['item'].x[id][self.features.item[feature]] += value
+            self.graph['item'].x[id][self.features.item[feature]] += value
 
     def update_operation(self, id, updates):
         for feature, value in updates:
-            self['operation'].x[id][self.features.operation[feature]] = value
+            self.graph['operation'].x[id][self.features.operation[feature]] = value
     
     def inc_operation(self, id, updates):
         for feature, value in updates:
-            self['operation'].x[id][self.features.operation[feature]] += value
+            self.graph['operation'].x[id][self.features.operation[feature]] += value
 
     def update_need_for_material(self, operation_id, material_id, updates):
         key = ('operation', 'needs_mat', 'material')
-        idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == material_id)
+        idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
         for feature, value in updates:
-            self[key].edge_attr[idx, self.features.need_for_materials[feature]] = value
+            self.graph[key].edge_attrs[idx, self.features.need_for_materials[feature]] = value
 
     def update_need_for_resource(self, operation_id, resource_id, updates):
         key = ('operation', 'needs_res', 'resource')
-        idx = (self[key].edge_index[0] == operation_id) & (self[key].edge_index[1] == resource_id)
+        idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
         for feature, value in updates:
-            self[key].edge_attr[idx, self.features.need_for_resources[feature]] = value
+            self.graph[key].edge_attrs[idx, self.features.need_for_resources[feature]] = value
 
     def parents(self):
         adj = to_dense_adj(self.item_assembly().edge_index)[0]
@@ -607,16 +608,16 @@ class GraphInstance(HeteroData):
         return children
     
     def loop_resources(self):
-        return range(self['resource'].x.size(0))
+        return range(self.graph['resource'].x.size(0))
     
     def loop_items(self):
-        return range(self['item'].x.size(0))
+        return range(self.graph['item'].x.size(0))
     
     def loop_operations(self):
-        return range(self['operation'].x.size(0))
+        return range(self.graph['operation'].x.size(0))
     
     def loop_materials(self):
-        return range(self['material'].x.size(0))
+        return range(self.graph['material'].x.size(0))
 
     def to_state(self):
         return State(self.items(), 
@@ -638,9 +639,9 @@ OUTSOURCING = "outsourcing"
 SCHEDULING = "scheduling"
 MATERIAL_USE = "material_use"
 
-class MaterialEmbedding(Module):
+class MaterialEmbeddingLayer(Module):
     def __init__(self, material_dimension, operation_dimension, embedding_dimension):
-        super(MaterialEmbedding, self).__init__()
+        super(MaterialEmbeddingLayer, self).__init__()
         self.material_transform = Linear(material_dimension, embedding_dimension, bias=False)
         self.att_self_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
         self.operation_transform = Linear(operation_dimension, embedding_dimension, bias=False)
@@ -658,7 +659,7 @@ class MaterialEmbedding(Module):
         materials = self.material_transform(materials)
         self_attention = self.leaky_relu(torch.matmul(torch.cat([materials, materials], dim=-1), self.att_self_coef))
         
-        ops_by_edges = self.operation_transform(torch.cat([operations[need_for_materials.edge_index[0]], need_for_materials.edge_attr], dim=-1))
+        ops_by_edges = self.operation_transform(torch.cat([operations[need_for_materials.edge_index[0]], need_for_materials.edge_attrs], dim=-1))
         mat_by_edges = materials[need_for_materials.edge_index[1]]
         cross_attention = self.leaky_relu(torch.matmul(torch.cat([mat_by_edges, ops_by_edges], dim=-1), self.att_coef))
 
@@ -672,9 +673,9 @@ class MaterialEmbedding(Module):
         embedding = F.elu(norm_self_attention * materials + sum_ops_by_edges)
         return embedding
 
-class ResourceEmbedding(Module):
+class ResourceEmbeddingLayer(Module):
     def __init__(self, resource_dimension, operation_dimension, embedding_dimension):
-        super(MaterialEmbedding, self).__init__()
+        super(ResourceEmbeddingLayer, self).__init__()
         self.self_transform = Linear(resource_dimension, embedding_dimension, bias=False)
         self.resource_transform = Linear(resource_dimension, embedding_dimension, bias=False)
         self.operation_transform = Linear(operation_dimension, embedding_dimension, bias=False)
@@ -696,7 +697,7 @@ class ResourceEmbedding(Module):
         self_resources = self.self_transform(resources) 
         self_attention = self.leaky_relu(torch.matmul(torch.cat([self_resources, self_resources], dim=-1), self.att_self_coef))
 
-        ops_by_need_edges = self.operation_transform(torch.cat([operations[need_for_resources.edge_index[0]], need_for_resources.edge_attr], dim=-1))
+        ops_by_need_edges = self.operation_transform(torch.cat([operations[need_for_resources.edge_index[0]], need_for_resources.edge_attrs], dim=-1))
         res_by_need_edges = self_resources[need_for_resources.edge_index[1]]
         operations_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res_by_need_edges, ops_by_need_edges], dim=-1), self.att_operation_coef))
         
@@ -720,9 +721,9 @@ class ResourceEmbedding(Module):
         embedding = F.elu(norm_self_attention * resources + sum_ops_by_edges + sum_res_by_edges)
         return embedding
 
-class ItemLayer(Module):
+class ItemEmbeddingLayer(Module):
     def __init__(self, operation_dimension, item_dimension, hidden_channels, out_channels):
-        super(ItemLayer, self).__init__()
+        super(ItemEmbeddingLayer, self).__init__()
         self.embedding_size = out_channels
         self.mlp_combined = Sequential(
             Linear(4 * out_channels, hidden_channels), ELU(),
@@ -770,9 +771,9 @@ class ItemLayer(Module):
         embedding[1:-1] = self.mlp_combined(torch.cat([parent_embeddings, agg_children_embeddings, agg_ops_embeddings, self_embeddings], dim=-1))
         return embedding
     
-class OperationLayer(Module):
+class OperationEmbeddingLayer(Module):
     def __init__(self, operation_dimension, item_dimension, resources_dimension, material_dimension, hidden_channels, out_channels):
-        super(OperationLayer, self).__init__()
+        super(OperationEmbeddingLayer, self).__init__()
         self.embedding_size = out_channels
         self.mlp_combined = Sequential(
             Linear(6 * out_channels, hidden_channels), ELU(),
@@ -842,7 +843,7 @@ class OperationLayer(Module):
         embedding[1:-1] = self.mlp_combined(torch.cat([agg_preds_embeddings, agg_succs_embeddings, agg_resources_embeddings, agg_materials_embeddings, item_embeddings, self_embeddings], dim=-1))
         return embedding
 
-def L1_EmbbedingGNN(Module):
+class L1_EmbbedingGNN(Module):
     def __init__(self, embedding_size, embedding_hidden_channels, nb_embedding_layers):
         super(L1_EmbbedingGNN, self).__init__()
         conf = FeatureConfiguration()
@@ -852,15 +853,15 @@ def L1_EmbbedingGNN(Module):
         self.resource_layers = ModuleList()
         self.item_layers = ModuleList()
         self.operation_layers = ModuleList()
-        self.material_layers.append(MaterialEmbedding(len(conf.material), len(conf.operation), embedding_size))
-        self.resource_layers.append(ResourceEmbedding(len(conf.resource), len(conf.operation), embedding_size))
-        self.item_layers.append(ItemLayer(len(conf.operation), embedding_size, embedding_hidden_channels, embedding_size))
-        self.operation_layers.append(OperationLayer(len(conf.operation), embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
+        self.material_layers.append(MaterialEmbeddingLayer(len(conf.material), len(conf.operation), embedding_size))
+        self.resource_layers.append(ResourceEmbeddingLayer(len(conf.resource), len(conf.operation), embedding_size))
+        self.item_layers.append(ItemEmbeddingLayer(len(conf.operation), embedding_size, embedding_hidden_channels, embedding_size))
+        self.operation_layers.append(OperationEmbeddingLayer(len(conf.operation), embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
         for _ in range(self.nb_embedding_layers-1):
-            self.material_layers.append(MaterialEmbedding(embedding_size, embedding_size, embedding_size))
-            self.resource_layers.append(ResourceEmbedding(embedding_size, embedding_size, embedding_size))
-            self.item_layers.append(ItemLayer(embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
-            self.operation_layers.append(OperationLayer(embedding_size, embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
+            self.material_layers.append(MaterialEmbeddingLayer(embedding_size, embedding_size, embedding_size))
+            self.resource_layers.append(ResourceEmbeddingLayer(embedding_size, embedding_size, embedding_size))
+            self.item_layers.append(ItemEmbeddingLayer(embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
+            self.operation_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
 
     def forward(self, state: State, related_items, parents, alpha):
         for l in range(self.nb_embedding_layers):
@@ -875,18 +876,18 @@ def L1_EmbbedingGNN(Module):
         state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources, alpha], dim=-1)[0]
         return state, state_embedding
 
-def L1_OutousrcingActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, actor_critic_hidden_channels):
+class L1_OutousrcingActor(Module):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size, actor_critic_hidden_channels):
         super(L1_OutousrcingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
-        self.actor_input_size = (self.embedding_size * 5) + 2
+        self.actor_input_size = (embedding_size * 5) + 2
         self.actor = Sequential(
             Linear(self.actor_input_size, actor_critic_hidden_channels), Tanh(),
             Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(),
             Linear(actor_critic_hidden_channels, 1)
         )
         self.critic_mlp = Sequential(
-            Linear((self.embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
+            Linear((embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
             Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(), 
             Linear(actor_critic_hidden_channels, 1)
         )
@@ -901,18 +902,18 @@ def L1_OutousrcingActor(Module):
         state_value = self.critic_mlp(state_embedding)
         return action_probs, state_value
     
-def L1_SchedulingActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, actor_critic_hidden_channels):
+class L1_SchedulingActor(Module):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size, actor_critic_hidden_channels):
         super(L1_SchedulingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
-        self.actor_input_size = (self.embedding_size * 6) + 1
+        self.actor_input_size = (embedding_size * 6) + 1
         self.actor = Sequential(
             Linear(self.actor_input_size, actor_critic_hidden_channels), Tanh(),
             Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(),
             Linear(actor_critic_hidden_channels, 1)
         )
         self.critic_mlp = Sequential(
-            Linear((self.embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
+            Linear((embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
             Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(), 
             Linear(actor_critic_hidden_channels, 1)
         )
@@ -927,18 +928,18 @@ def L1_SchedulingActor(Module):
         state_value = self.critic_mlp(state_embedding)
         return action_probs, state_value
 
-def L1_MaterialActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, actor_critic_hidden_channels):
+class L1_MaterialActor(Module):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size, actor_critic_hidden_channels):
         super(L1_MaterialActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
-        self.actor_input_size = (self.embedding_size * 6) + 1
+        self.actor_input_size = (embedding_size * 6) + 1
         self.actor = Sequential(
             Linear(self.actor_input_size, actor_critic_hidden_channels), Tanh(),
             Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(),
             Linear(actor_critic_hidden_channels, 1)
         )
         self.critic_mlp = Sequential(
-            Linear((self.embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
+            Linear((embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
             Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(), 
             Linear(actor_critic_hidden_channels, 1)
         )

@@ -159,9 +159,11 @@ cython_debug/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
 
+.DS_Store
 documentation/
 documentation/**
 EPSIII/jobs/train_gns.sh
 EPSIII/jobs/exact/**
 EPSIII/jobs/gns/**
 gns_env/
+__pycache__/
