@@ -527,18 +527,34 @@ class GraphInstance(HeteroData):
     def update_resource(self, id, updates):
         for feature, value in updates:
             self['resource'].x[id][self.features.resource[feature]] = value
+
+    def inc_resource(self, id, updates):
+        for feature, value in updates:
+            self['resource'].x[id][self.features.resource[feature]] += value
     
     def update_material(self, id, updates):
         for feature, value in updates:
             self['material'].x[id][self.features.material[feature]] = value
+
+    def inc_material(self, id, updates):
+        for feature, value in updates:
+            self['material'].x[id][self.features.material[feature]] += value
     
     def update_item(self, id, updates):
         for feature, value in updates:
             self['item'].x[id][self.features.item[feature]] = value
 
+    def inc_item(self, id, updates):
+        for feature, value in updates:
+            self['item'].x[id][self.features.item[feature]] += value
+
     def update_operation(self, id, updates):
         for feature, value in updates:
             self['operation'].x[id][self.features.operation[feature]] = value
+    
+    def inc_operation(self, id, updates):
+        for feature, value in updates:
+            self['operation'].x[id][self.features.operation[feature]] += value
 
     def update_need_for_material(self, operation_id, material_id, updates):
         key = ('operation', 'needs_mat', 'material')
