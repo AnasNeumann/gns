@@ -5,12 +5,12 @@ A small Graph Attention Network (GAT) to schedule jobs in a ETO manufacturing en
 ## THIS REPOSITORY IS STILL A WORK IN PROGRESS!!! NOT A FINAL PROJECT!
 
 ## Locally try the project
-1. `python -m venv ./venv`
-2. `source ./venv/bin/activate`
+1. `python -m venv ./gns_env`
+2. `source ./gns_env/bin/activate`
 3. `pip install --upgrade -r requirements.txt`
-4. `deactivate`
+4. `desactivate`
 
-## Architecture of the project
+## Architecture of the FJS project
 * `/FJS/` contains the code for the traditional Flexible Job Shop scheduling problem;
     * `/FJS/instance_generator.py [nb train instances] [nb test instances] [min jobs] [max jobs] [min resources] [max type of resources] [max resources by type] [max operations]` the code to randomly generate instances and save them into `/FJS/instances/test/` and `/FJS/instances/train/`;
         * e.g. `python FJS/instance_generator.py 100 50 5 20 3 7 3 20`;
@@ -38,7 +38,7 @@ FJS_instance = {
 ]}
 ```
 
-## Typical translation into a graph structure 
+## Typical translation of a FJS instance into a graph structure 
 ```python
 # Instance = {'resources': [1, 2, 2], 'jobs': [[(0, 11), (2, 6), (2, 14), (0, 15), (1, 1), (2, 13)], [(0, 5), (1, 14), (2, 1), (0, 6)]], 'size': 10, 'nb_res': 5}
 Graph_overview: HeteroData(
@@ -69,3 +69,16 @@ Precedence_relations: {'edge_index': tensor([[ 1,  2,  3,  4,  5,  7,  8,  9,  0
 Requirements operation->resource: {'edge_index': tensor([[ 1,  2,  2,  3,  3,  4,  5,  5,  6,  6,  7,  8,  8,  9,  9, 10],
         [ 0,  3,  4,  3,  4,  0,  1,  2,  3,  4,  0,  1,  2,  3,  4,  0]])}
 ```
+
+## Testing the EPSIII project (GNS solver / after generating instances and solving them optimally)
+Training the models using Multi-agents Proximal Policy Optimization
+```bash
+python EPSIII/gns.solver.py --train=true --mode=test --path=./EPSIII/
+```
+
+Testing trained models on one instance
+```bash
+python EPSIII/gns.solver.py --train=false --mode=test --path=./EPSIII/ --size=s --id=151
+```
+
+=> Change mode to "prod" to use GPU/TPU, more training, and parallel computing
