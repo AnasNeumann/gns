@@ -187,16 +187,27 @@ def translate(i: Instance):
 # =*= SEARCH FOR FEASIBLE ACTIONS =*=
 # =====================================================
 
-def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item):
+def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item_id):
     actions = []
-    external = graph.item(item, 'external')
-    decision_made = graph.item(item, 'outsourced')
-    available = graph.item(item, 'is_possible')
+    external = graph.item(item_id, 'external')
+    decision_made = graph.item(item_id, 'outsourced')
+    available = graph.item(item_id, 'is_possible')
     if available:
         if external==YES and decision_made==NOT_YET:
-            actions.extend([(item, YES), (item, NO)])
+            p, e = graph.items_g2i[item_id]
+            start, end = instance.get_operations_idx(p, e)
+            need_to_be_outsourced = False
+            for o in range(start, end):
+                for rt in instance.required_rt(p, o):
+                    if len(instance.resources_by_type(rt)) <=0:
+                        need_to_be_outsourced = True
+                        break
+            if need_to_be_outsourced:
+                actions.append((item_id, YES))
+            else:
+                actions.extend([(item_id, YES), (item_id, NO)])
         elif external==NO or decision_made==NO:
-            for child in graph.get_direct_children(instance, item):
+            for child in graph.get_direct_children(instance, item_id):
                 actions.extend(reccursive_outourcing_actions(instance, graph, child))
     return actions
 
