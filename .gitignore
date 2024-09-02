@@ -164,4 +164,4 @@ documentation/**
 EPSIII/jobs/train_gns.sh
 EPSIII/jobs/exact/**
 EPSIII/jobs/gns/**
-_old_code.py
+gns_env/
