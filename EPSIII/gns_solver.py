@@ -422,8 +422,11 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
     basic_processing_time = graph.need_for_resource(operation_id, resource_id, 'basic_processing_time')
     current_processing_time = graph.need_for_resource(operation_id, resource_id, 'current_processing_time')
     operation_end = current_time + current_processing_time
+    p, o = graph.operations_g2i(operation_id)
+    e = instance.get_item_of_operation(p, o)
     r = graph.resources_g2i[resource_id]
     rt = instance.get_resource_familly(r)
+    item_id = graph.items_i2g[p][e]
     graph.inc_resource(resource_id, [('executed_operations', 1), ('remaining_operations', -1)])
     graph.update_resource(resource_id, [('available_time', operation_end)])
     graph.update_need_for_resource(operation_id, resource_id, [
@@ -443,15 +446,12 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
             graph.del_need_for_resource(operation_id, similar_id)
     graph.inc_operation(operation_id, [('remaining_resources', -1), ('remaining_time', -basic_processing_time)])
     graph.update_operation(operation_id, [('end_time', operation_end)])
-    p, o = graph.operations_g2i(operation_id)
-    e = instance.get_item_of_operation(p, o)
     graph.inc_item(graph.items_i2g[p][instance.get_direct_parent(p, e)], [
         ('children_time', -basic_processing_time)
     ])
     if not instance.is_design[p][o]:
         for child in instance.get_children(p, e, direct=False):
             graph.inc_item(graph.items_i2g[child], [('parents_physical_time')], -basic_processing_time)
-    item_id = graph.items_i2g[p][e]
     graph.update_item(item_id, [
         ('start_time', min(current_time, graph.item(item_id, 'start_time'))),
         ('end_time', max(operation_end, graph.item(item_id, 'end_time')))
