@@ -337,10 +337,14 @@ def build_required_resources(i: Instance):
         required_types_of_materials[p] = [[] for _ in range(nb_ops)]
         for o in range(nb_ops):
             for rt in i.required_rt(p, o):
-                if i.finite_capacity[i.resources_by_type(rt)[0]]:
-                    required_types_of_resources[p][o].append(rt)
+                resources_of_rt = i.resources_by_type(rt)
+                if(len(resources_of_rt)>0):
+                    if i.finite_capacity[resources_of_rt[0]]:
+                        required_types_of_resources[p][o].append(rt)
+                    else:
+                        required_types_of_materials[p][o].append(rt)
                 else:
-                    required_types_of_materials[p][o].append(rt)
+                    print(f'\t -> Operation ({p},{o}) requires type ({rt}), which does not have any resources!')
     return required_types_of_resources, required_types_of_materials, res_by_types
 
 def policy(probabilities, greedy=True):
