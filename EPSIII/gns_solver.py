@@ -113,17 +113,21 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
         required_res = 0
         required_mat = 0
         for rt in i.required_rt(p, o):
-            if i.finite_capacity[i.resources_by_type(rt)[0]]:
-                required_res += 1
+            resources_of_rt = i.resources_by_type(rt)
+            if(len(resources_of_rt)>0):
+                if i.finite_capacity[resources_of_rt[0]]:
+                    required_res += 1
+                else:
+                    required_mat += 1
             else:
-                required_mat += 1
+                print(f'\t -> Operation ({p},{o}) requires type ({rt}) which do not have any resources!')
         op_id = graph.add_operation(p, o, i.is_design[p][o], i.simultaneous[p][o], i.in_hours[p][o], i.in_days[p][o], succs, total_successors, operation_time, required_res, required_mat, op_start, op_start+operation_time, operation_possible)
         graph.add_operation_assembly(item_id, op_id)
         for r in i.required_resources(p,o):
             if i.finite_capacity[r]:
                 graph.add_need_for_resources(op_id, graph.resources_i2g[r], [NO, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
             else:
-                graph.add_need_for_materials(op_id, graph.material_i2g[r], [NO, op_start, i.quantity_needed[r][p][o]])
+                graph.add_need_for_materials(op_id, graph.materials_i2g[r], [NO, op_start, i.quantity_needed[r][p][o]])
     for children in i.get_children(p, e, True):
         graph, child_id, estimated_end_child = build_item(i, graph, p, children, head=False)
         graph.add_item_assembly(item_id, child_id)
@@ -172,7 +176,7 @@ def translate(i: Instance):
                     remaining_quantity_needed += i.quantity_needed[r][p][o]
                 graph.add_material(r, i.init_quantity[r], i.purchase_time[r], remaining_quantity_needed)
     graph.resources_i2g = graph.build_i2g_1D(graph.resources_g2i, i.nb_resources)
-    graph.operations_i2g = graph.build_i2g_1D(graph.materials_g2i, i.nb_resources)
+    graph.materials_i2g = graph.build_i2g_1D(graph.materials_g2i, i.nb_resources)
     for p in range(i.get_nb_projects()):
         head = i.project_head(p)
         graph, _, lower_bound = build_item(i, graph, p, head, head=True)

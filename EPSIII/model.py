@@ -449,7 +449,7 @@ class GraphInstance():
     def add_edge_with_features(self, node_1, relation, node_2, idx, features: Tensor):
         exists = (node_1, relation, node_2) in self.graph.edge_types
         self.graph[node_1, relation, node_2].edge_index = torch.cat([self.graph[node_1, relation, node_2].edge_index, idx], dim=1) if exists else idx
-        self.graph[node_1, relation, node_2].edge_attrs = torch.cat([self.graph[node_1, relation, node_2].edge_attrs, features], dim=1) if exists else features
+        self.graph[node_1, relation, node_2].edge_attr = torch.cat([self.graph[node_1, relation, node_2].edge_attr, features], dim=1) if exists else features
     
     def add_need_for_materials(self, operation_id, material_id, features):
         self.add_edge_with_features('operation', 'needs_mat', 'material', id2tensor(operation_id, material_id), features2tensor(features))
@@ -499,12 +499,12 @@ class GraphInstance():
     def need_for_material(self, operation_id, material_id, feature):
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
-        return self.graph[key].edge_attrs[idx, self.features.need_for_materials[feature]]
+        return self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]]
     
     def need_for_resource(self, operation_id, resource_id, feature):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
-        return self.graph[key].edge_attrs[idx, self.features.need_for_resources[feature]]
+        return self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]]
 
     def item(self, id, feature):
         return self.graph['item'].x[id][self.features.item[feature]].item()
@@ -513,7 +513,7 @@ class GraphInstance():
         edges_idx = self.graph[edge_type].edge_index
         mask = ~((edges_idx[0] == id_1) & (edges_idx[1] == id_2))
         self.graph[edge_type].edge_index = edges_idx[:, mask]
-        self.graph[edge_type].edge_attrs = self.graph[edge_type].edge_attrs[mask]
+        self.graph[edge_type].edge_attr = self.graph[edge_type].edge_attr[mask]
     
     def del_need_for_resource(self, op_idx, res_idx):
         self.del_edge(('operation', 'needs_res', 'resource'), op_idx, res_idx)
@@ -561,13 +561,13 @@ class GraphInstance():
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
         for feature, value in updates:
-            self.graph[key].edge_attrs[idx, self.features.need_for_materials[feature]] = value
+            self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]] = value
 
     def update_need_for_resource(self, operation_id, resource_id, updates):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
         for feature, value in updates:
-            self.graph[key].edge_attrs[idx, self.features.need_for_resources[feature]] = value
+            self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]] = value
 
     def parents(self):
         adj = to_dense_adj(self.item_assembly().edge_index)[0]
@@ -659,7 +659,7 @@ class MaterialEmbeddingLayer(Module):
         materials = self.material_transform(materials)
         self_attention = self.leaky_relu(torch.matmul(torch.cat([materials, materials], dim=-1), self.att_self_coef))
         
-        ops_by_edges = self.operation_transform(torch.cat([operations[need_for_materials.edge_index[0]], need_for_materials.edge_attrs], dim=-1))
+        ops_by_edges = self.operation_transform(torch.cat([operations[need_for_materials.edge_index[0]], need_for_materials.edge_attr], dim=-1))
         mat_by_edges = materials[need_for_materials.edge_index[1]]
         cross_attention = self.leaky_relu(torch.matmul(torch.cat([mat_by_edges, ops_by_edges], dim=-1), self.att_coef))
 
@@ -697,7 +697,7 @@ class ResourceEmbeddingLayer(Module):
         self_resources = self.self_transform(resources) 
         self_attention = self.leaky_relu(torch.matmul(torch.cat([self_resources, self_resources], dim=-1), self.att_self_coef))
 
-        ops_by_need_edges = self.operation_transform(torch.cat([operations[need_for_resources.edge_index[0]], need_for_resources.edge_attrs], dim=-1))
+        ops_by_need_edges = self.operation_transform(torch.cat([operations[need_for_resources.edge_index[0]], need_for_resources.edge_attr], dim=-1))
         res_by_need_edges = self_resources[need_for_resources.edge_index[1]]
         operations_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res_by_need_edges, ops_by_need_edges], dim=-1), self.att_operation_coef))
         
