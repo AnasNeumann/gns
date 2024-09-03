@@ -569,7 +569,7 @@ class GraphInstance():
         for feature, value in updates:
             self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]] = value
 
-    def parents(self):
+    def flatten_parents(self):
         adj = to_dense_adj(self.item_assembly().edge_index)[0]
         nb_items = self.items().size(0)
         parents = torch.zeros(nb_items, dtype=torch.long)
@@ -577,7 +577,7 @@ class GraphInstance():
             parents[i] = adj[:,i].nonzero(as_tuple=True)[0]
         return parents
 
-    def related_items(self):
+    def flatten_related_items(self):
         adj = to_dense_adj(self.operation_assembly().edge_index)[0]
         nb_ops = self.operations().size(0)
         r_items = torch.zeros(nb_ops, dtype=torch.long)

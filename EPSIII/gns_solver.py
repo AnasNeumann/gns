@@ -499,9 +499,9 @@ def solve_one(instance: Instance, agents, path="", train=False):
     start_time = systime.time()
     graph, current_cmax = translate(instance)
     old_cmax = current_cmax
-    parents = graph.parents()
+    parents = graph.flatten_parents()
     utilization = [0 for _ in graph.loop_resources()]
-    related_items = graph.related_items()
+    related_items = graph.flatten_related_items()
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     next_operations = instance.build_next_operations()
     t = 0
