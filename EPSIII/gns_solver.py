@@ -160,13 +160,13 @@ def build_precedence(i: Instance, graph: GraphInstance):
 
 def translate(i: Instance):
     graph = GraphInstance()
-    for rt in range(i.nb_HR_types):
+    for rt in range(i.nb_resource_types):
         resources = i.resources_by_type(rt)
         operations = i.operations_by_resource_type(rt)
         res_idx = []
         for r in resources:
             if i.finite_capacity[r]:
-                res_id = graph.add_resource(r, 0, 0, 0, len(operations), len(resources))
+                res_id = graph.add_resource(r, 0, 0, 0, 0, len(operations), len(resources))
                 for other_id in res_idx:
                     graph.add_same_types(other_id, res_id)
                 res_idx.append(res_id)
@@ -182,6 +182,7 @@ def translate(i: Instance):
         graph, _, lower_bound = build_item(i, graph, p, head, head=True)
     graph.operations_i2g = graph.build_i2g_2D(graph.operations_g2i)
     graph.items_i2g = graph.build_i2g_2D(graph.items_g2i)
+    graph.add_dummy_item()
     graph = build_precedence(i, graph)
     return graph, lower_bound
 
@@ -505,7 +506,8 @@ def solve_one(instance: Instance, agents, path="", train=False):
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     next_operations = instance.build_next_operations()
     t = 0
-    current_cost, old_cost = 0
+    current_cost = 0
+    old_cost = 0
     rewards, values = [torch.Tensor([]) for _ in agents], [torch.Tensor([]) for _ in agents]
     probabilities, states, actions, actions_idx = [[] for _ in agents], [[] for _ in agents], [[] for _ in agents], [[] for _ in agents]
     terminate = False
@@ -784,6 +786,10 @@ if __name__ == '__main__':
         print("TRAIN MODELS WITH PPO...")
         train(instances, init_new_models())
     else:
+        '''
+            Test with: bash _env.sh
+            python gns_solver.py --size=s --id=151 --train=false --mode=test --path=./
+        '''
         print("SOLVE TARGET INSTANCE "+args.size+"_"+args.id+"...")
         INSTANCE_PATH = BASIC_PATH+'instances/test/'+args.size+'/instance_'+args.id+'.pkl'
         SOLUTION_PATH = BASIC_PATH+'instances/test/'+args.size+'/solution_gns_'+args.id+'.csv'

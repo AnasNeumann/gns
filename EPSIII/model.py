@@ -309,7 +309,7 @@ class Instance:
         return operations
     
     def build_next_operations(self):
-        return [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in self.O_size[p]] for p in len(self.O_size)]
+        return [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in range(self.O_size[p])] for p in range(len(self.O_size))]
 
 # =====================================================
 # =*= HYPER-GRAPH DATA STRUCTURE =*=
@@ -417,6 +417,15 @@ class GraphInstance():
         if args[self.features.item['head']] == 1:
             self.project_heads.append(id)
         return id
+    
+    def add_dummy_item(self):
+        self.add_node('item', torch.tensor([[0.0 for _ in range(len(self.features.item))]], dtype=torch.float))
+        dummy_item_id = len(self.graph['item'].x)-1
+        for head_id in self.project_heads:
+            self.add_item_assembly(dummy_item_id, head_id) 
+        for item_id, item in enumerate(self.graph['item'].x):
+            if item_id<dummy_item_id and item[self.features.item['children']] == 0:
+                self.add_item_assembly(item_id, dummy_item_id)
 
     def add_material(self, m, *args):
         self.materials_g2i.append(m)
@@ -449,7 +458,7 @@ class GraphInstance():
     def add_edge_with_features(self, node_1, relation, node_2, idx, features: Tensor):
         exists = (node_1, relation, node_2) in self.graph.edge_types
         self.graph[node_1, relation, node_2].edge_index = torch.cat([self.graph[node_1, relation, node_2].edge_index, idx], dim=1) if exists else idx
-        self.graph[node_1, relation, node_2].edge_attr = torch.cat([self.graph[node_1, relation, node_2].edge_attr, features], dim=1) if exists else features
+        self.graph[node_1, relation, node_2].edge_attr = torch.cat([self.graph[node_1, relation, node_2].edge_attr, features], dim=0) if exists else features
     
     def add_need_for_materials(self, operation_id, material_id, features):
         self.add_edge_with_features('operation', 'needs_mat', 'material', id2tensor(operation_id, material_id), features2tensor(features))
@@ -573,7 +582,7 @@ class GraphInstance():
         adj = to_dense_adj(self.item_assembly().edge_index)[0]
         nb_items = self.items().size(0)
         parents = torch.zeros(nb_items, dtype=torch.long)
-        for i in range(nb_items):
+        for i in range(nb_items-1):
             parents[i] = adj[:,i].nonzero(as_tuple=True)[0]
         return parents
 
@@ -611,7 +620,7 @@ class GraphInstance():
         return range(self.graph['resource'].x.size(0))
     
     def loop_items(self):
-        return range(self.graph['item'].x.size(0))
+        return range(self.graph['item'].x.size(0)-1)
     
     def loop_operations(self):
         return range(self.graph['operation'].x.size(0))
@@ -696,29 +705,32 @@ class ResourceEmbeddingLayer(Module):
     def forward(self, resources, operations, need_for_resources, same_types):
         self_resources = self.self_transform(resources) 
         self_attention = self.leaky_relu(torch.matmul(torch.cat([self_resources, self_resources], dim=-1), self.att_self_coef))
+        sum_res_by_edges = torch.zeros_like(self_resources, device=resources.device)
+        sum_ops_by_edges = torch.zeros_like(self_resources, device=resources.device)
 
         ops_by_need_edges = self.operation_transform(torch.cat([operations[need_for_resources.edge_index[0]], need_for_resources.edge_attr], dim=-1))
         res_by_need_edges = self_resources[need_for_resources.edge_index[1]]
         operations_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res_by_need_edges, ops_by_need_edges], dim=-1), self.att_operation_coef))
         
-        res1_by_same_edges = self.resource_transform(resources[same_types.edge_index[0]])
-        res2_by_same_edges = self_resources[same_types.edge_index[1]]
-        resources_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res2_by_same_edges, res1_by_same_edges], dim=-1), self.att_resource_coef))
-        
-        normalizer = F.softmax(torch.cat([self_attention, operations_cross_attention, resources_cross_attention], dim=0), dim=0)
-        norm_self_attention = normalizer[:self_attention.size(0)+operations_cross_attention.size(0)]
-        norm_operations_cross_attention = normalizer[self_attention.size(0):operations_cross_attention.size(0)]
-        norm_resources_cross_attention = normalizer[self_attention.size(0)+operations_cross_attention.size(0):]
+        if same_types:
+            res1_by_same_edges = self.resource_transform(resources[same_types.edge_index[0]])
+            res2_by_same_edges = self_resources[same_types.edge_index[1]]
+            resources_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res2_by_same_edges, res1_by_same_edges], dim=-1), self.att_resource_coef))
+
+            normalizer = F.softmax(torch.cat([self_attention, operations_cross_attention, resources_cross_attention], dim=0), dim=0)
+            norm_operations_cross_attention = normalizer[self_attention.size(0):self_attention.size(0)+operations_cross_attention.size(0)]
+            norm_resources_cross_attention = normalizer[self_attention.size(0)+operations_cross_attention.size(0):]
+
+            weighted_res_by_edges = norm_resources_cross_attention * res1_by_same_edges
+            sum_res_by_edges.index_add_(0, same_types.edge_index[1], weighted_res_by_edges)
+        else:
+            normalizer = F.softmax(torch.cat([self_attention, operations_cross_attention], dim=0), dim=0)
+            norm_operations_cross_attention = normalizer[self_attention.size(0):]
 
         weighted_ops_by_edges = norm_operations_cross_attention * ops_by_need_edges
-        sum_ops_by_edges = torch.zeros_like(resources, device=resources.device)
         sum_ops_by_edges.index_add_(0, need_for_resources.edge_index[1], weighted_ops_by_edges)
-
-        weighted_res_by_edges = norm_resources_cross_attention * res1_by_same_edges
-        sum_res_by_edges = torch.zeros_like(resources, device=resources.device)
-        sum_res_by_edges.index_add_(0, same_types.edge_index[1], weighted_res_by_edges)
         
-        embedding = F.elu(norm_self_attention * resources + sum_ops_by_edges + sum_res_by_edges)
+        embedding = F.elu(normalizer[:self_attention.size(0)] * self_resources + sum_ops_by_edges + sum_res_by_edges)
         return embedding
 
 class ItemEmbeddingLayer(Module):
@@ -753,7 +765,7 @@ class ItemEmbeddingLayer(Module):
 
     def forward(self, items, parents, operations, item_assembly, operation_assembly):
         self_embeddings = self.mlp_self(items)
-        parent_embeddings = self.mlp_parent(parents)
+        parent_embeddings = self.mlp_parent(items[parents])
 
         parent_idx_by_edge = item_assembly.edge_index[0]
         children_by_edge = items[item_assembly.edge_index[1]]
@@ -764,11 +776,11 @@ class ItemEmbeddingLayer(Module):
         item_idx_by_edges = operation_assembly.edge_index[0]
         operations_by_edges = operations[operation_assembly.edge_index[1]]
         agg_ops_embeddings = torch.zeros((items.size(0), operations.size(1)), device=items.device)
-        agg_ops_embeddings.index_add_(0, item_idx_by_edges, operations_by_edges) 
+        agg_ops_embeddings.index_add_(0, item_idx_by_edges, operations_by_edges)
         agg_ops_embeddings = self.mlp_operations(agg_ops_embeddings)
         
         embedding = torch.zeros((items.shape[0], self.embedding_size), device=items.device)
-        embedding[1:-1] = self.mlp_combined(torch.cat([parent_embeddings, agg_children_embeddings, agg_ops_embeddings, self_embeddings], dim=-1))
+        embedding[:-1] = self.mlp_combined(torch.cat([parent_embeddings[:-1], agg_children_embeddings[:-1], agg_ops_embeddings[:-1], self_embeddings[:-1]], dim=-1))
         return embedding
     
 class OperationEmbeddingLayer(Module):
@@ -811,9 +823,9 @@ class OperationEmbeddingLayer(Module):
             Linear(hidden_channels, out_channels)
         )
 
-    def forward(self, operations, related_items, materials, resources, need_for_resources, need_for_materials, precedences):
+    def forward(self, operations, items, related_items, materials, resources, need_for_resources, need_for_materials, precedences):
         self_embeddings = self.mlp_self(operations)
-        item_embeddings = self.mlp_items(related_items)
+        item_embeddings = self.mlp_items(items[related_items])
 
         operations_idx_by_mat_edge = need_for_materials.edge_index[0]
         materials_by_edge = materials[need_for_materials.edge_index[1]]
@@ -828,19 +840,19 @@ class OperationEmbeddingLayer(Module):
         agg_resources_embeddings = self.mlp_resources(agg_resources_embeddings)
 
         operations_idx_by_pred_edge = precedences.edge_index[0]
-        preds_by_edge = resources[precedences.edge_index[1]]
+        preds_by_edge = operations[precedences.edge_index[1]]
         agg_preds_embeddings = torch.zeros((operations.size(0), operations.size(1)), device=operations.device)
         agg_preds_embeddings.index_add_(0, operations_idx_by_pred_edge, preds_by_edge) 
         agg_preds_embeddings = self.mlp_predecessors(agg_preds_embeddings)
 
         operations_idx_by_succs_edge = precedences.edge_index[1]
-        succs_by_edge = resources[precedences.edge_index[0]]
+        succs_by_edge = operations[precedences.edge_index[0]]
         agg_succs_embeddings = torch.zeros((operations.size(0), operations.size(1)), device=operations.device)
         agg_succs_embeddings.index_add_(0, operations_idx_by_succs_edge, succs_by_edge) 
         agg_succs_embeddings = self.mlp_successors(agg_succs_embeddings)
 
         embedding = torch.zeros((operations.shape[0], self.embedding_size), device=operations.device)
-        embedding[1:-1] = self.mlp_combined(torch.cat([agg_preds_embeddings, agg_succs_embeddings, agg_resources_embeddings, agg_materials_embeddings, item_embeddings, self_embeddings], dim=-1))
+        embedding = self.mlp_combined(torch.cat([agg_preds_embeddings, agg_succs_embeddings, agg_resources_embeddings, agg_materials_embeddings, item_embeddings, self_embeddings], dim=-1))
         return embedding
 
 class L1_EmbbedingGNN(Module):
@@ -853,13 +865,13 @@ class L1_EmbbedingGNN(Module):
         self.resource_layers = ModuleList()
         self.item_layers = ModuleList()
         self.operation_layers = ModuleList()
-        self.material_layers.append(MaterialEmbeddingLayer(len(conf.material), len(conf.operation), embedding_size))
-        self.resource_layers.append(ResourceEmbeddingLayer(len(conf.resource), len(conf.operation), embedding_size))
-        self.item_layers.append(ItemEmbeddingLayer(len(conf.operation), embedding_size, embedding_hidden_channels, embedding_size))
+        self.material_layers.append(MaterialEmbeddingLayer(len(conf.material), len(conf.operation)+len(conf.need_for_materials), embedding_size))
+        self.resource_layers.append(ResourceEmbeddingLayer(len(conf.resource), len(conf.operation)+len(conf.need_for_resources), embedding_size))
+        self.item_layers.append(ItemEmbeddingLayer(len(conf.operation), len(conf.item), embedding_hidden_channels, embedding_size))
         self.operation_layers.append(OperationEmbeddingLayer(len(conf.operation), embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
         for _ in range(self.nb_embedding_layers-1):
-            self.material_layers.append(MaterialEmbeddingLayer(embedding_size, embedding_size, embedding_size))
-            self.resource_layers.append(ResourceEmbeddingLayer(embedding_size, embedding_size, embedding_size))
+            self.material_layers.append(MaterialEmbeddingLayer(embedding_size, embedding_size+len(conf.need_for_materials), embedding_size))
+            self.resource_layers.append(ResourceEmbeddingLayer(embedding_size, embedding_size+len(conf.need_for_resources), embedding_size))
             self.item_layers.append(ItemEmbeddingLayer(embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
             self.operation_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
 
@@ -868,13 +880,13 @@ class L1_EmbbedingGNN(Module):
             state.materials = self.material_layers[l](state.materials, state.operations, state.need_for_materials)
             state.resources = self.resource_layers[l](state.resources, state.operations, state.need_for_resources, state.same_types)
             state.items = self.item_layers[l](state.items, parents, state.operations, state.item_assembly, state.operation_assembly)
-            state.operations = self.operation_layers[l](state.operations, related_items, state.materials, state.resources, state.need_for_resources, state.need_for_materials, state.precedences)
+            state.operations = self.operation_layers[l](state.operations, state.items, related_items, state.materials, state.resources, state.need_for_resources, state.need_for_materials, state.precedences)
         pooled_materials = global_mean_pool(state.materials, torch.zeros(state.materials.shape[0], dtype=torch.long))
         pooled_resources = global_mean_pool(state.resources, torch.zeros(state.resources.shape[0], dtype=torch.long))
         pooled_items = global_mean_pool(state.items, torch.zeros(state.items.shape[0], dtype=torch.long))
         pooled_operations = global_mean_pool(state.operations, torch.zeros(state.operations.shape[0], dtype=torch.long))
-        state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources, alpha], dim=-1)[0]
-        return state, state_embedding
+        state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources], dim=-1)[0]
+        return state, torch.cat([state_embedding, torch.tensor([alpha])], dim=0)
 
 class L1_OutousrcingActor(Module):
     def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size, actor_critic_hidden_channels):
@@ -893,9 +905,11 @@ class L1_OutousrcingActor(Module):
         )
 
     def forward(self, state: State, actions, related_items, parents, alpha):
+        print("HELLO")
+        print(actions)
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
         inputs = torch.zeros((len(actions), self.actor_input_size))
-        for i, (item_id, outsourcing_choice) in enumerate(actions.outsourcing):
+        for i, (item_id, outsourcing_choice) in enumerate(actions):
             inputs[i] = torch.cat([state.items[item_id], torch.tensor([outsourcing_choice], dtype=torch.long), state_embedding], dim=-1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
@@ -921,7 +935,7 @@ class L1_SchedulingActor(Module):
     def forward(self, state: State, actions, related_items, parents, alpha):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
         inputs = torch.zeros((len(actions), self.actor_input_size))
-        for i, (operation_id, resource_id) in enumerate(actions.outsourcing):
+        for i, (operation_id, resource_id) in enumerate(actions):
             inputs[i] = torch.cat([state.operations[operation_id], state.resources[resource_id], state_embedding], dim=-1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
@@ -947,7 +961,7 @@ class L1_MaterialActor(Module):
     def forward(self, state: State, actions, related_items, parents, alpha):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
         inputs = torch.zeros((len(actions), self.actor_input_size))
-        for i, (operation_id, material_id) in enumerate(actions.outsourcing):
+        for i, (operation_id, material_id) in enumerate(actions):
             inputs[i] = torch.cat([state.operations[operation_id], state.materials[material_id], state_embedding], dim=-1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
