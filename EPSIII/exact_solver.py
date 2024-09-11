@@ -20,13 +20,13 @@ def init_vars(model: cp_model.CpModel, i: Instance):
     s.E_prod_start = [[model.NewIntVar(0, i.M, f'E_prod_start{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
     s.E_end = [[model.NewIntVar(0, i.M, f'E_end{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
     s.E_validated = [[model.NewIntVar(0, i.M, f'E_validated{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
-    s.O_uses_init_quantity, s.O_start, s.O_setup, s.O_end, s.O_executed, s.D_setup = init_several_1D(nb_projects, [None], 6)
-    s.precedes = init_2D(nb_projects, nb_projects, [None])
+    s.O_uses_init_quantity, s.O_start, s.O_setup, s.O_end, s.O_executed, s.D_setup = init_several_1D(nb_projects, None, 6)
+    s.precedes = init_2D(nb_projects, nb_projects, None)
     s.Cmax = model.NewIntVar(0, i.M, 'Cmax')
     for p in range(nb_projects):
         nb_ops = i.O_size[p]
-        s.O_uses_init_quantity[p], s.O_start[p], s.O_setup[p], s.O_end[p], s.O_executed[p] = init_several_2D(nb_ops, i.nb_resources, [None], 5)
-        s.D_setup[p] = init_3D(nb_ops, i.nb_resources, i.nb_settings, [None])
+        s.O_uses_init_quantity[p], s.O_start[p], s.O_setup[p], s.O_end[p], s.O_executed[p] = init_several_2D(nb_ops, i.nb_resources, None, 5)
+        s.D_setup[p] = init_3D(nb_ops, i.nb_resources, i.nb_settings, None)
         for o in range(nb_ops):
             for r in range(i.nb_resources):
                 if i.require(p, o, r):
@@ -38,7 +38,7 @@ def init_vars(model: cp_model.CpModel, i: Instance):
                     s.D_setup[p][o][r] = [model.NewBoolVar(f'D_setup{p}_{o}_{r}_{c}') for c in range(i.nb_settings)]
         for p2 in range(nb_projects):
             nb_ops2 = i.O_size[p2]
-            s.precedes[p][p2] = init_3D(nb_ops, nb_ops2, i.nb_resources, [None])
+            s.precedes[p][p2] = init_3D(nb_ops, nb_ops2, i.nb_resources, None)
             for o in range(nb_ops):
                 for o2 in range(nb_ops2):
                     for r in range(i.nb_resources):
