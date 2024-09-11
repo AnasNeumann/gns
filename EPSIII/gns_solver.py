@@ -359,8 +359,8 @@ def update_processing_time(instance: Instance, graph: GraphInstance, op_id, res_
     r = graph.resources_g2i[res_id]
     processing_time =  graph.need_for_resource(op_id, res_id, 'basic_processing_time')
     op_setup_time = 0 if instance.get_operation_type(p, o) == graph.current_operation_type[res_id] else instance.operation_setup[r]
-    for d in instance.nb_settings:
-        dtime = 0 if graph.current_design_value[res_id][d] == instance.design_value[p][o][d] else instance.design_setup[r][d] 
+    for d in range(instance.nb_settings):
+        dtime = 0 if (graph.current_design_value[res_id][d] == instance.design_value[p][o][d]) else instance.design_setup[r][d] 
         op_setup_time = op_setup_time + dtime
     return processing_time + op_setup_time
 
@@ -454,7 +454,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
     ])
     utilization[resource_id] += current_processing_time
     graph.current_operation_type[resource_id] = instance.get_operation_type(p, o)
-    for d in instance.nb_settings:
+    for d in range(instance.nb_settings):
         graph.current_design_value[resource_id][d] == instance.design_value[p][o][d]
     required_types_of_resources[p][o].remove(rt)
     for similar in rt:
