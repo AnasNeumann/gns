@@ -113,13 +113,13 @@ class Instance:
         return start, start+self.EO_size[p][e]
     
     def get_operation_type(self, p, o):
-        for ot in self.nb_ops_types:
+        for ot in range(self.nb_ops_types):
             if self.operation_family[p][o][ot]:
                 return ot
         return -1
     
     def get_resource_tpye(self, r):
-        for rt in self.nb_resource_types:
+        for rt in range(self.nb_resource_types):
             if self.resource_family[r][rt]:
                 return rt
         return -1
@@ -547,7 +547,9 @@ class GraphInstance():
             self.graph['material'].x[id][self.features.material[feature]] = value
 
     def inc_material(self, id, updates):
+        print(updates)
         for feature, value in updates:
+            print(self.graph['material'].x[id][self.features.material[feature]])
             self.graph['material'].x[id][self.features.material[feature]] += value
     
     def update_item(self, id, updates):
@@ -905,8 +907,6 @@ class L1_OutousrcingActor(Module):
         )
 
     def forward(self, state: State, actions, related_items, parents, alpha):
-        print("HELLO")
-        print(actions)
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
         inputs = torch.zeros((len(actions), self.actor_input_size))
         for i, (item_id, outsourcing_choice) in enumerate(actions):

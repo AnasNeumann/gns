@@ -125,9 +125,9 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
         graph.add_operation_assembly(item_id, op_id)
         for r in i.required_resources(p,o):
             if i.finite_capacity[r]:
-                graph.add_need_for_resources(op_id, graph.resources_i2g[r], [NO, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
+                graph.add_need_for_resources(op_id, graph.resources_i2g[r], [NOT_YET, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
             else:
-                graph.add_need_for_materials(op_id, graph.materials_i2g[r], [NO, op_start, i.quantity_needed[r][p][o]])
+                graph.add_need_for_materials(op_id, graph.materials_i2g[r], [NOT_YET, op_start, i.quantity_needed[r][p][o]])
     for children in i.get_children(p, e, True):
         graph, child_id, estimated_end_child = build_item(i, graph, p, children, head=False)
         graph.add_item_assembly(item_id, child_id)
@@ -513,11 +513,11 @@ def solve_one(instance: Instance, agents, path="", train=False):
     terminate = False
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, t)
-        if len(actions)>0:
+        if len(poss_actions)>0:
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
-            probs, state_value = agents[actions_type][AGENT](graph.to_state(), actions, related_items, parents, instance.w_makespan)
+            probs, state_value = agents[actions_type][AGENT](graph.to_state(), poss_actions, related_items, parents, instance.w_makespan)
             states[actions_type].append(graph.to_state())
             values[actions_type] = torch.cat((values[actions_type], torch.Tensor([state_value.detach()])))
             actions[actions_type].append(poss_actions)
@@ -527,9 +527,11 @@ def solve_one(instance: Instance, agents, path="", train=False):
             if actions_type == OUTSOURCING:
                 item_id, outsourcing_choice = poss_actions[idx]
                 if outsourcing_choice == YES:
-                    end_date, local_price = outsource_item(graph, instance, item_id, t)
+                    g, end_date, local_price = outsource_item(graph, instance, item_id, t)
+                    graph = g
                     p, e = graph.items_g2i[item_id]
                     approximate_d_time, approximate_p_time = instance.item_processing_time(p, e)
+                    max_parent_end = 0
                     for parent in instance.get_ancestors(p, e):
                         parent_id = graph.items_i2g[p][parent]
                         max_parent_end = max(end_date, graph.item(parent_id, 'end_time'))
@@ -545,9 +547,6 @@ def solve_one(instance: Instance, agents, path="", train=False):
                     current_cmax = max(current_cmax, max_parent_end)
                 else:
                     graph.update_item(item_id, [('outsourced', NO)])
-                    p, e = graph.items_g2i[item_id]
-                    for child in instance.get_children(p, e):
-                        graph.update_item(graph.items_i2g[p][child], [('is_possible', YES), ('available_time', end_date)])
             elif actions_type == SCHEDULING:
                 operation_id, resource_id = poss_actions[idx]                
                 graph, utilization, required_types_of_resources, operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, utilization, t)

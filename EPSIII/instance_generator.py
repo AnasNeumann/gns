@@ -49,11 +49,11 @@ def init_array(size, min, max, rdm=True):
 
 def build_resources(i: Instance):
     nb_projects = NB_PROJECTS[SIZE]
-    i.resource_family = init_2D(i.nb_resources, i.nb_resource_types, [False])
-    i.design_setup = init_2D(i.nb_resources, i.nb_settings, [0])
-    i.finite_capacity = init_1D(i.nb_resources, [False])
-    i.init_quantity, i.purchase_time, i.operation_setup = init_several_1D(i.nb_resources, [0], 3)
-    i.quantity_needed, i.execution_time = init_several_2D(i.nb_resources, nb_projects, [-1], 2)
+    i.resource_family = init_2D(i.nb_resources, i.nb_resource_types, False)
+    i.design_setup = init_2D(i.nb_resources, i.nb_settings, 0)
+    i.finite_capacity = init_1D(i.nb_resources, False)
+    i.init_quantity, i.purchase_time, i.operation_setup = init_several_1D(i.nb_resources, 0, 3)
+    i.quantity_needed, i.execution_time = init_several_2D(i.nb_resources, nb_projects, -1, 2)
     for r in range(i.nb_resources):
         if r < i.nb_human_resources:
             i.finite_capacity[r] = True
@@ -72,16 +72,16 @@ def build_resources(i: Instance):
             i.init_quantity[r] = INIT_QUANTITY
             i.resource_family[r][i.nb_production_machine_types + r - i.nb_production_machines] = True
         for p in range(nb_projects):
-            i.quantity_needed[r][p], i.execution_time[r][p] = init_several_1D(i.O_size[p], [-1], 2)
+            i.quantity_needed[r][p], i.execution_time[r][p] = init_several_1D(i.O_size[p], -1, 2)
             for o in range(i.O_size[p]):
                 if i.require(p,o,r):
                     if i.finite_capacity[r]:
-                        i.quantity_needed[r][p][o] = random.randint(0, MAX_QUANTITY_USED)
-                        i.execution_time[r][p][o] = 0
-                    else:
                         i.quantity_needed[r][p][o] = 0
                         val = MAX_PROCESSING_TIMES_DESIGN if i.in_days[p][o] else MAX_PROCESSING_TIMES_ASSEMBLY if i.in_hours[p][o] else MAX_PROCESSING_TIMES_PROD
                         i.execution_time[r][p][o] = i.real_time_scale(p,o) * random.randint(1, val)
+                    else:
+                        i.quantity_needed[r][p][o] = random.randint(0, MAX_QUANTITY_USED)
+                        i.execution_time[r][p][o] = 0
     return i
 
 def build_operations(i: Instance):
@@ -92,11 +92,11 @@ def build_operations(i: Instance):
     nb_assembly_operation_types = NB_ASSEMBLY_OPERATION_TYPES[SIZE]
     nb_production_operation_types = NB_PRODUCTION_OPERATION_TYPES[SIZE]
     i.nb_ops_types = nb_design_operations_types + nb_assembly_operation_types + nb_production_operation_types
-    i.design_value, i.is_design, i.in_days, i.in_hours, i.resource_type_needed, i.simultaneous, i.operation_family = init_several_1D(nb_projects, [-1], 7)
+    i.design_value, i.is_design, i.in_days, i.in_hours, i.resource_type_needed, i.simultaneous, i.operation_family = init_several_1D(nb_projects, -1, 7)
     for p in range(nb_projects):
         nb_ops = i.O_size[p]
-        i.is_design[p], i.in_days[p], i.in_hours[p], i.simultaneous[p], i.operation_family[p] = init_several_1D(nb_ops, [False], 4)
-        i.operation_family[p], i.resource_type_needed[p] = init_several_2D(nb_ops, i.nb_ops_types, [False], 2)
+        i.is_design[p], i.in_days[p], i.in_hours[p], i.simultaneous[p], i.operation_family[p] = init_several_1D(nb_ops, False, 5)
+        i.operation_family[p], i.resource_type_needed[p] = init_several_2D(nb_ops, i.nb_ops_types, False, 2)
         i.design_value[p] = init_2D(nb_ops, i.nb_settings, [-1])
         for e in range(elts_per_project):
             first, last = i.get_operations_idx(p, e)
@@ -126,18 +126,18 @@ def build_operations(i: Instance):
 
 def build_assembly(i: Instance, p, parent, ancestors):
     ancestors.append(parent)
-    for children in i.get_children(p, parent, True):
+    for child in i.get_children(p, parent, True):
         for ancestor in ancestors:
-            i.assembly[p][ancestor][children] = True
-        i = build_assembly(i, p, children, list(ancestors))
+            i.assembly[p][ancestor][child] = True
+        i = build_assembly(i, p, child, list(ancestors))
     return i
 
 def build_elements(i: Instance):
     nb_projects = NB_PROJECTS[SIZE]
     elts_per_project = NB_ELTS_PER_PROJECT[SIZE]
-    i.assembly, i.direct_assembly = init_several_3D(nb_projects, elts_per_project, elts_per_project, [False], 2)
-    i.outsourcing_time, i.external_cost = init_several_2D(nb_projects, elts_per_project, [-1], 2)
-    i.external = init_2D(nb_projects, elts_per_project, [False])
+    i.assembly, i.direct_assembly = init_several_3D(nb_projects, elts_per_project, elts_per_project, False, 2)
+    i.outsourcing_time, i.external_cost = init_several_2D(nb_projects, elts_per_project, -1, 2)
+    i.external = init_2D(nb_projects, elts_per_project, False)
     mean_elt_op_time = MAX_PROCESSING_TIMES_DESIGN*60;
     MAX_PRICE = round(mean_elt_op_time*MAX_OUTSOURCING_PRICE_SHARE);
     MIN_PRICE = round(mean_elt_op_time*MIN_OUTSOURCING_PRICE_SHARE);
@@ -164,8 +164,8 @@ def build_precedence(i: Instance):
     for p in range(nb_projects):
         start = 0
         for e in range(elts_per_project):
-            i.operations_by_element[p][e] = init_1D(i.O_size[p], [False])
-            i.precedence[p][e] = init_2D(i.O_size[p], i.O_size[p], [False])
+            i.operations_by_element[p][e] = init_1D(i.O_size[p], False)
+            i.precedence[p][e] = init_2D(i.O_size[p], i.O_size[p], False)
             for o in range(start, start + i.EO_size[p][e]):
                 i.operations_by_element[p][e][o] = True
                 if o > start:
@@ -199,12 +199,16 @@ def build_one(size, id, w_makespan):
     i.total_elements =  NB_ELTS_PER_PROJECT[SIZE] * NB_PROJECTS[SIZE]
     i.nb_resource_types = i.nb_HR_types + i.nb_production_machine_types + i.nb_material + UNKOWN_MACHINE_TYPE
     i.nb_resources = i.nb_human_resources + i.nb_production_machines + i.nb_material
-    i.E_size = init_1D(nb_projects, [elts_per_project])
-    i.EO_size = init_2D(nb_projects, elts_per_project, [-1])
-    i.O_size = init_1D(nb_projects, [-1])
+    i.E_size = init_1D(nb_projects, elts_per_project)
+    i.EO_size = init_2D(nb_projects, elts_per_project, -1)
+    i.O_size = init_1D(nb_projects, -1)
     return build_resources(build_operations(build_elements(build_precedence(build_projects(i)))))
 
 if __name__ == '__main__':
+    '''
+        TEST WITH
+        python instance_generator.py --train=150 --test=50
+    '''
     parser = argparse.ArgumentParser(description="EPSIII instances generator")
     parser.add_argument("--train", help="Number of training instances", required=True)
     parser.add_argument("--test", help="Number of testing instances", required=True)
