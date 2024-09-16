@@ -7,6 +7,7 @@ from torch_geometric.nn import global_mean_pool
 from torch_geometric.utils import to_dense_adj
 from torch import Tensor
 from common import features2tensor, id2tensor, init_3D
+import json
 
 # =====================================================
 # =*= SOLUTION DATA STRUCTURE =*=
@@ -310,6 +311,82 @@ class Instance:
     
     def build_next_operations(self):
         return [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in range(self.O_size[p])] for p in range(len(self.O_size))]
+    
+    def loop_projects(self):
+        return range(len(self.E_size))
+    
+    def loop_items(self, p):
+        return range(self.E_size[p])
+    
+    def loop_operations(self, p):
+        return range(self.O_size[p])
+
+    def recursive_display_item(self, p, e, parent):
+        operations = []
+        children = []
+        start, end = self.get_operations_idx(p, e)
+        for child in self.get_children(p, e, True):
+            children.append(self.recursive_display_item(p, child, e))
+        for o in range(start, end):
+            resource_types = []
+            material_types = []
+            for rt in self.required_resources(p, o):
+                resources = self.resources_by_type(rt)
+                finite = self.finite_capacity[resources[0]]
+                if finite:
+                    r = resources[0]
+                    resource_types.append({"RT": rt, "nb_resources": len(resources), "execution_time": self.execution_time[r][p][o]})
+                else:
+                    m = resources[0]
+                    material_types.append({
+                        "RT": rt,
+                        "init_quantity": self.init_quantity[m],
+                        "quantity_needed": self.quantity_needed[m][p][o]
+                    })
+            if len(material_types)>0:
+                operations.append({
+                    "operation_id": o,
+                    "simultaneous": self.simultaneous[p][o],
+                    "is_design": self.is_design[p][o],
+                    "resource_types": resource_types,
+                    "material_types": material_types
+                })
+            else:
+                operations.append({
+                    "operation_id": o,
+                    "simultaneous": self.simultaneous[p][o],
+                    "is_design": self.is_design[p][o],
+                    "resource_types": resource_types,
+                })
+        if self.external[p][e]:
+            if len(children)>0:
+                return {
+                    "item_id": e, 
+                    "parent": parent,
+                    "outsourcing_time": self.outsourcing_time[p][e],
+                    "external_cost": self.external_cost[p][e],
+                    "operations": operations, 
+                    "children": children
+                }
+            else:
+                return {
+                    "item_id": e, 
+                    "parent": parent,
+                    "outsourcing_time": self.outsourcing_time[p][e],
+                    "external_cost": self.external_cost[p][e],
+                    "operations": operations, 
+                }
+        else:
+            if len(children)>0:
+                return {"item_id": e, "parent": parent, "nb_children": len(children), "operations": operations, "children": children}
+            else:
+                return {"item_id": e, "parent": parent, "operations": operations}
+
+    def display(self):
+        projects = []
+        for p in self.loop_projects():
+            projects.append({"project_id:": p, "head": self.recursive_display_item(p, self.project_head(p), -1)})
+        return json.dumps({"nb_projects": len(projects), "projects": projects}, indent=4)            
 
 # =====================================================
 # =*= HYPER-GRAPH DATA STRUCTURE =*=

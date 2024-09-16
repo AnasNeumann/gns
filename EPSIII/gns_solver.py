@@ -136,8 +136,8 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
     return graph, item_id, estimated_end
 
 def build_precedence(i: Instance, graph: GraphInstance):
-    for p in range(i.get_nb_projects()):
-        for e in range(i.E_size[p]):
+    for p in i.loop_projects():
+        for e in i.loop_items(p):
             start, end = i.get_operations_idx(p, e)
             parent_last_design = []
             parent_first_physical = []
@@ -178,7 +178,7 @@ def translate(i: Instance):
                 graph.add_material(r, i.init_quantity[r], i.purchase_time[r], remaining_quantity_needed)
     graph.resources_i2g = graph.build_i2g_1D(graph.resources_g2i, i.nb_resources)
     graph.materials_i2g = graph.build_i2g_1D(graph.materials_g2i, i.nb_resources)
-    for p in range(i.get_nb_projects()):
+    for p in i.loop_projects():
         head = i.project_head(p)
         graph, _, lower_bound = build_item(i, graph, p, head, head=True)
     graph.operations_i2g = graph.build_i2g_2D(graph.operations_g2i)
@@ -328,12 +328,12 @@ def objective_value(cmax, cost, cmax_weight):
     return cmax*cmax_weight + cost*cost_weight
 
 def build_required_resources(i: Instance):
-    required_types_of_resources = [[] for _ in range(i.get_nb_projects())]
-    required_types_of_materials = [[] for _ in range(i.get_nb_projects())]
+    required_types_of_resources = [[] for _ in i.loop_projects()]
+    required_types_of_materials = [[] for _ in i.loop_projects()]
     res_by_types = [[] for _ in range(i.nb_resource_types)]
     for r in range(i.nb_resources):
         res_by_types[i.get_resource_familly(r)].append(r)
-    for p in range(i.get_nb_projects()):
+    for p in i.loop_projects():
         nb_ops = i.O_size[p]
         required_types_of_resources[p] = [[] for _ in range(nb_ops)]
         required_types_of_materials[p] = [[] for _ in range(nb_ops)]
@@ -815,7 +815,8 @@ if __name__ == '__main__':
         print("SOLVE TARGET INSTANCE "+args.size+"_"+args.id+"...")
         INSTANCE_PATH = BASIC_PATH+'instances/test/'+args.size+'/instance_'+args.id+'.pkl'
         SOLUTION_PATH = BASIC_PATH+'instances/test/'+args.size+'/solution_gns_'+args.id+'.csv'
-        instance = load_instance(INSTANCE_PATH)
+        instance: Instance = load_instance(INSTANCE_PATH)
+        #print(instance.display())
         agents = init_new_models() if args.mode == 'test' else load_trained_models() 
         solve_one(instance, agents, SOLUTION_PATH, train=False)
     print("===* END OF FILE *===")
