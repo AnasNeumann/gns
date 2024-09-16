@@ -118,7 +118,7 @@ class Instance:
                 return ot
         return -1
     
-    def get_resource_tpye(self, r):
+    def get_resource_type(self, r):
         for rt in range(self.nb_resource_types):
             if self.resource_family[r][rt]:
                 return rt
@@ -508,12 +508,12 @@ class GraphInstance():
     def need_for_material(self, operation_id, material_id, feature):
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
-        return self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]]
+        return self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]].item()
     
     def need_for_resource(self, operation_id, resource_id, feature):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
-        return self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]]
+        return self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]].item()
 
     def item(self, id, feature):
         return self.graph['item'].x[id][self.features.item[feature]].item()
@@ -547,9 +547,7 @@ class GraphInstance():
             self.graph['material'].x[id][self.features.material[feature]] = value
 
     def inc_material(self, id, updates):
-        print(updates)
         for feature, value in updates:
-            print(self.graph['material'].x[id][self.features.material[feature]])
             self.graph['material'].x[id][self.features.material[feature]] += value
     
     def update_item(self, id, updates):

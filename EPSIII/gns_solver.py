@@ -166,7 +166,7 @@ def translate(i: Instance):
         res_idx = []
         for r in resources:
             if i.finite_capacity[r]:
-                res_id = graph.add_resource(r, 0, 0, 0, 0, len(operations), len(resources))
+                res_id = graph.add_resource(r, i.nb_settings, 0, 0, 0, len(operations), len(resources))
                 for other_id in res_idx:
                     graph.add_same_types(other_id, res_id)
                 res_idx.append(res_id)
@@ -218,7 +218,7 @@ def check_time(instance: Instance, current_time, hours=True, days=True):
     must_be = 60*instance.H if days else 60 if hours else 1
     return current_time % must_be == 0
 
-def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_id, p, e, start, end, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
+def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_id, p, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     actions = []
     can_be_executed = False
     if  graph.operation(operation_id, 'is_possible') == YES and graph.operation(operation_id, 'remaining_resources')>0 and check_time(instance, current_time, instance.in_hours[p][o], instance.in_days[p][o]): 
@@ -261,7 +261,7 @@ def reccursive_scheduling_actions(instance: Instance, graph: GraphInstance, item
             if instance.is_design[p][o]:
                 start_design = o
                 operation_id = graph.operations_i2g[p][o]
-                actions_o, can_be_executed = check_scheduling_action(instance, graph, operation_id, p, e, start, end, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
+                actions_o, can_be_executed = check_scheduling_action(instance, graph, operation_id, p, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
                 actions.extend(actions_o)
                 if can_be_executed:
                     operations.append(operation_id)
@@ -274,7 +274,7 @@ def reccursive_scheduling_actions(instance: Instance, graph: GraphInstance, item
         if remaining_physical_time > 0 and not actions: # item not terminal and no children to execute
             for o in range(start_design+1, end):
                 operation_id = graph.operations_i2g[p][o]
-                actions_o, can_be_executed = check_scheduling_action(instance, graph, p, e, start, end, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
+                actions_o, can_be_executed = check_scheduling_action(instance, graph, operation_id, p, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
                 actions.extend(actions_o)
                 if can_be_executed:
                     operations.append(operation_id)
@@ -358,9 +358,9 @@ def update_processing_time(instance: Instance, graph: GraphInstance, op_id, res_
     p, o = graph.operations_g2i[op_id]
     r = graph.resources_g2i[res_id]
     processing_time =  graph.need_for_resource(op_id, res_id, 'basic_processing_time')
-    op_setup_time = 0 if instance.get_operation_type(p, o) == graph.current_operation_type[res_id] else instance.operation_setup[r]
+    op_setup_time = 0 if (instance.get_operation_type(p, o) == graph.current_operation_type[res_id] or graph.current_operation_type[res_id]<0) else instance.operation_setup[r]
     for d in range(instance.nb_settings):
-        dtime = 0 if (graph.current_design_value[res_id][d] == instance.design_value[p][o][d]) else instance.design_setup[r][d] 
+        dtime = 0 if (graph.current_design_value[res_id][d] == instance.design_value[p][o][d] or graph.current_design_value[res_id][d]<0) else instance.design_setup[r][d] 
         op_setup_time = op_setup_time + dtime
     return processing_time + op_setup_time
 
@@ -440,7 +440,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
     basic_processing_time = graph.need_for_resource(operation_id, resource_id, 'basic_processing_time')
     current_processing_time = graph.need_for_resource(operation_id, resource_id, 'current_processing_time')
     operation_end = current_time + current_processing_time
-    p, o = graph.operations_g2i(operation_id)
+    p, o = graph.operations_g2i[operation_id]
     e = instance.get_item_of_operation(p, o)
     r = graph.resources_g2i[resource_id]
     rt = instance.get_resource_familly(r)
@@ -457,7 +457,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
     for d in range(instance.nb_settings):
         graph.current_design_value[resource_id][d] == instance.design_value[p][o][d]
     required_types_of_resources[p][o].remove(rt)
-    for similar in rt:
+    for similar in instance.resources_by_type(rt):
         if similar != r:
             similar_id = graph.resources_i2g[similar]
             graph.inc_resource(similar_id, [('remaining_operations', -1)])
@@ -786,8 +786,11 @@ if __name__ == '__main__':
         train(instances, init_new_models())
     else:
         '''
-            Test with: bash _env.sh
+            Test inference mode with: bash _env.sh
             python gns_solver.py --size=s --id=151 --train=false --mode=test --path=./
+
+            Test training mode with: bash _env.sh
+            python gns_solver.py --train=true --mode=prod --path=./
         '''
         print("SOLVE TARGET INSTANCE "+args.size+"_"+args.id+"...")
         INSTANCE_PATH = BASIC_PATH+'instances/test/'+args.size+'/instance_'+args.id+'.pkl'
