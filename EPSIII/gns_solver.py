@@ -15,6 +15,7 @@ PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 OUTSOURCING = 0
 SCHEDULING = 1
 MATERIAL_USE = 2
+ACTIONS_NAMES = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
 LEARNING_RATE = 2e-4
 PARRALLEL = True
@@ -512,12 +513,19 @@ def solve_one(instance: Instance, agents, path="", train=False):
     probabilities, states, actions, actions_idx = [[] for _ in agents], [[] for _ in agents], [[] for _ in agents], [[] for _ in agents]
     terminate = False
     while not terminate:
+        print("1. Search for actions...")
+        start_searching_for_actions = systime.time()
         poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, t)
+        print("2. End of searching for actions after "+str(round(systime.time()-start_searching_for_actions,5))+" seconds...")
         if len(poss_actions)>0:
+            print("3. Some actions found with type: "+ACTIONS_NAMES[actions_type])
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
+            print("4. Start applying corresponding GAT agent...")
+            start_applying_agent = systime.time()
             probs, state_value = agents[actions_type][AGENT](graph.to_state(), poss_actions, related_items, parents, instance.w_makespan)
+            print("5. End of applying agent actions after "+str(round(systime.time()-start_applying_agent,5))+" seconds...")
             states[actions_type].append(graph.to_state())
             values[actions_type] = torch.cat((values[actions_type], torch.Tensor([state_value.detach()])))
             actions[actions_type].append(poss_actions)
@@ -526,6 +534,8 @@ def solve_one(instance: Instance, agents, path="", train=False):
             actions_idx[actions_type].append(idx)
             if actions_type == OUTSOURCING:
                 item_id, outsourcing_choice = poss_actions[idx]
+                print("6.A. Start applying outsourcing: ID="+str(item_id)+" / CHOICE="+str(outsourcing_choice)+"...")
+                start_applying_decision = systime.time()
                 if outsourcing_choice == YES:
                     g, end_date, local_price = outsource_item(graph, instance, item_id, t)
                     graph = g
@@ -547,8 +557,11 @@ def solve_one(instance: Instance, agents, path="", train=False):
                     current_cmax = max(current_cmax, max_parent_end)
                 else:
                     graph.update_item(item_id, [('outsourced', NO)])
+                print("7.A. End of applying outsourcing after "+str(round(systime.time()-start_applying_decision,5))+" seconds...")
             elif actions_type == SCHEDULING:
-                operation_id, resource_id = poss_actions[idx]                
+                operation_id, resource_id = poss_actions[idx]    
+                print("6.B. Start applying scheduling: OPERATION="+str(operation_id)+" / RESOURCE="+str(resource_id)+"...")
+                start_applying_decision = systime.time()            
                 graph, utilization, required_types_of_resources, operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, utilization, t)
                 p, o = graph.operations_g2i[operation_id]
                 if instance.simultaneous[p][o]:
@@ -571,12 +584,21 @@ def solve_one(instance: Instance, agents, path="", train=False):
                                 print("ERROR WHILE TRYING TO SYNC OPERATION - Resource type "+str(rt)+" not available...")
                 graph = try_to_open_next_operations(graph, instance, next_operations, operation_id, operation_end)
                 current_cmax = max(current_cmax, operation_end)
+                print("7.B. End of applying scheduling after "+str(round(systime.time()-start_applying_decision,5))+" seconds...")
             else:
                 operation_id, material_id = poss_actions[idx]
+                print("6.C. Start applying material use: OPERATION="+str(operation_id)+" / RESOURCE="+str(material_id)+"...")
+                start_applying_decision = systime.time()       
                 graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
                 graph = try_to_open_next_operations(graph, instance, next_operations, operation_id, t)
                 current_cmax = max(current_cmax, t)
+                print("7.C. End of applying material use after "+str(round(systime.time()-start_applying_decision,5))+" seconds...")
+            reward(instance.w_makespan, old_cost, current_cost, old_cmax, current_cmax)
+            old_cost = current_cost
+            old_cmax = current_cmax
         else:
+            print("8. Start searching for next time...")
+            start_applying_decision = systime.time()  
             next = -1
             for resource_id in graph.loop_resources():
                 available_time = graph.resource(resource_id, 'available_time')
@@ -591,9 +613,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 t = next
                 for res_id in graph.loop_resources():
                    graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
-        reward(instance.w_makespan, old_cost, current_cost, old_cmax, current_cmax)
-        old_cost = current_cost
-        old_cmax = current_cmax
+            print("9. End of searching next time after "+str(round(systime.time()-start_applying_decision,5))+" seconds [time found is "+str(t)+"]...")
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
     else:
