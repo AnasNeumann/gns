@@ -295,31 +295,49 @@ class Instance:
                 return True
         return False
 
-    def next_operations(self, p, e, o):
-        operations = []
-        if self.is_design[p][o]:
-            operations.extend(self.succs(p, e, o, design_only=True, physical_only=False))
-            if self.is_last_design(p, e, o):
-                for child in self.get_children(p, e, direct=True):
-                    operations.extend(self.first_design_operations(p, child))
-                pass
-        else:
-            operations.extend(self.succs(p, e, o, design_only=False, physical_only=True))
-        if self.is_last_operation(p, e, o):
-            operations.extend(self.first_physical_operations(p, self.get_direct_parent(p, e)))
-        return operations
-    
-    def build_next_operations(self):
-        return [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in range(self.O_size[p])] for p in range(len(self.O_size))]
-    
     def loop_projects(self):
         return range(len(self.E_size))
-    
+
     def loop_items(self, p):
         return range(self.E_size[p])
-    
+
     def loop_operations(self, p):
         return range(self.O_size[p])
+
+    def next_operations(self, p, e, o):
+        operations = []
+        no_child = True
+        if self.is_design[p][o]:
+            if self.is_last_design(p, e, o):
+                for child in self.get_children(p, e, direct=True):
+                    no_child = False
+                    operations.extend(self.first_design_operations(p, child))
+            else:
+                operations.extend(self.succs(p, e, o, design_only=True, physical_only=False))
+        else:
+            operations.extend(self.succs(p, e, o, design_only=False, physical_only=True))
+        if self.is_last_operation(p, e, o) and no_child:
+            parent_found = False
+            current = e
+            while not parent_found:
+                parent = self.get_direct_parent(p, current)
+                if parent >= 0:
+                    physcal_ops = self.first_physical_operations(p, parent)
+                    if len(physcal_ops)>0:
+                        operations.extend(physcal_ops)
+                        parent_found = True
+                    else:
+                        current = parent
+                else:
+                    parent_found = True
+        return operations
+
+    def build_next_operations(self):
+        yyy = [[o for o in self.loop_operations(p)] for p in self.loop_projects()]
+        xxx = [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in self.loop_operations(p)] for p in self.loop_projects()]
+        print(yyy)
+        print(xxx)
+        return [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in self.loop_operations(p)] for p in self.loop_projects()]
 
     def recursive_display_item(self, p, e, parent):
         operations = []
