@@ -256,24 +256,25 @@ def reccursive_scheduling_actions(instance: Instance, graph: GraphInstance, item
     if graph.item(item_id, 'is_possible') == YES and (graph.item(item_id, 'external') == NO or graph.item(item_id, 'outsourced') == NO):
         p, e = graph.items_g2i[item_id]
         start, end = instance.get_operations_idx(p, e)
-        start_design = start
+        last_design = start
         remaining_physical_time = graph.item(item_id, 'remaining_physical_time')
+        remaining_design_time = graph.item(item_id, 'remaining_design_time')
         for o in range(start, end):
             if instance.is_design[p][o]:
-                start_design = o
+                last_design = o
                 operation_id = graph.operations_i2g[p][o]
                 actions_o, can_be_executed = check_scheduling_action(instance, graph, operation_id, p, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
                 actions.extend(actions_o)
                 if can_be_executed:
                     operations.append(operation_id)
-        if not actions and (remaining_physical_time==0 or (start_design+1)==end): # item not terminal and no design operations left
+        if not actions and remaining_design_time==0: # no design operations left
             for child_i in instance.get_children(p, e, direct=True): 
                 child = graph.items_i2g[p][child_i]
                 p_actions, p_operations = reccursive_scheduling_actions(instance, graph, child, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
                 actions.extend(p_actions)
                 actions.extend(p_operations)
         if remaining_physical_time > 0 and not actions: # item not terminal and no children to execute
-            for o in range(start_design+1, end):
+            for o in range(last_design+1, end):
                 operation_id = graph.operations_i2g[p][o]
                 actions_o, can_be_executed = check_scheduling_action(instance, graph, operation_id, p, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
                 actions.extend(actions_o)
@@ -316,6 +317,8 @@ def get_feasible_actions(instance: Instance, graph: GraphInstance, required_type
     if not actions and len(operations)>0: 
         actions = get_material_use_actions(instance, graph, operations, required_types_of_materials, res_by_types, current_time)
         type = MATERIAL_USE
+    print(f"Action type: {type}")
+    print(actions)
     return actions, type
 
 # =====================================================
@@ -486,6 +489,7 @@ def try_to_open_next_operations(graph: GraphInstance, instance: Instance, next_o
         p, o = graph.operations_g2i[operation_id]
         e = instance.get_item_of_operation(p, o)
         for next in next_operations[p][o]:
+            # TODO Check if all predecessors are done before enabling!
             next_id = graph.operations_i2g[p][next]
             next_time = next_possible_time(instance, available_time, p, next)
             print(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time}...')

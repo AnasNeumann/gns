@@ -233,9 +233,10 @@ class Instance:
         ops = []
         start, end = self.get_operations_idx(p, e)
         for o in range(start, end):
-            preds = self.preds_or_succs(p, e, start, end, o, design_only=True, physical_only=False, preds=True)
-            if len(preds) <= 0:
-                ops.append(o)
+            if self.is_design[p][o]:
+                preds = self.preds_or_succs(p, e, start, end, o, design_only=True, physical_only=False, preds=True)
+                if len(preds) <= 0:
+                    ops.append(o)
         return ops
 
     def first_physical_operations(self, p, e):
@@ -333,10 +334,6 @@ class Instance:
         return operations
 
     def build_next_operations(self):
-        yyy = [[o for o in self.loop_operations(p)] for p in self.loop_projects()]
-        xxx = [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in self.loop_operations(p)] for p in self.loop_projects()]
-        print(yyy)
-        print(xxx)
         return [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in self.loop_operations(p)] for p in self.loop_projects()]
 
     def recursive_display_item(self, p, e, parent):
