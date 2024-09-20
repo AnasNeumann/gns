@@ -196,7 +196,7 @@ def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item
     external = graph.item(item_id, 'external')
     decision_made = graph.item(item_id, 'outsourced')
     available = graph.item(item_id, 'is_possible')
-    if available:
+    if available==YES:
         if external==YES and decision_made==NOT_YET:
             p, e = graph.items_g2i[item_id]
             start, end = instance.get_operations_idx(p, e)
@@ -222,7 +222,7 @@ def check_time(instance: Instance, current_time, hours=True, days=True):
 def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_id, p, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     actions = []
     can_be_executed = False
-    if  graph.operation(operation_id, 'is_possible') == YES and graph.operation(operation_id, 'remaining_resources')>0 and check_time(instance, current_time, instance.in_hours[p][o], instance.in_days[p][o]): 
+    if graph.operation(operation_id, 'is_possible') == YES and graph.operation(operation_id, 'remaining_resources')>0 and check_time(instance, current_time, instance.in_hours[p][o], instance.in_days[p][o]): 
         sync_available = True
         sync_actions = []
         if not instance.simultaneous[p][o]:
@@ -307,8 +307,8 @@ def get_material_use_actions(instance: Instance, graph: GraphInstance, operation
                     actions.append((operation_id, mat_id))
     return actions
 
-def get_feasible_actions(instance: Instance, graph: GraphInstance, required_types_of_resources, required_types_of_materials, res_by_types, current_time, check_for_outsourcing=True):
-    actions = get_outourcing_actions(instance, graph) if check_for_outsourcing else []
+def get_feasible_actions(instance: Instance, graph: GraphInstance, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
+    actions = get_outourcing_actions(instance, graph)
     type = OUTSOURCING
     if not actions:
         actions, operations = get_scheduling_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
