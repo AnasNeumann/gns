@@ -613,7 +613,10 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 t = next
                 for res_id in graph.loop_resources():
                    graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
-            print("9. End of searching next time after "+str(round(systime.time()-start_applying_decision,5))+" seconds [time found is "+str(t)+"]...")
+                print("9. End of searching next time after "+str(round(systime.time()-start_applying_decision,5))+" seconds [time found is "+str(t)+"]...")
+            else:
+                print("10. No next time found")
+                terminate = True
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
     else:
