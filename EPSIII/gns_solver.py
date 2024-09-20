@@ -377,6 +377,7 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id, t):
     cost = graph.item(item_id, 'outsourcing_cost')
     graph.update_item(item_id, [
         ('outsourced', YES),
+        ('is_possible', YES),
         ('remaining_physical_time', 0),
         ('remaining_design_time', 0),
         ('children_time', 0),
@@ -405,8 +406,7 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id, t):
                 graph.del_need_for_material(op_id, mat_id)
                 graph.inc_material(mat_id, [('remaining_demand', -1 * quantity_needed)])
     for child in instance.get_children(p, e):
-        g, child_time, child_cost = outsource_item(graph, instance, graph.items_i2g[p][child], t)
-        graph = g
+        graph, child_time, child_cost = outsource_item(graph, instance, graph.items_i2g[p][child], t)
         cost += child_cost
         end_date = max(t, child_time)
     return graph, end_date, cost
@@ -470,7 +470,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
     ])
     if not instance.is_design[p][o]:
         for child in instance.get_children(p, e, direct=False):
-            graph.inc_item(graph.items_i2g[child], [('parents_physical_time')], -basic_processing_time)
+            graph.inc_item(graph.items_i2g[p][child], [('parents_physical_time', -basic_processing_time)])
     graph.update_item(item_id, [
         ('start_time', min(current_time, graph.item(item_id, 'start_time'))),
         ('end_time', max(operation_end, graph.item(item_id, 'end_time')))
@@ -496,6 +496,53 @@ def try_to_open_next_operations(graph: GraphInstance, instance: Instance, next_o
                 graph.update_item(graph.items_i2g[p][child], [('is_possible', YES)])
             pass
     return graph
+
+def check_completeness(graph: GraphInstance):
+    for item_id in graph.loop_items():
+        outsourced = graph.item(item_id, 'outsourced')
+        e = graph.items_g2i[item_id]
+        if graph.item(item_id, 'remaining_physical_time')>0:
+            print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL HAS {graph.item(item_id, 'remaining_physical_time')} OF PHYSICAL TIME TO DO!")
+        if graph.item(item_id, 'remaining_design_time')>0:
+            print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL HAS {graph.item(item_id, 'remaining_design_time')} OF DESIGN TIME TO DO!")  
+        if graph.item(item_id, 'outsourced')==NOT_YET:
+            print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL NO OUTSOURCING DECISIONS!")   
+        if graph.item(item_id, 'is_possible')==NOT_YET:
+            print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL NOT POSSIBLE!")
+    for material_id in graph.loop_materials():
+        m = graph.materials_g2i[material_id]
+        if graph.material(material_id, 'remaining_demand')>0:
+            print(f"PROBLEM MATERIAL {m} STILL HAS {graph.material(material_id, 'remaining_demand')} OF REMAINING DEMAND!")
+    for resource_id in graph.loop_resources():
+        r = graph.resources_g2i[resource_id]
+        if graph.resource(resource_id, 'remaining_operations')>0:
+            print(f"PROBLEM RESOURCE {r} STILL HAS {graph.resource(resource_id, 'remaining_operations')} OF REMAINING OPERATION!")
+    need_for_mat_idx, loop_mat = graph.loop_need_for_material()
+    for i in loop_mat:
+        operation_id = need_for_mat_idx[0, i]
+        material_id = need_for_mat_idx[1, i]
+        p, o = graph.operations_g2i[operation_id]
+        m = graph.materials_g2i[material_id]
+        if graph.need_for_material(operation_id, material_id, 'status') == NOT_YET:
+            print(f"PROBLEM NEED OF MATERIAL op=({p},{o}), mat={m} STATUS STILL NO YET!")
+    need_for_res_idx, loop_res = graph.loop_need_for_resource()
+    for i in loop_res:
+        operation_id = need_for_res_idx[0, i]
+        resource_id = need_for_res_idx[1, i]
+        p, o = graph.operations_g2i[operation_id]
+        r = graph.resources_g2i[resource_id]
+        if graph.need_for_resource(operation_id, resource_id, 'status') == NOT_YET:
+            print(f"PROBLEM NEED OF RESOURCE op=({p},{o}), res={r} STATUS STILL NO YET!")
+    for operation_id in graph.loop_operations():
+        p, o = graph.operations_g2i[operation_id]
+        if graph.operation(operation_id, 'is_possible')==NOT_YET:
+            print(f"PROBLEM OPERATION ({p},{o}) STILL NOT POSSIBLE!")
+        if graph.operation(operation_id, 'remaining_resources')>0:
+            print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_resources')} REMAINING RESOURCES!")
+        if graph.operation(operation_id, 'remaining_materials')>0:
+            print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_materials')} REMAINING MATERIALS!")
+        if graph.operation(operation_id, 'remaining_time')>0:
+            print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_time')} REMAINING TIME!")
 
 def solve_one(instance: Instance, agents, path="", train=False):
     start_time = systime.time()
@@ -537,24 +584,23 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 print("6.A. Start applying outsourcing: ID="+str(item_id)+" / CHOICE="+str(outsourcing_choice)+"...")
                 start_applying_decision = systime.time()
                 if outsourcing_choice == YES:
-                    g, end_date, local_price = outsource_item(graph, instance, item_id, t)
-                    graph = g
+                    graph, end_date, local_price = outsource_item(graph, instance, item_id, t)
                     p, e = graph.items_g2i[item_id]
                     approximate_d_time, approximate_p_time = instance.item_processing_time(p, e)
-                    max_parent_end = 0
-                    for parent in instance.get_ancestors(p, e):
-                        parent_id = graph.items_i2g[p][parent]
-                        max_parent_end = max(end_date, graph.item(parent_id, 'end_time'))
-                        graph.update_item(parent_id, [
-                            ('children_time', graph.item(parent_id, 'children_time')-(approximate_d_time+approximate_p_time)),
-                            ('end_time', max_parent_end)
+                    max_ancestor_end = 0
+                    for ancestor in instance.get_ancestors(p, e):
+                        ancestor_id = graph.items_i2g[p][ancestor]
+                        max_ancestor_end = max(end_date, graph.item(ancestor_id, 'end_time'))
+                        graph.update_item(ancestor_id, [
+                            ('children_time', graph.item(ancestor_id, 'children_time')-(approximate_d_time+approximate_p_time)),
+                            ('end_time', max_ancestor_end)
                         ])
-                        for o in instance.first_physical_operations(p, e):
-                            op_id = graph.operations_i2g[p][o]
-                            available_time = next_possible_time(instance, end_date, p, o)
-                            graph.update_operation(op_id, [('is_possible', YES), ('available_time', available_time)])
+                    for o in instance.first_physical_operations(p, instance.get_direct_parent(p, e)):
+                        op_id = graph.operations_i2g[p][o]
+                        available_time = next_possible_time(instance, end_date, p, o)
+                        graph.update_operation(op_id, [('is_possible', YES), ('available_time', available_time)])
                     current_cost += local_price  
-                    current_cmax = max(current_cmax, max_parent_end)
+                    current_cmax = max(current_cmax, max_ancestor_end)
                 else:
                     graph.update_item(item_id, [('outsourced', NO)])
                 print("7.A. End of applying outsourcing after "+str(round(systime.time()-start_applying_decision,5))+" seconds...")
@@ -616,6 +662,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 print("9. End of searching next time after "+str(round(systime.time()-start_applying_decision,5))+" seconds [time found is "+str(t)+"]...")
             else:
                 print("10. No next time found")
+                check_completeness(graph)
                 terminate = True
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
