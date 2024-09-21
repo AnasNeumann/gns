@@ -9,6 +9,10 @@ from torch import Tensor
 from common import features2tensor, id2tensor, init_3D
 import json
 
+NOT_YET = -1
+YES = 1
+NO = 0
+
 # =====================================================
 # =*= SOLUTION DATA STRUCTURE =*=
 # =====================================================
@@ -333,8 +337,14 @@ class Instance:
                     parent_found = True
         return operations
 
-    def build_next_operations(self):
-        return [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in self.loop_operations(p)] for p in self.loop_projects()]
+    def build_next_and_previous_operations(self):
+        next = [[self.next_operations(p, self.get_item_of_operation(p, o), o) for o in self.loop_operations(p)] for p in self.loop_projects()]
+        previous = [[[] for _ in self.loop_operations(p)] for p in self.loop_projects()]
+        for p in self.loop_projects():
+            for o in self.loop_operations(p):
+                for successor in next[p][o]:
+                    previous[p][successor].append(o)
+        return previous, next
 
     def recursive_display_item(self, p, e, parent):
         operations = []
@@ -669,6 +679,22 @@ class GraphInstance():
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
         for feature, value in updates:
             self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]] = value
+
+    def is_item_complete(self, item_id):
+        if self.item(item_id, 'remaining_physical_time')>0 \
+            or self.item(item_id, 'remaining_design_time')>0 \
+            or self.item(item_id, 'outsourced')==NOT_YET \
+            or self.item(item_id, 'is_possible')==NOT_YET:
+            return False
+        return True
+
+    def is_operation_complete(self, operation_id):
+        if self.operation(operation_id, 'is_possible')==NOT_YET \
+            or self.operation(operation_id, 'remaining_resources')>0 \
+            or self.operation(operation_id, 'remaining_materials')>0 \
+            or self.operation(operation_id, 'remaining_time')>0:
+            return False
+        return True
 
     def flatten_parents(self):
         adj = to_dense_adj(self.item_assembly().edge_index)[0]
