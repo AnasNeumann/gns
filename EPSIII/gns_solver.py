@@ -201,6 +201,8 @@ def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item
                     if not instance.resources_by_type(rt):
                         need_to_be_outsourced = True
                         break
+                if need_to_be_outsourced:
+                    break
             if need_to_be_outsourced:
                 actions.append((item_id, YES))
             else:
@@ -233,6 +235,8 @@ def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_
                     else:
                         sync_available = False
                         break
+            if not sync_available:
+                break
         if instance.simultaneous[p][o] and sync_available:
             for rt in required_types_of_materials[p][o]:
                 for m in res_by_types[rt]:
@@ -240,6 +244,8 @@ def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_
                     if instance.purchase_time[m] > current_time and graph.material(mat_id, 'remaining_init_quantity') < instance.quantity_needed[m][p][o]:
                         sync_available = False
                         break
+                if not sync_available:
+                    break
             if sync_available:
                 actions.extend(sync_actions)
                 can_be_executed = True
@@ -248,8 +254,8 @@ def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_
 def reccursive_scheduling_actions(instance: Instance, graph: GraphInstance, item_id, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     actions = []
     operations = []
-    if graph.item(item_id, 'is_possible') == YES and (graph.item(item_id, 'external') == NO or graph.item(item_id, 'outsourced') == NO):
-        p, e = graph.items_g2i[item_id]
+    if graph.item(item_id, 'is_possible')==YES and (graph.item(item_id, 'external')==NO or graph.item(item_id, 'outsourced')==NO):
+        p, e = graph.items_g2i[item_id] 
         start, end = instance.get_operations_idx(p, e)
         last_design = start
         remaining_physical_time = graph.item(item_id, 'remaining_physical_time')
