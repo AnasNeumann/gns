@@ -370,21 +370,22 @@ def next_possible_time(instance: Instance, current_time, p, o):
         return ((current_time // scale) + 1) * scale
 
 def outsource_item(graph: GraphInstance, instance: Instance, item_id, t):
-    end_date = t + graph.item(item_id, 'outsourcing_time')
     cost = graph.item(item_id, 'outsourcing_cost')
+    outsourcing_time = max(graph.item(item_id, 'start_time'), t)
+    end_date = outsourcing_time + graph.item(item_id, 'outsourcing_time')
     graph.update_item(item_id, [
         ('outsourced', YES),
         ('is_possible', YES),
         ('remaining_physical_time', 0),
         ('remaining_design_time', 0),
         ('children_time', 0),
-        ('start_time', t),
+        ('start_time', outsourcing_time),
         ('end_time', end_date)])
     p, e = graph.items_g2i[item_id]
     start, end = instance.get_operations_idx(p, e)
     for o in range(start, end):
         op_id = graph.operations_i2g[p][o]
-        available_time = next_possible_time(instance, t, p, o)
+        available_time = next_possible_time(instance, outsourcing_time, p, o)
         graph.update_operation(op_id, [
             ('remaining_resources', 0),
             ('remaining_materials', 0),
@@ -403,7 +404,7 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id, t):
                 graph.del_need_for_material(op_id, mat_id)
                 graph.inc_material(mat_id, [('remaining_demand', -1 * quantity_needed)])
     for child in instance.get_children(p, e):
-        graph, child_time, child_cost = outsource_item(graph, instance, graph.items_i2g[p][child], t)
+        graph, child_time, child_cost = outsource_item(graph, instance, graph.items_i2g[p][child], outsourcing_time)
         cost += child_cost
         end_date = max(t, child_time)
     return graph, end_date, cost
@@ -504,8 +505,9 @@ def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previo
                 ])
         if instance.is_last_design(p, e, o):
             for child in instance.get_children(p, e, direct=True):
-                debug_print(f'Enabling item ({p},{child}) for outsourcing...')
-                graph.update_item(graph.items_i2g[p][child], [('is_possible', YES)])
+                child_id = graph.items_i2g[p][child]
+                debug_print(f'Enabling item {child_id} -> ({p},{child}) for outsourcing...')
+                graph.update_item(child_id, [('is_possible', YES), ('start_time', available_time)])
     return graph
 
 def check_completeness(graph: GraphInstance):
