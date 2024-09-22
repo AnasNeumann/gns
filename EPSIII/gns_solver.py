@@ -412,7 +412,7 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id, t):
 
 def apply_use_material(graph: GraphInstance, instance: Instance, operation_id, material_id, required_types_of_materials, current_time):
     p, o = graph.operations_g2i[operation_id]
-    rt = instance.get_resource_familly(graph.materials_g2i[operation_id])
+    rt = instance.get_resource_familly(graph.materials_g2i[material_id])
     quantity_needed = graph.need_for_material(material_id, 'quantity_needed')
     current_quantity = graph.material(material_id, 'remaining_init_quantity')
     waiting_demand = graph.material(material_id, 'remaining_demand') 
