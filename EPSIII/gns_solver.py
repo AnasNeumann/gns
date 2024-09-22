@@ -106,19 +106,17 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head=False):
     for o in range(start, end):
         succs = end-(o+1)
         operation_time = i.operation_time(p,o)
-        operation_possible = YES if item_possible and (o == start) else NOT_YET
+        operation_possible = YES if (head and (o == start)) else NOT_YET
         total_successors = childrens_physical_operations + succs + (childrens_design_operations if i.is_design[p][o] else 0)
         required_res = 0
         required_mat = 0
         for rt in i.required_rt(p, o):
             resources_of_rt = i.resources_by_type(rt)
-            if(len(resources_of_rt)>0):
+            if resources_of_rt:
                 if i.finite_capacity[resources_of_rt[0]]:
                     required_res += 1
                 else:
                     required_mat += 1
-            else:
-                print(f'\t -> Operation ({p},{o}) requires type ({rt}) which do not have any resources!')
         op_id = graph.add_operation(p, o, i.is_design[p][o], i.simultaneous[p][o], i.in_hours[p][o], i.in_days[p][o], succs, total_successors, operation_time, required_res, required_mat, op_start, op_start+operation_time, operation_possible)
         graph.add_operation_assembly(item_id, op_id)
         for r in i.required_resources(p,o):
@@ -339,7 +337,7 @@ def build_required_resources(i: Instance):
         for o in range(nb_ops):
             for rt in i.required_rt(p, o):
                 resources_of_rt = i.resources_by_type(rt)
-                if(len(resources_of_rt)>0):
+                if resources_of_rt:
                     if i.finite_capacity[resources_of_rt[0]]:
                         required_types_of_resources[p][o].append(rt)
                     else:
@@ -480,7 +478,13 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
         graph.inc_item(item_id, [('remaining_physical_time', -basic_processing_time)])
     return graph, utilization, required_types_of_resources, operation_end
 
-def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previous_operations, next_operations, operation_id, available_time): 
+def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previous_operations, next_operations, operation_id, available_time, debug_mode=False): 
+    if debug_mode:
+        def debug_print(*args):
+            print(*args)
+    else:
+        def debug_print(*args):
+            pass
     if graph.is_operation_complete(operation_id):
         p, o = graph.operations_g2i[operation_id]
         e = instance.get_item_of_operation(p, o)
@@ -493,14 +497,14 @@ def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previo
             if next_good_to_go:
                 next_id = graph.operations_i2g[p][next]
                 next_time = next_possible_time(instance, available_time, p, next)
-                print(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time}...')
+                debug_print(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time}...')
                 graph.update_operation(next_id, [
                     ('available_time', next_time),
                     ('is_possible', YES)
                 ])
         if instance.is_last_design(p, e, o):
             for child in instance.get_children(p, e, direct=True):
-                print(f'Enabling item ({p},{child}) for outsourcing...')
+                debug_print(f'Enabling item ({p},{child}) for outsourcing...')
                 graph.update_item(graph.items_i2g[p][child], [('is_possible', YES)])
     return graph
 
@@ -551,7 +555,14 @@ def check_completeness(graph: GraphInstance):
         if graph.operation(operation_id, 'remaining_time')>0:
             print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_time')} REMAINING TIME!")
 
-def solve_one(instance: Instance, agents, path="", train=False):
+def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False):
+    if debug_mode:
+        def debug_print(*args):
+            print(*args)
+    else:
+        def debug_print(*args):
+            pass  
+    debug_print(instance.display())
     start_time = systime.time()
     graph, current_cmax = translate(instance)
     old_cmax = current_cmax
@@ -572,7 +583,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, t)
         if poss_actions:
-            print(poss_actions)
+            debug_print(f"Current possible actions: {poss_actions}")
             reset_dates = True
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
@@ -589,7 +600,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 p, e = graph.items_g2i[item_id]
                 if outsourcing_choice == YES:
                     graph, end_date, local_price = outsource_item(graph, instance, item_id, t)
-                    print(f"Outsourcing item {item_id} -> ({p},{e})...")
+                    debug_print(f"Outsourcing item {item_id} -> ({p},{e})...")
                     approximate_d_time, approximate_p_time = instance.item_processing_time(p, e)
                     max_ancestor_end = 0
                     for ancestor in instance.get_ancestors(p, e):
@@ -606,12 +617,12 @@ def solve_one(instance: Instance, agents, path="", train=False):
                     current_cost += local_price  
                     current_cmax = max(current_cmax, max_ancestor_end)
                 else:
-                    print(f"Producing item {item_id} -> ({p},{e}) locally...")
+                    debug_print(f"Producing item {item_id} -> ({p},{e}) locally...")
                     graph.update_item(item_id, [('outsourced', NO)])
             elif actions_type == SCHEDULING:
                 operation_id, resource_id = poss_actions[idx]    
                 p, o = graph.operations_g2i[operation_id]
-                print(f"Scheduling: operation {operation_id} -> ({p},{o}) on resource {graph.resources_g2i[resource_id]}...")     
+                debug_print(f"Scheduling: operation {operation_id} -> ({p},{o}) on resource {graph.resources_g2i[resource_id]}...")     
                 graph, utilization, required_types_of_resources, operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, utilization, t)
                 if instance.simultaneous[p][o]:
                     for rt in instance.required_rt(p, o):
@@ -630,14 +641,14 @@ def solve_one(instance: Instance, agents, path="", train=False):
                                     found = True
                                     break
                             if not found:
-                                print("ERROR WHILE TRYING TO SYNC OPERATION - Resource type "+str(rt)+" not available...")
-                graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, operation_end)
+                                debug_print("ERROR WHILE TRYING TO SYNC OPERATION - Resource type "+str(rt)+" not available...")
+                graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, operation_end, debug_mode=debug_mode)
                 current_cmax = max(current_cmax, operation_end)
             else:
                 operation_id, material_id = poss_actions[idx]
                 p, o = graph.operations_g2i[operation_id]
-                print(f"Material use: operation {operation_id} -> ({p},{o}) on material {graph.materials_g2i[material_id]}...")  
-                graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
+                debug_print(f"Material use: operation {operation_id} -> ({p},{o}) on material {graph.materials_g2i[material_id]}...")  
+                graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t, debug_mode=debug_mode)
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t)
                 current_cmax = max(current_cmax, t)
             reward(instance.w_makespan, old_cost, current_cost, old_cmax, current_cmax)
@@ -648,28 +659,31 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 next_dates = []
                 for resource_id in graph.loop_resources():
                     available_time = graph.resource(resource_id, 'available_time')
+                    debug_print(f"\t --> Machine {resource_id} found available at time {available_time} [t={t}]")
                     if available_time>t:
                         next_dates.append(available_time)
                 for operation_id in graph.loop_operations():
                     if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
                         available_time = graph.operation(operation_id, 'available_time')
+                        debug_print(f"\t --> operation {operation_id} found available at time {available_time} [t={t}]")
                         if available_time>t:
                             next_dates.append(available_time)
             else:
                 next_dates.pop(0)
             if next_dates:
-                print(f"New current time t={t}...")
                 reset_dates = False
                 possible_actions_was_empty = False
                 t = next_dates[0]
                 for res_id in graph.loop_resources():
                     graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
+                debug_print(f"New current time t={t}...")
             else:
                 if not possible_actions_was_empty:
                     possible_actions_was_empty = True
                 else:
-                    print("End of solving stage!")
-                    check_completeness(graph)
+                    debug_print("End of solving stage!")
+                    if debug_mode:
+                        check_completeness(graph)
                     terminate = True
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
@@ -704,7 +718,7 @@ def load_training_dataset():
                 with open(file_path, 'rb') as file:
                     problems.append(pickle.load(file))
         instances.append(problems)
-    print("end of loading!")
+    print("End of loading!")
     return instances
 
 def calculate_returns(rewards, gamma=PPO_CONF['discount_factor']):
@@ -804,7 +818,7 @@ def async_solve_batch(agents, batch, num_processes, train=True, epochs=-1, optim
             loss = PPO_loss(batch, agent, all_probabilities[agent_id], all_states[agent_id], all_actions[agent_id], all_actions_idx[agent_id], advantages[agent_id], flattened_values[agent_id], all_returns[agent_id], all_instances_idx[agent_id], all_related_items, all_parents)
             print(f'\t Average Loss = {loss:.4f}')
 
-def train(instances, agents, iterations=PPO_CONF['train_iterations'], batch_size=PPO_CONF['batch_size'], epochs=PPO_CONF['opt_epochs'], validation_rate=PPO_CONF['validation_rate']):
+def train(instances, agents, iterations=PPO_CONF['train_iterations'], batch_size=PPO_CONF['batch_size'], epochs=PPO_CONF['opt_epochs'], validation_rate=PPO_CONF['validation_rate'], debug_mode=False):
     optimizers = [torch.optim.Adam(agent.parameters(), lr=LEARNING_RATE) for agent,_ in agents]
     for agent,_ in agents:
         agent.train()
@@ -818,11 +832,11 @@ def train(instances, agents, iterations=PPO_CONF['train_iterations'], batch_size
     for iteration in range(iterations):
         print("PPO iteration: "+str(iteration+1)+"/"+str(iterations)+":")
         if iteration % PPO_CONF['switch_batch'] == 0:
-            print("\t Time to sample new batch of size "+str(batch_size)+"...")
+            print("\t time to sample new batch of size "+str(batch_size)+"...")
             current_batch = random.sample(train_instances, batch_size)
         async_solve_batch(agents, current_batch, num_processes, train=True, epochs=epochs, optimizers=optimizers)
         if iteration % validation_rate == 0:
-            print("\t Time to validate the loss...")
+            print("\t time to validate the loss...")
             for agent,_ in agents:
                 agent.eval()
             with torch.no_grad():
@@ -845,10 +859,12 @@ if __name__ == '__main__':
     parser.add_argument("--path", help="Saving path on the server", required=True)
     args = parser.parse_args()
     print(f"Execution mode: {args.mode}...")
+    debug_mode = False
     if args.mode == 'test':
         PPO_CONF['train_iterations'] = 10
         PPO_CONF['batch_size'] = 3
         PARRALLEL = False
+        debug_mode = True
     try:
         set_start_method('spawn')
     except RuntimeError:
@@ -860,7 +876,7 @@ if __name__ == '__main__':
         print("LOAD DATASET TO TRAIN MODELS...")
         instances = load_training_dataset()
         print("TRAIN MODELS WITH PPO...")
-        train(instances, init_new_models())
+        train(instances, init_new_models(), debug_mode=debug_mode)
     else:
         '''
             Test inference mode with: bash _env.sh
@@ -873,7 +889,6 @@ if __name__ == '__main__':
         INSTANCE_PATH = BASIC_PATH+'instances/test/'+args.size+'/instance_'+args.id+'.pkl'
         SOLUTION_PATH = BASIC_PATH+'instances/test/'+args.size+'/solution_gns_'+args.id+'.csv'
         instance: Instance = load_instance(INSTANCE_PATH)
-        print(instance.display())
         agents = init_new_models() if args.mode == 'test' else load_trained_models() 
-        solve_one(instance, agents, SOLUTION_PATH, train=False)
+        solve_one(instance, agents, SOLUTION_PATH, train=False, debug_mode=debug_mode)
     print("===* END OF FILE *===")
