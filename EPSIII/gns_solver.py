@@ -200,7 +200,7 @@ def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item
             need_to_be_outsourced = False
             for o in range(start, end):
                 for rt in instance.required_rt(p, o):
-                    if len(instance.resources_by_type(rt)) <=0:
+                    if not instance.resources_by_type(rt):
                         need_to_be_outsourced = True
                         break
             if need_to_be_outsourced:
@@ -413,7 +413,7 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id, t):
 def apply_use_material(graph: GraphInstance, instance: Instance, operation_id, material_id, required_types_of_materials, current_time):
     p, o = graph.operations_g2i[operation_id]
     rt = instance.get_resource_familly(graph.materials_g2i[material_id])
-    quantity_needed = graph.need_for_material(material_id, 'quantity_needed')
+    quantity_needed = graph.need_for_material(operation_id, material_id, 'quantity_needed')
     current_quantity = graph.material(material_id, 'remaining_init_quantity')
     waiting_demand = graph.material(material_id, 'remaining_demand') 
     graph.update_need_for_material(operation_id, material_id, [
@@ -566,10 +566,14 @@ def solve_one(instance: Instance, agents, path="", train=False):
     rewards, values = [torch.Tensor([]) for _ in agents], [torch.Tensor([]) for _ in agents]
     probabilities, states, actions, actions_idx = [[] for _ in agents], [[] for _ in agents], [[] for _ in agents], [[] for _ in agents]
     terminate = False
+    next_dates = []
+    reset_dates = False
+    possible_actions_was_empty = False
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, t)
-        if len(poss_actions)>0:
+        if poss_actions:
             print(poss_actions)
+            reset_dates = True
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
@@ -640,24 +644,33 @@ def solve_one(instance: Instance, agents, path="", train=False):
             old_cost = current_cost
             old_cmax = current_cmax
         else:
-            next = -1
-            for resource_id in graph.loop_resources():
-                available_time = graph.resource(resource_id, 'available_time')
-                if available_time>t and (next<0 or next>available_time):
-                    next = available_time
-            for operation_id in graph.loop_operations():
-                if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
-                    available_time = graph.operation(operation_id, 'available_time')
-                    if available_time>t and (next<0 or next>available_time):
-                        next = available_time
-            if next>t:
-                t = next
-                for res_id in graph.loop_resources():
-                   graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
+            if possible_actions_was_empty or reset_dates:
+                next_dates = []
+                for resource_id in graph.loop_resources():
+                    available_time = graph.resource(resource_id, 'available_time')
+                    if available_time>t:
+                        next_dates.append(available_time)
+                for operation_id in graph.loop_operations():
+                    if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
+                        available_time = graph.operation(operation_id, 'available_time')
+                        if available_time>t:
+                            next_dates.append(available_time)
             else:
-                print("End of solving stage!")
-                check_completeness(graph)
-                terminate = True
+                next_dates.pop(0)
+            if next_dates:
+                print(f"New current time t={t}...")
+                reset_dates = False
+                possible_actions_was_empty = False
+                t = next_dates[0]
+                for res_id in graph.loop_resources():
+                    graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
+            else:
+                if not possible_actions_was_empty:
+                    possible_actions_was_empty = True
+                else:
+                    print("End of solving stage!")
+                    check_completeness(graph)
+                    terminate = True
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
     else:

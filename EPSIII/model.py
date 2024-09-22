@@ -220,7 +220,7 @@ class Instance:
         for o in range(start, end):
             if self.is_design[p][o]:
                 succs = self.preds_or_succs(p, e, start, end, o, design_only=True, physical_only=False, preds=False)
-                if len(succs) <= 0:
+                if not succs:
                     ops.append(o)
         return ops
 
@@ -229,7 +229,7 @@ class Instance:
         start, end = self.get_operations_idx(p, e)
         for o in range(start, end):
             preds = self.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=False, preds=True)
-            if len(preds) <= 0:
+            if not preds:
                 ops.append(o)
         return ops
     
@@ -239,7 +239,7 @@ class Instance:
         for o in range(start, end):
             if self.is_design[p][o]:
                 preds = self.preds_or_succs(p, e, start, end, o, design_only=True, physical_only=False, preds=True)
-                if len(preds) <= 0:
+                if not preds:
                     ops.append(o)
         return ops
 
@@ -249,7 +249,7 @@ class Instance:
         for o in range(start, end):
             if not self.is_design[p][o]:
                 preds = self.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=True, preds=True)
-                if len(preds) <= 0:
+                if not preds:
                     ops.append(o)
         return ops
 
@@ -258,7 +258,7 @@ class Instance:
         start, end = self.get_operations_idx(p, e)
         for o in range(start, end):
             succs = self.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=False, preds=False)
-            if len(succs) <= 0:
+            if not succs:
                 ops.append(o)
         return ops
 
@@ -317,6 +317,8 @@ class Instance:
                 for child in self.get_children(p, e, direct=True):
                     no_child = False
                     operations.extend(self.first_design_operations(p, child))
+                if no_child:
+                    operations.extend(self.succs(p, e, o, design_only=False, physical_only=True))
             else:
                 operations.extend(self.succs(p, e, o, design_only=True, physical_only=False))
         else:
@@ -328,7 +330,7 @@ class Instance:
                 parent = self.get_direct_parent(p, current)
                 if parent >= 0:
                     physcal_ops = self.first_physical_operations(p, parent)
-                    if len(physcal_ops)>0:
+                    if physcal_ops:
                         operations.extend(physcal_ops)
                         parent_found = True
                     else:
@@ -368,7 +370,7 @@ class Instance:
                         "init_quantity": self.init_quantity[m],
                         "quantity_needed": self.quantity_needed[m][p][o]
                     })
-            if len(material_types)>0:
+            if material_types:
                 operations.append({
                     "operation_id": o,
                     "simultaneous": self.simultaneous[p][o],
@@ -384,7 +386,7 @@ class Instance:
                     "resource_types": resource_types,
                 })
         if self.external[p][e]:
-            if len(children)>0:
+            if children:
                 return {
                     "item_id": e, 
                     "parent": parent,
@@ -402,7 +404,7 @@ class Instance:
                     "operations": operations, 
                 }
         else:
-            if len(children)>0:
+            if children:
                 return {"item_id": e, "parent": parent, "nb_children": len(children), "operations": operations, "children": children}
             else:
                 return {"item_id": e, "parent": parent, "operations": operations}
