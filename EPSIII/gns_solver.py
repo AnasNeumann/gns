@@ -219,7 +219,7 @@ def check_time(instance: Instance, current_time, hours=True, days=True):
 def check_scheduling_action(instance: Instance, graph: GraphInstance, operation_id, p, o, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     actions = []
     can_be_executed = False
-    if graph.operation(operation_id, 'is_possible') == YES and graph.operation(operation_id, 'remaining_resources')>0 and check_time(instance, current_time, instance.in_hours[p][o], instance.in_days[p][o]): 
+    if graph.operation(operation_id, 'is_possible') == YES and check_time(instance, current_time, instance.in_hours[p][o], instance.in_days[p][o]): 
         sync_available = True
         sync_actions = []
         if not instance.simultaneous[p][o]:
@@ -308,10 +308,11 @@ def get_material_use_actions(instance: Instance, graph: GraphInstance, operation
 def get_feasible_actions(instance: Instance, graph: GraphInstance, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     actions = get_outourcing_actions(instance, graph)
     type = OUTSOURCING
+    operations = []
     if not actions:
         actions, operations = get_scheduling_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
         type = SCHEDULING
-    if not actions and len(operations)>0: 
+    if not actions and len(operations)>0:
         actions = get_material_use_actions(instance, graph, operations, required_types_of_materials, res_by_types, current_time)
         type = MATERIAL_USE
     return actions, type
@@ -480,13 +481,13 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
     return graph, utilization, required_types_of_resources, operation_end
 
 def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previous_operations, next_operations, operation_id, available_time): 
-    if graph.operation(operation_id, 'remaining_resources')==0 and graph.operation(operation_id, 'remaining_materials')==0:
+    if graph.is_operation_complete(operation_id):
         p, o = graph.operations_g2i[operation_id]
         e = instance.get_item_of_operation(p, o)
         for next in next_operations[p][o]:
             next_good_to_go = True
             for previous in previous_operations[p][next]:
-                if not graph.is_operation_complete(graph.operations_i2g[p][previous]):
+                if previous != operation_id and not graph.is_operation_complete(graph.operations_i2g[p][previous]):
                     next_good_to_go = False
                     break
             if next_good_to_go:
@@ -568,6 +569,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, t)
         if len(poss_actions)>0:
+            print(poss_actions)
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
@@ -583,7 +585,7 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 p, e = graph.items_g2i[item_id]
                 if outsourcing_choice == YES:
                     graph, end_date, local_price = outsource_item(graph, instance, item_id, t)
-                    print(f"Outsourcing item ({p},{e})...")
+                    print(f"Outsourcing item {item_id} -> ({p},{e})...")
                     approximate_d_time, approximate_p_time = instance.item_processing_time(p, e)
                     max_ancestor_end = 0
                     for ancestor in instance.get_ancestors(p, e):
@@ -600,13 +602,13 @@ def solve_one(instance: Instance, agents, path="", train=False):
                     current_cost += local_price  
                     current_cmax = max(current_cmax, max_ancestor_end)
                 else:
-                    print(f"Producing item ({p},{e}) locally...")
+                    print(f"Producing item {item_id} -> ({p},{e}) locally...")
                     graph.update_item(item_id, [('outsourced', NO)])
             elif actions_type == SCHEDULING:
                 operation_id, resource_id = poss_actions[idx]    
-                print("Scheduling: operation #"+str(operation_id)+" on resource #"+str(resource_id)+"...")        
-                graph, utilization, required_types_of_resources, operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, utilization, t)
                 p, o = graph.operations_g2i[operation_id]
+                print(f"Scheduling: operation {operation_id} -> ({p},{o}) on resource {graph.resources_g2i[resource_id]}...")     
+                graph, utilization, required_types_of_resources, operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, utilization, t)
                 if instance.simultaneous[p][o]:
                     for rt in instance.required_rt(p, o):
                         if rt != instance.get_resource_familly(graph.resources_g2i[resource_id]):
@@ -629,7 +631,8 @@ def solve_one(instance: Instance, agents, path="", train=False):
                 current_cmax = max(current_cmax, operation_end)
             else:
                 operation_id, material_id = poss_actions[idx]
-                print("Material use: operation #"+str(operation_id)+" on material #"+str(material_id)+"...")  
+                p, o = graph.operations_g2i[operation_id]
+                print(f"Material use: operation {operation_id} -> ({p},{o}) on material {graph.materials_g2i[material_id]}...")  
                 graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t)
                 current_cmax = max(current_cmax, t)
