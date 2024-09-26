@@ -107,7 +107,7 @@ class Instance:
     def get_ancestors(self, p, e):
         ancestors = []
         for e2 in range(self.E_size[p]):
-            if self.assembly[p][e][e2]:
+            if self.assembly[p][e2][e]:
                 ancestors.append(e2)
         return ancestors
     
