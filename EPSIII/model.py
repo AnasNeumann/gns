@@ -137,8 +137,7 @@ class Instance:
 
     def operation_time(self, p, o):
         time = 0
-        rts = self.required_rt(p,o)
-        for rt in rts:
+        for rt in self.required_rt(p,o):
             time_rt = 0
             for r in self.resources_by_type(rt):
                 if self.finite_capacity[r]:
@@ -357,19 +356,22 @@ class Instance:
         for o in range(start, end):
             resource_types = []
             material_types = []
-            for rt in self.required_resources(p, o):
+            for rt in self.required_rt(p, o):
                 resources = self.resources_by_type(rt)
-                finite = self.finite_capacity[resources[0]]
-                if finite:
-                    r = resources[0]
-                    resource_types.append({"RT": rt, "nb_resources": len(resources), "execution_time": self.execution_time[r][p][o]})
+                if resources:
+                    finite = self.finite_capacity[resources[0]]
+                    if finite:
+                        r = resources[0]
+                        resource_types.append({"RT": rt, "nb_resources": len(resources), "execution_time": self.execution_time[r][p][o]})
+                    else:
+                        m = resources[0]
+                        material_types.append({
+                            "RT": rt,
+                            "init_quantity": self.init_quantity[m],
+                            "quantity_needed": self.quantity_needed[m][p][o]
+                        })
                 else:
-                    m = resources[0]
-                    material_types.append({
-                        "RT": rt,
-                        "init_quantity": self.init_quantity[m],
-                        "quantity_needed": self.quantity_needed[m][p][o]
-                    })
+                    resource_types.append({"RT": rt, "nb_resources": 0, "execution_time": -1})
             if material_types:
                 operations.append({
                     "operation_id": o,
