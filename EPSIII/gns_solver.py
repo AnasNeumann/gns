@@ -220,10 +220,11 @@ def get_outourcing_actions(instance: Instance, graph: GraphInstance):
         actions.extend(reccursive_outourcing_actions(instance, graph, project_head))
     return actions
 
-def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInstance, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
+def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInstance, operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     scheduling_actions = []
     material_use_actions = []
-    for operation_id in graph.loop_operations():
+    ops_to_test = operations if operations else graph.loop_operations()
+    for operation_id in ops_to_test:
         p, o = graph.operations_g2i[operation_id]
         e = instance.get_item_of_operation(p, o)
         item_id = graph.items_i2g[p][e]
@@ -270,11 +271,11 @@ def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInst
                             material_use_actions.append((operation_id, mat_id))
     return scheduling_actions, material_use_actions
 
-def get_feasible_actions(instance: Instance, graph: GraphInstance, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
+def get_feasible_actions(instance: Instance, graph: GraphInstance, operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
     actions = get_outourcing_actions(instance, graph)
     type = OUTSOURCING
     if not actions:
-        scheduling_actions, material_use_actions = get_scheduling_and_material_use_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
+        scheduling_actions, material_use_actions = get_scheduling_and_material_use_actions(instance, graph, operations,required_types_of_resources, required_types_of_materials, res_by_types, current_time)
         if scheduling_actions:
             actions = scheduling_actions
             type = SCHEDULING
@@ -538,8 +539,9 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
     rewards, values = [torch.Tensor([]) for _ in agents], [torch.Tensor([]) for _ in agents]
     probabilities, states, actions, actions_idx = [[] for _ in agents], [[] for _ in agents], [[] for _ in agents], [[] for _ in agents]
     terminate = False
+    operations_to_test = []
     while not terminate:
-        poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, t)
+        poss_actions, actions_type = get_feasible_actions(instance, graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t)
         debug_print(f"Current possible actions: {poss_actions}")
         if poss_actions:
             if actions_type == SCHEDULING:
@@ -620,6 +622,7 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
             old_cmax = current_cmax
         else: # NO OPERATIONS LEFT AT TIME T SEARCH FOR NEXT TIME
             next_date = -1
+            operations_to_test = []
             for material_id in graph.loop_materials():
                 arrival_time = graph.material(material_id, 'arrival_time')
                 if arrival_time>t and (arrival_time<next_date or next_date<0):
@@ -640,8 +643,10 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
                         debug_print(f"\t --> operation {operation_id} can be scheduled at time {available_time} [t={t}]")
                     elif graph.operation(operation_id, 'remaining_materials')>0:
                         debug_print(f"\t --> operation {operation_id} can use material at time {available_time} [t={t}]")
-                    if available_time>t and (available_time<next_date or next_date<0):
-                        next_date = available_time
+                    if available_time>t: 
+                        operations_to_test.append(operation_id)
+                        if available_time<next_date or next_date<0:
+                            next_date = available_time
             if next_date>=0:
                 t = next_date
                 if t > 0:
