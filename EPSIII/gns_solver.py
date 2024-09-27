@@ -472,26 +472,26 @@ def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previo
                 graph.update_item(child_id, [('is_possible', YES), ('start_time', available_time)])
     return graph
 
-def check_completeness(graph: GraphInstance):
+def check_completeness(graph: GraphInstance, debug_print):
     for item_id in graph.loop_items():
         outsourced = graph.item(item_id, 'outsourced')
         e = graph.items_g2i[item_id]
         if graph.item(item_id, 'remaining_physical_time')>0:
-            print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL HAS {graph.item(item_id, 'remaining_physical_time')} OF PHYSICAL TIME TO DO!")
+            debug_print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL HAS {graph.item(item_id, 'remaining_physical_time')} OF PHYSICAL TIME TO DO!")
         if graph.item(item_id, 'remaining_design_time')>0:
-            print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL HAS {graph.item(item_id, 'remaining_design_time')} OF DESIGN TIME TO DO!")  
+            debug_print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL HAS {graph.item(item_id, 'remaining_design_time')} OF DESIGN TIME TO DO!")  
         if graph.item(item_id, 'outsourced')==NOT_YET:
-            print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL NO OUTSOURCING DECISIONS!")   
+            debug_print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL NO OUTSOURCING DECISIONS!")   
         if graph.item(item_id, 'is_possible')==NOT_YET:
-            print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL NOT POSSIBLE!")
+            debug_print(f"PROBLEM ITEM {e} [outsourced={outsourced}] STILL NOT POSSIBLE!")
     for material_id in graph.loop_materials():
         m = graph.materials_g2i[material_id]
         if graph.material(material_id, 'remaining_demand')>0:
-            print(f"PROBLEM MATERIAL {m} STILL HAS {graph.material(material_id, 'remaining_demand')} OF REMAINING DEMAND!")
+            debug_print(f"PROBLEM MATERIAL {m} STILL HAS {graph.material(material_id, 'remaining_demand')} OF REMAINING DEMAND!")
     for resource_id in graph.loop_resources():
         r = graph.resources_g2i[resource_id]
         if graph.resource(resource_id, 'remaining_operations')>0:
-            print(f"PROBLEM RESOURCE {r} STILL HAS {graph.resource(resource_id, 'remaining_operations')} OF REMAINING OPERATION!")
+            debug_print(f"PROBLEM RESOURCE {r} STILL HAS {graph.resource(resource_id, 'remaining_operations')} OF REMAINING OPERATION!")
     need_for_mat_idx, loop_mat = graph.loop_need_for_material()
     for i in loop_mat:
         operation_id = need_for_mat_idx[0, i]
@@ -499,7 +499,7 @@ def check_completeness(graph: GraphInstance):
         p, o = graph.operations_g2i[operation_id]
         m = graph.materials_g2i[material_id]
         if graph.need_for_material(operation_id, material_id, 'status') == NOT_YET:
-            print(f"PROBLEM NEED OF MATERIAL op=({p},{o}), mat={m} STATUS STILL NO YET!")
+            debug_print(f"PROBLEM NEED OF MATERIAL op=({p},{o}), mat={m} STATUS STILL NO YET!")
     need_for_res_idx, loop_res = graph.loop_need_for_resource()
     for i in loop_res:
         operation_id = need_for_res_idx[0, i]
@@ -507,22 +507,25 @@ def check_completeness(graph: GraphInstance):
         p, o = graph.operations_g2i[operation_id]
         r = graph.resources_g2i[resource_id]
         if graph.need_for_resource(operation_id, resource_id, 'status') == NOT_YET:
-            print(f"PROBLEM NEED OF RESOURCE op=({p},{o}), res={r} STATUS STILL NO YET!")
+            debug_print(f"PROBLEM NEED OF RESOURCE op=({p},{o}), res={r} STATUS STILL NO YET!")
     for operation_id in graph.loop_operations():
         p, o = graph.operations_g2i[operation_id]
         if graph.operation(operation_id, 'is_possible')==NOT_YET:
-            print(f"PROBLEM OPERATION ({p},{o}) STILL NOT POSSIBLE!")
+            debug_print(f"PROBLEM OPERATION ({p},{o}) STILL NOT POSSIBLE!")
         if graph.operation(operation_id, 'remaining_resources')>0:
-            print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_resources')} REMAINING RESOURCES!")
+            debug_print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_resources')} REMAINING RESOURCES!")
         if graph.operation(operation_id, 'remaining_materials')>0:
-            print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_materials')} REMAINING MATERIALS!")
+            debug_print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_materials')} REMAINING MATERIALS!")
         if graph.operation(operation_id, 'remaining_time')>0:
-            print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_time')} REMAINING TIME!")
+            debug_print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_time')} REMAINING TIME!")
 
 def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False):
     if debug_mode:
         def debug_print(*args):
             print(*args)
+            with open('./log.sh', 'a') as file:
+                file.write(*args)
+                file.write('\n')
     else:
         def debug_print(*args):
             pass  
@@ -658,7 +661,7 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
             else:
                 debug_print("End of solving stage!")
                 if debug_mode:
-                    check_completeness(graph)
+                    check_completeness(graph, debug_print)
                 terminate = True
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents

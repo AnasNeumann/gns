@@ -165,5 +165,6 @@ documentation/**
 EPSIII/jobs/train_gns.sh
 EPSIII/jobs/exact/**
 EPSIII/jobs/gns/**
+EPSIII/log.sh
 gns_env/
 __pycache__/
