@@ -617,9 +617,15 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
                             ('end_time', max_ancestor_end)
                         ])
                     for o in instance.first_physical_operations(p, instance.get_direct_parent(p, e)):
-                        op_id = graph.operations_i2g[p][o]
-                        available_time = next_possible_time(instance, end_date, p, o)
-                        graph.update_operation(op_id, [('is_possible', YES), ('available_time', available_time)])
+                        next_good_to_go = True
+                        for previous in previous_operations[p][o]:
+                            if not graph.is_operation_complete(graph.operations_i2g[p][previous]):
+                                next_good_to_go = False
+                                break
+                        if next_good_to_go:
+                            op_id = graph.operations_i2g[p][o]
+                            available_time = next_possible_time(instance, end_date, p, o)
+                            graph.update_operation(op_id, [('is_possible', YES), ('available_time', available_time)])
                     current_cost += local_price  
                     current_cmax = max(current_cmax, max_ancestor_end)
                 else:
