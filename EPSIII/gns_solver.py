@@ -667,26 +667,35 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
             old_cmax = current_cmax
         else: # NO OPERATIONS LEFT AT TIME T SEARCH FOR NEXT TIME
             if possible_actions_was_empty or reset_dates:
-                next_dates = []
+                next_dates = [] if possible_actions_was_empty else [t]
                 for resource_id in graph.loop_resources():
                     available_time = graph.resource(resource_id, 'available_time')
-                    debug_print(f"\t --> Machine {resource_id} found available at time {available_time} [t={t}]")
                     if available_time>t:
+                        debug_print(f"\t --> Machine {resource_id} will be available at time {available_time} [t={t}]")
                         next_dates.append(available_time)
+                    else:
+                        debug_print(f"\t --> Machine {resource_id} was available since time {available_time} [t={t}]")
                 for operation_id in graph.loop_operations():
                     if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
                         available_time = graph.operation(operation_id, 'available_time')
-                        debug_print(f"\t --> operation {operation_id} found available at time {available_time} [t={t}]")
                         if available_time>t:
+                            debug_print(f"\t --> operation {operation_id} will be available at time {available_time} [t={t}]")
                             next_dates.append(available_time)
+                        else:
+                            p, o = graph.operations_g2i[operation_id]
+                            available_time = next_possible_time(instance, t, p, o)
+                            debug_print(f"\t --> operation {operation_id} was already available and could be executed at time {available_time} [t={t}]")
+                            next_dates.append(available_time)
+                next_dates.sort()
             else:
                 next_dates.pop(0)
             if next_dates:
                 reset_dates = False
                 possible_actions_was_empty = False
                 t = next_dates[0]
-                for res_id in graph.loop_resources():
-                    graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
+                if t > 0:
+                    for res_id in graph.loop_resources():
+                        graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
                 debug_print(f"New current time t={t}...")
             else:
                 if not possible_actions_was_empty:
