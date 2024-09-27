@@ -220,7 +220,7 @@ def get_outourcing_actions(instance: Instance, graph: GraphInstance):
         actions.extend(reccursive_outourcing_actions(instance, graph, project_head))
     return actions
 
-def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInstance, operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
+def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInstance, operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time, debug_print):
     scheduling_actions = []
     material_use_actions = []
     ops_to_test = operations if operations else graph.loop_operations()
@@ -247,6 +247,7 @@ def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInst
                             if graph.resource(res_id, 'available_time') <= current_time:
                                 sync_actions.append((operation_id, res_id))
                             else:
+                                debug_print(f"\t Sync impossible at time {current_time} for Operation {operation_id} -> ({p}, {o}) due to resource {res_id}/{r}...")
                                 sync_available = False
                                 break
                     if not sync_available:
@@ -256,6 +257,7 @@ def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInst
                         for m in res_by_types[rt]:
                             mat_id = graph.materials_i2g[m]
                             if instance.purchase_time[m] > current_time and graph.material(mat_id, 'remaining_init_quantity') < instance.quantity_needed[m][p][o]:
+                                debug_print(f"\t Sync impossible at time {current_time} for Operation {operation_id} -> ({p}, {o}) due to material {mat_id}/{m}...")
                                 sync_available = False
                                 break
                         if not sync_available:
@@ -271,11 +273,11 @@ def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInst
                             material_use_actions.append((operation_id, mat_id))
     return scheduling_actions, material_use_actions
 
-def get_feasible_actions(instance: Instance, graph: GraphInstance, operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time):
+def get_feasible_actions(instance: Instance, graph: GraphInstance, operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time, debug_print):
     actions = get_outourcing_actions(instance, graph)
     type = OUTSOURCING
     if not actions:
-        scheduling_actions, material_use_actions = get_scheduling_and_material_use_actions(instance, graph, operations,required_types_of_resources, required_types_of_materials, res_by_types, current_time)
+        scheduling_actions, material_use_actions = get_scheduling_and_material_use_actions(instance, graph, operations,required_types_of_resources, required_types_of_materials, res_by_types, current_time, debug_print)
         if scheduling_actions:
             actions = scheduling_actions
             type = SCHEDULING
@@ -541,7 +543,7 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
     terminate = False
     operations_to_test = []
     while not terminate:
-        poss_actions, actions_type = get_feasible_actions(instance, graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t)
+        poss_actions, actions_type = get_feasible_actions(instance, graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t, debug_print)
         debug_print(f"Current possible actions: {poss_actions}")
         if poss_actions:
             if actions_type == SCHEDULING:
