@@ -587,14 +587,10 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
     rewards, values = [torch.Tensor([]) for _ in agents], [torch.Tensor([]) for _ in agents]
     probabilities, states, actions, actions_idx = [[] for _ in agents], [[] for _ in agents], [[] for _ in agents], [[] for _ in agents]
     terminate = False
-    next_dates = []
-    reset_dates = False
-    possible_actions_was_empty = False
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, required_types_of_resources, required_types_of_materials, res_by_types, t)
         if poss_actions:
             debug_print(f"Current possible actions: {poss_actions}")
-            reset_dates = True
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
@@ -666,41 +662,37 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
             old_cost = current_cost
             old_cmax = current_cmax
         else: # NO OPERATIONS LEFT AT TIME T SEARCH FOR NEXT TIME
-            if possible_actions_was_empty or reset_dates:
-                next_dates = [] if possible_actions_was_empty else [t]
-                for resource_id in graph.loop_resources():
-                    available_time = graph.resource(resource_id, 'available_time')
-                    debug_print(f"\t --> Machine {resource_id} is available at time {available_time} [t={t}]")
-                    if available_time>t and available_time not in next_dates:
-                        next_dates.append(available_time)
-                for operation_id in graph.loop_operations():
-                    if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
-                        available_time = graph.operation(operation_id, 'available_time')
-                        if available_time <= t:
-                            p, o = graph.operations_g2i[operation_id]
-                            available_time = next_possible_time(instance, t, p, o)
-                        debug_print(f"\t --> operation {operation_id} can be executed at time {available_time} [t={t}]")
-                        if available_time not in next_dates:
-                            next_dates.append(available_time)
-                next_dates.sort()
-            else:
-                next_dates.pop(0)
-            if next_dates:
-                reset_dates = False
-                possible_actions_was_empty = False
-                t = next_dates[0]
+            next_date = -1
+            for material_id in graph.loop_materials():
+                arrival_time = graph.material(material_id, 'arrival_time')
+                if arrival_time>t and (arrival_time<next_date or next_date<0):
+                    debug_print(f"\t --> New quantity of material {material_id} is available at time {arrival_time} [t={t}]")
+                    next_date = arrival_time
+            for resource_id in graph.loop_resources():
+                available_time = graph.resource(resource_id, 'available_time')
+                debug_print(f"\t --> Machine {resource_id} is available at time {available_time} [t={t}]")
+                if available_time>t and (available_time<next_date or next_date<0):
+                    next_date = available_time
+            for operation_id in graph.loop_operations():
+                if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
+                    available_time = graph.operation(operation_id, 'available_time')
+                    if available_time <= t:
+                        p, o = graph.operations_g2i[operation_id]
+                        available_time = next_possible_time(instance, t, p, o)
+                    debug_print(f"\t --> operation {operation_id} can be executed at time {available_time} [t={t}]")
+                    if available_time>t and (available_time<next_date or next_date<0):
+                        next_date = available_time
+            if next_date>=0:
+                t = next_date
                 if t > 0:
                     for res_id in graph.loop_resources():
                         graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
                 debug_print(f"New current time t={t}...")
             else:
-                if not possible_actions_was_empty:
-                    possible_actions_was_empty = True
-                else:
-                    debug_print("End of solving stage!")
-                    if debug_mode:
-                        check_completeness(graph)
-                    terminate = True
+                debug_print("End of solving stage!")
+                if debug_mode:
+                    check_completeness(graph)
+                terminate = True
     if train:
         return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
     else:
