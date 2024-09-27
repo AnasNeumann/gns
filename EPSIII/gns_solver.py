@@ -670,21 +670,17 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
                 next_dates = [] if possible_actions_was_empty else [t]
                 for resource_id in graph.loop_resources():
                     available_time = graph.resource(resource_id, 'available_time')
-                    if available_time>t:
-                        debug_print(f"\t --> Machine {resource_id} will be available at time {available_time} [t={t}]")
+                    debug_print(f"\t --> Machine {resource_id} is available at time {available_time} [t={t}]")
+                    if available_time>t and available_time not in next_dates:
                         next_dates.append(available_time)
-                    else:
-                        debug_print(f"\t --> Machine {resource_id} was available since time {available_time} [t={t}]")
                 for operation_id in graph.loop_operations():
                     if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
                         available_time = graph.operation(operation_id, 'available_time')
-                        if available_time>t:
-                            debug_print(f"\t --> operation {operation_id} will be available at time {available_time} [t={t}]")
-                            next_dates.append(available_time)
-                        else:
+                        if available_time <= t:
                             p, o = graph.operations_g2i[operation_id]
                             available_time = next_possible_time(instance, t, p, o)
-                            debug_print(f"\t --> operation {operation_id} was already available and could be executed at time {available_time} [t={t}]")
+                        debug_print(f"\t --> operation {operation_id} can be executed at time {available_time} [t={t}]")
+                        if available_time not in next_dates:
                             next_dates.append(available_time)
                 next_dates.sort()
             else:
