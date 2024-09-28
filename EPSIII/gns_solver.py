@@ -2,7 +2,7 @@ import argparse
 import pickle
 from torch.multiprocessing import Pool, set_start_method
 import os
-from model import Instance, GraphInstance, L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, NO, NOT_YET, YES
+from model import Instance, GraphInstance, L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, ItemFeatures, OperationFeatures, MaterialFeatures, ResourceFeatures, NeedForMaterialFeatures, NeedForResourceFeatures, NO, NOT_YET, YES
 from common import load_instance, to_bool, init_several_1D, search_object_by_id
 import torch
 torch.autograd.set_detect_anomaly(True)
@@ -98,9 +98,21 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head):
             parents_physical_time += apt
             parents_design_time += adt
     estimated_end = design_time + parents_design_time + physical_time + children_time
-    status = NOT_YET if i.external[p][e] else NO 
-    item_possible = YES if head else NOT_YET
-    item_id = graph.add_item(p, e, head, i.external[p][e], status, i.external_cost[p][e], i.outsourcing_time[p][e], physical_time, design_time, len(ancestors), len(childrens), parents_physical_time, children_time, parents_design_time, estimated_end, item_possible)
+    item_id = graph.add_item(p, e, ItemFeatures(
+        head = head, 
+        external = i.external[p][e],
+        outsourced = NOT_YET if i.external[p][e] else NO,
+        outsourcing_cost = i.external_cost[p][e],
+        outsourcing_time = i.outsourcing_time[p][e],
+        remaining_physical_time = physical_time,
+        remaining_design_time = design_time,
+        parents = len(ancestors),
+        children = len(childrens),
+        parents_physical_time = parents_physical_time,
+        children_time = children_time,
+        start_time = parents_design_time,
+        end_time = estimated_end,
+        is_possible = YES if head else NOT_YET))
     op_start = parents_design_time
     start, end = i.get_operations_idx(p,e)
     for o in range(start, end):
@@ -108,8 +120,6 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head):
             op_start = op_start+operation_time
         succs = end-(o+1)
         operation_time = i.operation_time(p,o)
-        operation_possible = YES if (head and (o == start)) else NOT_YET
-        total_successors = childrens_physical_operations + succs + (childrens_design_operations if i.is_design[p][o] else 0)
         required_res = 0
         required_mat = 0
         for rt in i.required_rt(p, o):
@@ -119,13 +129,33 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head):
                     required_res += 1
                 else:
                     required_mat += 1
-        op_id = graph.add_operation(p, o, i.is_design[p][o], i.simultaneous[p][o], i.in_hours[p][o], i.in_days[p][o], succs, total_successors, operation_time, required_res, required_mat, op_start, op_start+operation_time, operation_possible)
+        op_id = graph.add_operation(p, o, OperationFeatures(
+            design = i.is_design[p][o],
+            sync = i.simultaneous[p][o],
+            timescale_hours = i.in_hours[p][o],
+            timescale_days = i.in_days[p][o],
+            direct_successors = succs,
+            total_successors = childrens_physical_operations + succs + (childrens_design_operations if i.is_design[p][o] else 0),
+            remaining_time = operation_time,
+            remaining_resources = required_res,
+            remaining_materials = required_mat,
+            available_time = op_start,
+            end_time = op_start+operation_time,
+            is_possible = YES if (head and (o == start)) else NOT_YET))
         graph.add_operation_assembly(item_id, op_id)
         for r in i.required_resources(p,o):
             if i.finite_capacity[r]:
-                graph.add_need_for_resources(op_id, graph.resources_i2g[r], [NOT_YET, i.execution_time[r][p][o], i.execution_time[r][p][o], op_start, op_start+i.execution_time[r][p][o]])
+                graph.add_need_for_resources(op_id, graph.resources_i2g[r], NeedForResourceFeatures(
+                    status = NOT_YET,
+                    basic_processing_time = i.execution_time[r][p][o],
+                    current_processing_time = i.execution_time[r][p][o],
+                    start_time = op_start,
+                    end_time = op_start+i.execution_time[r][p][o]))
             else:
-                graph.add_need_for_materials(op_id, graph.materials_i2g[r], [NOT_YET, op_start, i.quantity_needed[r][p][o]])
+                graph.add_need_for_materials(op_id, graph.materials_i2g[r], NeedForMaterialFeatures(
+                    status = NOT_YET,
+                    execution_time = op_start,
+                    quantity_needed = i.quantity_needed[r][p][o]))
     for children in i.get_children(p, e, True):
         graph, child_id, estimated_end_child = build_item(i, graph, p, children, head=False)
         graph.add_item_assembly(item_id, child_id)
@@ -164,7 +194,12 @@ def translate(i: Instance):
         res_idx = []
         for r in resources:
             if i.finite_capacity[r]:
-                res_id = graph.add_resource(r, i.nb_settings, 0, 0, 0, len(operations), len(resources))
+                res_id = graph.add_resource(r, i.nb_settings, ResourceFeatures(
+                    utilization_ratio = 0,
+                    available_time = 0,
+                    executed_operations = 0,
+                    remaining_operations = len(operations),
+                    similar_resources = len(resources)))
                 for other_id in res_idx:
                     graph.add_same_types(other_id, res_id)
                 res_idx.append(res_id)
@@ -172,7 +207,10 @@ def translate(i: Instance):
                 remaining_quantity_needed = 0
                 for p, o in operations:
                     remaining_quantity_needed += i.quantity_needed[r][p][o]
-                graph.add_material(r, i.init_quantity[r], i.purchase_time[r], remaining_quantity_needed)
+                graph.add_material(r, MaterialFeatures(
+                    remaining_init_quantity = i.init_quantity[r], 
+                    arrival_time = i.purchase_time[r], 
+                    remaining_demand = remaining_quantity_needed))
     graph.resources_i2g = graph.build_i2g_1D(graph.resources_g2i, i.nb_resources)
     graph.materials_i2g = graph.build_i2g_1D(graph.materials_g2i, i.nb_resources)
     for p in i.loop_projects():
