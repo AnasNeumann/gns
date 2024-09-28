@@ -234,9 +234,8 @@ def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item
     if available==YES:
         if external==YES and decision_made==NOT_YET:
             p, e = graph.items_g2i[item_id]
-            start, end = instance.get_operations_idx(p, e)
             need_to_be_outsourced = False
-            for o in range(start, end):
+            for o in instance.loop_item_operations(p,e):
                 for rt in instance.required_rt(p, o):
                     if not instance.resources_by_type(rt):
                         need_to_be_outsourced = True
@@ -388,8 +387,7 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id, t, enforce
         ('start_time', outsourcing_time),
         ('end_time', end_date)])
     p, e = graph.items_g2i[item_id]
-    start, end = instance.get_operations_idx(p, e)
-    for o in range(start, end):
+    for o in instance.loop_item_operations(p,e):
         op_id = graph.operations_i2g[p][o]
         available_time = next_possible_time(instance, outsourcing_time, p, o)
         graph.update_operation(op_id, [
@@ -442,13 +440,13 @@ def apply_use_material(graph: GraphInstance, instance: Instance, operation_id, m
     return graph, required_types_of_materials
 
 def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, resource_id, required_types_of_resources, utilization, current_time):
-    basic_processing_time = graph.need_for_resource(operation_id, resource_id, 'basic_processing_time')
     current_processing_time = graph.need_for_resource(operation_id, resource_id, 'current_processing_time')
     operation_end = current_time + current_processing_time
     p, o = graph.operations_g2i[operation_id]
     e = instance.get_item_of_operation(p, o)
     r = graph.resources_g2i[resource_id]
     rt = instance.get_resource_familly(r)
+    estimated_processing_time = instance.operation_resource_time(p, o, rt)
     item_id = graph.items_i2g[p][e]
     graph.inc_resource(resource_id, [('executed_operations', 1), ('remaining_operations', -1)])
     graph.update_resource(resource_id, [('available_time', operation_end)])
@@ -467,22 +465,23 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
             similar_id = graph.resources_i2g[similar]
             graph.inc_resource(similar_id, [('remaining_operations', -1)])
             graph.del_need_for_resource(operation_id, similar_id)
-    graph.inc_operation(operation_id, [('remaining_resources', -1), ('remaining_time', -basic_processing_time)])
+    graph.inc_operation(operation_id, [('remaining_resources', -1), ('remaining_time', -estimated_processing_time)])
     graph.update_operation(operation_id, [('end_time', operation_end)])
-    graph.inc_item(graph.items_i2g[p][instance.get_direct_parent(p, e)], [
-        ('children_time', -basic_processing_time)
-    ])
+    for ancestor in instance.get_ancestors(p, e):
+        graph.inc_item(graph.items_i2g[p][ancestor], [
+            ('children_time', -estimated_processing_time)
+        ])
     if not instance.is_design[p][o]:
         for child in instance.get_children(p, e, direct=False):
-            graph.inc_item(graph.items_i2g[p][child], [('parents_physical_time', -basic_processing_time)])
+            graph.inc_item(graph.items_i2g[p][child], [('parents_physical_time', -estimated_processing_time)])
     graph.update_item(item_id, [
         ('start_time', min(current_time, graph.item(item_id, 'start_time'))),
         ('end_time', max(operation_end, graph.item(item_id, 'end_time')))
     ])
     if instance.is_design[p][o]:
-        graph.inc_item(item_id, [('remaining_design_time', -basic_processing_time)])
+        graph.inc_item(item_id, [('remaining_design_time', -estimated_processing_time)])
     else:
-        graph.inc_item(item_id, [('remaining_physical_time', -basic_processing_time)])
+        graph.inc_item(item_id, [('remaining_physical_time', -estimated_processing_time)])
     return graph, utilization, required_types_of_resources, operation_end
 
 def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previous_operations, next_operations, operation_id, available_time, debug_print): 
@@ -604,7 +603,6 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
                     graph, end_date, local_price = outsource_item(graph, instance, item_id, t, enforce_time=False)
                     debug_print(f"Outsourcing item {item_id} -> ({p},{e})...")
                     approximate_d_time, approximate_p_time = instance.item_processing_time(p, e)
-                    max_ancestor_end = 0
                     for ancestor in instance.get_ancestors(p, e):
                         ancestor_id = graph.items_i2g[p][ancestor]
                         max_ancestor_end = max(end_date, graph.item(ancestor_id, 'end_time'))

@@ -134,22 +134,26 @@ class Instance:
             if self.operations_by_element[p][e][o]:
                 return e
         return -1
+    
+    def operation_resource_time(self, p, o, rt):
+        resources = self.resources_by_type(rt)
+        if not resources or not self.finite_capacity[resources[0]]:
+            return 0
+        time_rt = 0
+        for r in self.resources_by_type(rt):
+            time_rt = max(time_rt, self.execution_time[r][p][o])
+        return time_rt
 
     def operation_time(self, p, o):
         time = 0
-        for rt in self.required_rt(p,o):
-            time_rt = 0
-            for r in self.resources_by_type(rt):
-                if self.finite_capacity[r]:
-                    time_rt = max(time_rt, self.execution_time[r][p][o])
-            time += time_rt
+        for rt in self.required_rt(p, o):
+            time += self.operation_resource_time(p, o, rt)
         return time
 
     def item_processing_time(self, p, e):
-        start, end = self.get_operations_idx(p,e)
         design_time = 0
         physical_time = 0
-        for o in range(start, end):
+        for o in self.loop_item_operations(p,e):
             if self.is_design[p][o]:
                 design_time += self.operation_time(p,o)
             else:
@@ -205,8 +209,7 @@ class Instance:
     
     def succs(self, p, e, o, design_only=False, physical_only=False):
         operations = []
-        start, end = self.get_operations_idx(p, e)
-        for other in range(start, end):
+        for other in self.loop_item_operations(p,e):
             if other!=o and (not design_only or self.is_design[p][other]) \
                 and (not physical_only or not self.is_design[p][other]) \
                 and self.precedence[p][e][other][o]:
@@ -298,6 +301,10 @@ class Instance:
             if o2 == o:
                 return True
         return False
+    
+    def loop_item_operations(self, p, e):
+        start, end = self.get_operations_idx(p,e)
+        return range(start, end)
 
     def loop_projects(self):
         return range(len(self.E_size))
@@ -350,10 +357,9 @@ class Instance:
     def recursive_display_item(self, p, e, parent):
         operations = []
         children = []
-        start, end = self.get_operations_idx(p, e)
         for child in self.get_children(p, e, True):
             children.append(self.recursive_display_item(p, child, e))
-        for o in range(start, end):
+        for o in self.loop_item_operations(p,e):
             resource_types = []
             material_types = []
             for rt in self.required_rt(p, o):
