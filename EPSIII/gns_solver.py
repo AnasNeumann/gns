@@ -785,12 +785,9 @@ def PPO_optimize(optimizer, loss):
 
 def async_solve_one(init_args):
     agents, instance, debug_mode = init_args
-    total_ops = 0
-    for j in instance['jobs']:
-        total_ops += len(j)
-    print(f"\t start solving instance: {instance['id']}...")
+    print(f"\t start solving instance: {instance.id}...")
     result = solve_one(instance, agents, train=True, debug_mode=debug_mode)
-    print(f"\t end solving instance: {instance['id']}!")
+    print(f"\t end solving instance: {instance.id}!")
     return result
 
 def async_solve_batch(agents, batch, num_processes, train, epochs, optimizers, debug):
