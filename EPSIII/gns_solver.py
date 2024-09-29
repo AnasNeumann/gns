@@ -565,7 +565,7 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
                 file.write('\n')
     else:
         def debug_print(*args):
-            pass  
+            pass
     debug_print(instance.display())
     start_time = systime.time()
     graph, current_cmax = translate(instance)
@@ -721,9 +721,9 @@ def search_instance(instances, id) -> Instance:
             return instance
     return None
 
-def load_training_dataset():
+def load_training_dataset(debug_mode):
     instances = [] 
-    for size in PROBLEM_SIZES:
+    for size in PROBLEM_SIZES if not debug_mode else ['s', 'm']:
         problems = []
         path = BASIC_PATH+'instances/train/'+size+'/'
         for i in os.listdir(path):
@@ -789,20 +789,20 @@ def PPO_optimize(optimizer, loss):
     optimizer.step()
 
 def async_solve_one(init_args):
-    agents, instance = init_args
+    agents, instance, debug_mode = init_args
     total_ops = 0
     for j in instance['jobs']:
         total_ops += len(j)
     print("\t start solving instance: "+str(instance['id'])+"...")
-    result = solve_one(instance, agents, train=True)
+    result = solve_one(instance, agents, train=True, debug_mode=debug_mode)
     print("\t end solving instance: "+str(instance['id'])+"!")
     return result
 
-def async_solve_batch(agents, batch, num_processes, train=True, epochs=-1, optimizers=[]):
+def async_solve_batch(agents, batch, num_processes, train, epochs, optimizers, debug):
     all_probabilities, all_states, all_actions, all_actions_idx, all_instances_idx = init_several_1D(3, [], 5)
     all_related_items, all_parents = [], []
     with Pool(num_processes) as pool:
-        results = pool.map(async_solve_one, [(agents, instance) for instance in batch])
+        results = pool.map(async_solve_one, [(agents, instance, debug) for instance in batch])
     all_rewards, all_values, probabilities, states, actions, actions_idx, instances_idx, related_items, parents = zip(*results)
     for instance in range(len(batch)):
         all_parents.append({'id': instances_idx[0][0], 'parents': parents[instance]})
@@ -833,6 +833,15 @@ def async_solve_batch(agents, batch, num_processes, train=True, epochs=-1, optim
             print(f'\t Average Loss = {loss:.4f}')
 
 def train(instances, agents, iterations=PPO_CONF['train_iterations'], batch_size=PPO_CONF['batch_size'], epochs=PPO_CONF['opt_epochs'], validation_rate=PPO_CONF['validation_rate'], debug_mode=False):
+    if debug_mode:
+        def debug_print(*args):
+            print(*args)
+            with open('./log.sh', 'a') as file:
+                file.write(*args)
+                file.write('\n')
+    else:
+        def debug_print(*args):
+            pass
     optimizers = [torch.optim.Adam(agent.parameters(), lr=LEARNING_RATE) for agent,_ in agents]
     for agent,_ in agents:
         agent.train()
@@ -846,15 +855,15 @@ def train(instances, agents, iterations=PPO_CONF['train_iterations'], batch_size
     for iteration in range(iterations):
         print("PPO iteration: "+str(iteration+1)+"/"+str(iterations)+":")
         if iteration % PPO_CONF['switch_batch'] == 0:
-            print("\t time to sample new batch of size "+str(batch_size)+"...")
+            debug_print("\t time to sample new batch of size "+str(batch_size)+"...")
             current_batch = random.sample(train_instances, batch_size)
-        async_solve_batch(agents, current_batch, num_processes, train=True, epochs=epochs, optimizers=optimizers)
+        async_solve_batch(agents, current_batch, num_processes, train=True, epochs=epochs, optimizers=optimizers, debug=debug_mode)
         if iteration % validation_rate == 0:
-            print("\t time to validate the loss...")
+            debug_print("\t time to validate the loss...")
             for agent,_ in agents:
                 agent.eval()
             with torch.no_grad():
-                async_solve_batch(agents, val_instances, num_processes, train=False)
+                async_solve_batch(agents, val_instances, num_processes, train=False, epochs=-1, optimizers=[], debug=debug_mode)
             for agent,_ in agents:
                 agent.train()
     save_models(agents)
@@ -887,17 +896,18 @@ if __name__ == '__main__':
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"Execution device: {DEVICE}...")
     if to_bool(args.train):
+        '''
+            Test training mode with: bash _env.sh
+            python gns_solver.py --train=true --mode=test --path=./
+        '''
         print("LOAD DATASET TO TRAIN MODELS...")
-        instances = load_training_dataset()
+        instances = load_training_dataset(debug_mode=debug_mode)
         print("TRAIN MODELS WITH PPO...")
         train(instances, init_new_models(), debug_mode=debug_mode)
     else:
         '''
             Test inference mode with: bash _env.sh
             python gns_solver.py --size=s --id=151 --train=false --mode=test --path=./
-
-            Test training mode with: bash _env.sh
-            python gns_solver.py --train=true --mode=prod --path=./
         '''
         print("SOLVE TARGET INSTANCE "+args.size+"_"+args.id+"...")
         INSTANCE_PATH = BASIC_PATH+'instances/test/'+args.size+'/instance_'+args.id+'.pkl'
