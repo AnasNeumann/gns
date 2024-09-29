@@ -634,21 +634,16 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
                 if instance.simultaneous[p][o]:
                     for rt in instance.required_rt(p, o):
                         if rt != instance.get_resource_familly(graph.resources_g2i[resource_id]):
-                            found = False
                             for r in instance.resources_by_type(rt):
                                 if instance.finite_capacity[r]:
                                     other_resource_id = graph.resources_i2g[r]
                                     if graph.resource(other_resource_id, 'available_time') <= t:
                                         graph, utilization, required_types_of_resources, op_end = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, utilization, t)
                                         operation_end = max(operation_end, op_end)
-                                        found = True
                                         break
                                 else:
                                     graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, graph.materials_i2g[r], required_types_of_materials, t)
-                                    found = True
                                     break
-                            if not found:
-                                debug_print("ERROR WHILE TRYING TO SYNC OPERATION - Resource type "+str(rt)+" not available...")
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, operation_end, debug_print)
                 current_cmax = max(current_cmax, operation_end)
             else:
@@ -732,7 +727,7 @@ def load_training_dataset(debug_mode):
                 with open(file_path, 'rb') as file:
                     problems.append(pickle.load(file))
         instances.append(problems)
-    print("End of loading!")
+    print(f"End of loading {len(instances)} instances!")
     return instances
 
 def calculate_returns(rewards, gamma=PPO_CONF['discount_factor']):
@@ -778,9 +773,9 @@ def PPO_loss(instances, agent, old_probs, states, actions, actions_idx, advantag
     policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
     value_loss = torch.mean(torch.stack([(V_old - r) ** 2 for V_old, r in zip(old_values, returns)]))
     entropy_loss = torch.mean(entropies)
-    print("\t\t value loss - "+str(value_loss))
-    print("\t\t policy loss - "+str(policy_loss)) 
-    print("\t\t entropy loss - "+str(entropy_loss)) 
+    print(f"\t\t value loss - {value_loss}")
+    print(f"\t\t policy loss - {policy_loss}") 
+    print(f"\t\t entropy loss - {entropy_loss}") 
     return (PPO_CONF['policy_loss']*policy_loss) + (PPO_CONF['value_loss']*value_loss) - (entropy_loss*PPO_CONF['entropy'])
 
 def PPO_optimize(optimizer, loss):
@@ -793,9 +788,9 @@ def async_solve_one(init_args):
     total_ops = 0
     for j in instance['jobs']:
         total_ops += len(j)
-    print("\t start solving instance: "+str(instance['id'])+"...")
+    print(f"\t start solving instance: {instance['id']}...")
     result = solve_one(instance, agents, train=True, debug_mode=debug_mode)
-    print("\t end solving instance: "+str(instance['id'])+"!")
+    print(f"\t end solving instance: {instance['id']}!")
     return result
 
 def async_solve_batch(agents, batch, num_processes, train, epochs, optimizers, debug):
@@ -821,18 +816,18 @@ def async_solve_batch(agents, batch, num_processes, train, epochs, optimizers, d
         flattened_values.append([v for vals in all_values[agent_id] for v in vals])
     if train and epochs>0:
         for e in range(epochs):
-            print("\t Optimization epoch: "+str(e+1)+"/"+str(epochs))
+            print(f"\t Optimization epoch: {e+1}/{epochs}")
             for agent_id, (agent, name) in enumerate(agent):
-                print("\t\t Optimizing agent: "+name+"...")
+                print(f"\t\t Optimizing agent: {name}...")
                 loss = PPO_loss(batch, agent, all_probabilities[agent_id], all_states[agent_id], all_actions[agent_id], all_actions_idx[agent_id], advantages[agent_id], flattened_values[agent_id], all_returns[agent_id], all_instances_idx[agent_id], all_related_items, all_parents)
                 PPO_optimize(optimizers[agent_id], loss)
     else:
         for agent_id, (agent, name) in enumerate(agents):
-            print("\t\t Evaluating agent: "+name+"...")
+            print(f"\t\t Evaluating agent: {name}...")
             loss = PPO_loss(batch, agent, all_probabilities[agent_id], all_states[agent_id], all_actions[agent_id], all_actions_idx[agent_id], advantages[agent_id], flattened_values[agent_id], all_returns[agent_id], all_instances_idx[agent_id], all_related_items, all_parents)
             print(f'\t Average Loss = {loss:.4f}')
 
-def train(instances, agents, iterations=PPO_CONF['train_iterations'], batch_size=PPO_CONF['batch_size'], epochs=PPO_CONF['opt_epochs'], validation_rate=PPO_CONF['validation_rate'], debug_mode=False):
+def train(instances, agents, iterations, batch_size, epochs, validation_rate, debug_mode=False):
     if debug_mode:
         def debug_print(*args):
             print(*args)
@@ -851,11 +846,11 @@ def train(instances, agents, iterations=PPO_CONF['train_iterations'], batch_size
     num_val = int(len(instances) * PPO_CONF['validation_ratio'])
     train_instances, val_instances = instances[num_val:], instances[:num_val]
     num_processes = multiprocessing.cpu_count() if PARRALLEL else 1
-    print("Running on "+str(num_processes)+" TPUs in parallel...")
+    print(f"Start training models with PPO running on {num_processes} TPUs in parallel...")
     for iteration in range(iterations):
-        print("PPO iteration: "+str(iteration+1)+"/"+str(iterations)+":")
+        print(f"PPO iteration: {iteration+1}/{iterations}:")
         if iteration % PPO_CONF['switch_batch'] == 0:
-            debug_print("\t time to sample new batch of size "+str(batch_size)+"...")
+            debug_print(f"\t time to sample new batch of size {batch_size}...")
             current_batch = random.sample(train_instances, batch_size)
         async_solve_batch(agents, current_batch, num_processes, train=True, epochs=epochs, optimizers=optimizers, debug=debug_mode)
         if iteration % validation_rate == 0:
@@ -900,16 +895,14 @@ if __name__ == '__main__':
             Test training mode with: bash _env.sh
             python gns_solver.py --train=true --mode=test --path=./
         '''
-        print("LOAD DATASET TO TRAIN MODELS...")
         instances = load_training_dataset(debug_mode=debug_mode)
-        print("TRAIN MODELS WITH PPO...")
-        train(instances, init_new_models(), debug_mode=debug_mode)
+        train(instances, init_new_models(), iterations=PPO_CONF['train_iterations'], batch_size=PPO_CONF['batch_size'], epochs=PPO_CONF['opt_epochs'], validation_rate=PPO_CONF['validation_rate'], debug_mode=debug_mode)
     else:
         '''
             Test inference mode with: bash _env.sh
             python gns_solver.py --size=s --id=151 --train=false --mode=test --path=./
         '''
-        print("SOLVE TARGET INSTANCE "+args.size+"_"+args.id+"...")
+        print(f"SOLVE TARGET INSTANCE {args.size}_{args.id}...")
         INSTANCE_PATH = BASIC_PATH+'instances/test/'+args.size+'/instance_'+args.id+'.pkl'
         SOLUTION_PATH = BASIC_PATH+'instances/test/'+args.size+'/solution_gns_'+args.id+'.csv'
         instance: Instance = load_instance(INSTANCE_PATH)
