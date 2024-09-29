@@ -116,7 +116,7 @@ def build_operations(i: Instance):
                 maxRT = i.nb_HR_types-1 if (i.in_days[p][o] or i.in_hours[p][o]) else i.nb_resource_types - i.nb_material - UNKOWN_MACHINE_TYPE -1
                 minRT = 0 if (i.in_days[p][o] or i.in_hours[p][o]) else i.nb_HR_types
                 i.resource_type_needed[p][o][random.randint(minRT, maxRT)] = True
-                if not i.in_days[p][o] and not i.in_hours[p][o] and bias_generator(0.8):
+                if not i.in_days[p][o] and not i.in_hours[p][o] and bias_generator(0.6):
                     i.resource_type_needed[p][o][random.randint(maxRT+1, maxRT+i.nb_material)] = True
                 if not found_unkown_elt and i.external[p][e] and not i.in_days[p][o] and not i.in_hours[p][o] and len(i.get_children(p,e,True))<=0:
                     found_unkown_elt = True
