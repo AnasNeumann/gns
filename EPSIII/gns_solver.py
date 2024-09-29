@@ -791,7 +791,7 @@ def async_solve_one(init_args):
     return result
 
 def async_solve_batch(agents, batch, num_processes, train, epochs, optimizers, debug):
-    all_probabilities, all_states, all_actions, all_actions_idx, all_instances_idx = init_several_1D(3, [], 5)
+    all_probabilities, all_states, all_actions, all_actions_idx, all_instances_idx = init_several_1D(len(agents), [], 5)
     all_related_items, all_parents = [], []
     with Pool(num_processes) as pool:
         results = pool.map(async_solve_one, [(agents, instance, debug) for instance in batch])
