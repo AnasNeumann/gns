@@ -726,7 +726,7 @@ def load_training_dataset(debug_mode):
                 file_path = os.path.join(path, i)
                 with open(file_path, 'rb') as file:
                     problems.append(pickle.load(file))
-        instances.append(problems)
+        instances.extend(problems)
     print(f"End of loading {len(instances)} instances!")
     return instances
 
