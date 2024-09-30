@@ -821,7 +821,7 @@ def async_solve_batch(agents: list[(Module, str)], batch: list[Instance], num_pr
     if train and epochs>0:
         for e in range(epochs):
             print(f"\t Optimization epoch: {e+1}/{epochs}")
-            for agent_id, (agent, name) in enumerate(agent):
+            for agent_id, (agent, name) in enumerate(agents):
                 print(f"\t\t Optimizing agent: {name}...")
                 loss = PPO_loss(batch, agent, all_probabilities[agent_id], all_states[agent_id], all_actions[agent_id], all_actions_idx[agent_id], advantages[agent_id], flattened_values[agent_id], all_returns[agent_id], all_instances_idx[agent_id], all_related_items, all_parents)
                 PPO_optimize(optimizers[agent_id], loss)
