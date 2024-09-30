@@ -11,7 +11,8 @@ import multiprocessing
 import pandas as pd
 import time as systime
 from typing import Callable, Tuple
-from torch import Tensor, Module
+from torch import Tensor
+from torch.nn import Module
 from torch.optim import Optimizer
 
 PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
@@ -159,11 +160,12 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
                     execution_time = op_start,
                     quantity_needed = i.quantity_needed[r][p][o]))
     estimated_start_child = estimated_start if i.external[p][e] else design_mean_time
+    estimated_childrend_end = 0
     for children in i.get_children(p, e, True):
         graph, child_id, estimated_end_child = build_item(i, graph, p, e=children, head=False, estimated_start=estimated_start_child)
         graph.add_item_assembly(item_id, child_id)
-        estimated_end = max(estimated_end, estimated_end_child)
-    estimated_end = min(estimated_start + i.outsourcing_time[p][e], estimated_end + physical_mean_time) if i.external[p][e] else (estimated_end+physical_mean_time)
+        estimated_childrend_end = max(estimated_childrend_end, estimated_end_child)
+    estimated_end = min(estimated_start + i.outsourcing_time[p][e], estimated_childrend_end + physical_mean_time) if i.external[p][e] else (estimated_childrend_end+physical_mean_time)
     graph.update_item(item_id, [('end_time', estimated_end)])
     return graph, item_id, estimated_end
 
@@ -707,7 +709,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
             'value': [objective_value(current_cmax, current_cost, instance.w_makespan)/100], 
             'computing_time': [systime.time()-start_time]
         })
-        debug_print(solutions_df)
+        print(solutions_df)
         solutions_df.to_csv(path, index=False)
         return current_cmax, current_cost 
 
