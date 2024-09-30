@@ -1,12 +1,13 @@
 import copy
 import torch
 from torch_geometric.data import HeteroData
+from torch_geometric.data.storage import EdgeStorage
 from torch.nn import Sequential, Linear, ELU, Tanh, Parameter, LeakyReLU, Module, ModuleList
 import torch.nn.functional as F
 from torch_geometric.nn import global_mean_pool
 from torch_geometric.utils import to_dense_adj
 from torch import Tensor
-from common import features2tensor, id2tensor, init_3D
+from common import features2tensor, id2tensor, num_feature
 import json
 
 NOT_YET = -1
@@ -34,7 +35,7 @@ class Solution:
 # =*= INSTANCE DATA STRUCTURE & ACCESS FUNCTIONS =*=
 # =====================================================
 class Instance:
-    def __init__(self, size, id, w_makespan, H, **kwargs):
+    def __init__(self, size: int, id: int, w_makespan: int, H: int, **kwargs):
         self.id = id
         self.size = size
         self.H = H
@@ -90,7 +91,7 @@ class Instance:
     def get_name(self):
         return self.size+'_'+str(self.id)
 
-    def get_children(self, p, e, direct=True):
+    def get_children(self, p: int, e: int, direct: bool=True):
         data = self.direct_assembly if direct else self.assembly
         children = []
         for e2 in range(self.E_size[p]):
@@ -98,88 +99,92 @@ class Instance:
                 children.append(e2)
         return children
 
-    def get_direct_parent(self, p, e):
+    def get_direct_parent(self, p: int, e: int):
         for e2 in range(self.E_size[p]):
             if self.direct_assembly[p][e2][e]:
                 return e2
         return -1
 
-    def get_ancestors(self, p, e):
+    def get_ancestors(self, p: int, e: int):
         ancestors = []
         for e2 in range(self.E_size[p]):
             if self.assembly[p][e2][e]:
                 ancestors.append(e2)
         return ancestors
     
-    def get_operations_idx(self, p, e):
+    def get_operations_idx(self, p: int, e: int):
         start = 0
         for e2 in range(0, e):
             start = start + self.EO_size[p][e2]    
         return start, start+self.EO_size[p][e]
     
-    def get_operation_type(self, p, o):
+    def get_operation_type(self, p: int, o: int):
         for ot in range(self.nb_ops_types):
             if self.operation_family[p][o][ot]:
                 return ot
         return -1
     
-    def get_resource_type(self, r):
+    def get_resource_type(self, r: int):
         for rt in range(self.nb_resource_types):
             if self.resource_family[r][rt]:
                 return rt
         return -1
     
-    def get_item_of_operation(self, p, o):
+    def get_item_of_operation(self, p: int, o: int):
         for e in range(self.E_size[p]):
             if self.operations_by_element[p][e][o]:
                 return e
         return -1
     
-    def operation_resource_time(self, p, o, rt):
+    def operation_resource_time(self, p: int, o: int, rt: int, max_load: bool):
         resources = self.resources_by_type(rt)
         if not resources or not self.finite_capacity[resources[0]]:
             return 0
-        time_rt = 0
+        time_rt = []
         for r in self.resources_by_type(rt):
-            time_rt = max(time_rt, self.execution_time[r][p][o])
-        return time_rt
+                time_rt.append(self.execution_time[r][p][o])
+        if max_load:
+            return max(time_rt)
+        return sum(time_rt)/len(time_rt) if time_rt else 0
 
-    def operation_time(self, p, o):
-        time = 0
+    def operation_time(self, p: int, o: int, total_load: bool):
+        times = []
         for rt in self.required_rt(p, o):
-            time += self.operation_resource_time(p, o, rt)
-        return time
+                times.append(self.operation_resource_time(p, o, rt, max_load=total_load))
+        if total_load:
+            return sum(times)
+        return max(times)
 
-    def item_processing_time(self, p, e):
+    def item_processing_time(self, p: int, e: int, total_load:bool):
         design_time = 0
         physical_time = 0
         for o in self.loop_item_operations(p,e):
             if self.is_design[p][o]:
-                design_time += self.operation_time(p,o)
+                design_time += self.operation_time(p,o, total_load=total_load)
             else:
-                physical_time += self.operation_time(p,o)
+                physical_time += self.operation_time(p,o, total_load=total_load)
         return design_time, physical_time
 
-    def require(self, p, o, r):
+    def require(self, p: int, o: int, r: int):
         for rt in range(self.nb_resource_types):
             if self.resource_family[r][rt]:
                 return self.resource_type_needed[p][o][rt]
         return False
     
-    def required_rt(self, p, o):
+    def required_rt(self, p: int, o: int):
         rts = []
         for rt in range(self.nb_resource_types):
             if self.resource_type_needed[p][o][rt]:
                 rts.append(rt)
         return rts
 
-    def real_time_scale(self, p, o):
+    def real_time_scale(self, p: int, o: int):
         return 60*self.H if self.in_days[p][o] else 60 if self.in_hours[p][o] else 1
 
     def get_nb_projects(self):
         return len(self.E_size)
     
-    def operations_by_resource_type(self, rt):
+    def operations_by_resource_type(self, rt: int):
         operations = []
         for p in range(self.get_nb_projects()):
             for o in range(self.O_size[p]):
@@ -187,7 +192,7 @@ class Instance:
                     operations.append((p, o))
         return operations
 
-    def project_head(self, p):
+    def project_head(self, p: int):
         for e in range(self.E_size[p]):
             is_head = True
             for e2 in range(self.E_size[p]):
@@ -198,7 +203,7 @@ class Instance:
                 return e
         return -1
     
-    def preds_or_succs(self, p, e, start, end, o, design_only=False, physical_only=False, preds=True):
+    def preds_or_succs(self, p: int, e: int, start: int, end: int, o, design_only: bool=False, physical_only: bool=False, preds: bool=True):
         operations = []
         for other in range(start, end):
             if other!=o and (not design_only or self.is_design[p][other]) \
@@ -207,7 +212,7 @@ class Instance:
                 operations.append(other)
         return operations
     
-    def succs(self, p, e, o, design_only=False, physical_only=False):
+    def succs(self, p: int, e: int, o: int, design_only: bool=False, physical_only: bool=False):
         operations = []
         for other in self.loop_item_operations(p,e):
             if other!=o and (not design_only or self.is_design[p][other]) \
@@ -216,7 +221,7 @@ class Instance:
                 operations.append(other)
         return operations
     
-    def last_design_operations(self, p, e):
+    def last_design_operations(self, p: int, e: int):
         ops = []
         start, end = self.get_operations_idx(p, e)
         for o in range(start, end):
@@ -226,7 +231,7 @@ class Instance:
                     ops.append(o)
         return ops
 
-    def first_operations(self, p, e):
+    def first_operations(self, p: int, e: int):
         ops = []
         start, end = self.get_operations_idx(p, e)
         for o in range(start, end):
@@ -235,7 +240,7 @@ class Instance:
                 ops.append(o)
         return ops
     
-    def first_design_operations(self, p, e):
+    def first_design_operations(self, p: int, e: int):
         ops = []
         start, end = self.get_operations_idx(p, e)
         for o in range(start, end):
@@ -245,7 +250,7 @@ class Instance:
                     ops.append(o)
         return ops
 
-    def first_physical_operations(self, p, e):
+    def first_physical_operations(self, p: int, e: int):
         ops = []
         start, end = self.get_operations_idx(p, e)
         for o in range(start, end):
@@ -255,7 +260,7 @@ class Instance:
                     ops.append(o)
         return ops
 
-    def last_operations(self, p, e):
+    def last_operations(self, p: int, e: int):
         ops = []
         start, end = self.get_operations_idx(p, e)
         for o in range(start, end):
@@ -264,58 +269,58 @@ class Instance:
                 ops.append(o)
         return ops
 
-    def required_resources(self, p, o):
+    def required_resources(self, p: int, o: int):
         resources = []
         for r in range(self.nb_resources):
             if self.require(p, o, r):
                 resources.append(r)
         return resources
 
-    def is_same(self, p1, p2, o1, o2):
+    def is_same(self, p1: int, p2: int, o1: int, o2: int):
         return (p1 == p2) and (o1 == o2)
 
-    def get_resource_familly(self, r):
+    def get_resource_familly(self, r: int):
         for rf in range(self.nb_resource_types):
             if self.resource_family[r][rf]:
                 return rf
         return -1
 
-    def real_time_scale(self, p, o):
+    def real_time_scale(self, p: int, o: int):
         return 60*self.H if self.in_days[p][o] else 60 if self.in_hours[p][o] else 1
 
-    def resources_by_type(self, rt):
+    def resources_by_type(self, rt: int):
         resources = []
         for r in range(self.nb_resources):
             if self.resource_family[r][rt]:
                 resources.append(r)
         return resources
     
-    def is_last_design(self, p, e, o):
+    def is_last_design(self, p: int, e: int, o: int):
         for o2 in self.last_design_operations(p, e):
             if o2 == o:
                 return True
         return False
 
-    def is_last_operation(self, p, e, o):
+    def is_last_operation(self, p: int, e: int, o: int):
         for o2 in self.last_operations(p, e):
             if o2 == o:
                 return True
         return False
     
-    def loop_item_operations(self, p, e):
+    def loop_item_operations(self, p: int, e: int):
         start, end = self.get_operations_idx(p,e)
         return range(start, end)
 
     def loop_projects(self):
         return range(len(self.E_size))
 
-    def loop_items(self, p):
+    def loop_items(self, p: int):
         return range(self.E_size[p])
 
-    def loop_operations(self, p):
+    def loop_operations(self, p: int):
         return range(self.O_size[p])
 
-    def next_operations(self, p, e, o):
+    def next_operations(self, p: int, e: int, o: int):
         operations = []
         no_child = True
         if self.is_design[p][o]:
@@ -354,7 +359,7 @@ class Instance:
                     previous[p][successor].append(o)
         return previous, next
 
-    def recursive_display_item(self, p, e, parent):
+    def recursive_display_item(self, p: int, e: int, parent: int):
         operations = []
         children = []
         for child in self.get_children(p, e, True):
@@ -427,7 +432,7 @@ class Instance:
 # =*= HYPER-GRAPH DATA STRUCTURES & MANIPULATION FUNCTIONS =*=
 # =============================================================
 class State:
-    def __init__(self, items, operations, resources, materials, need_for_materials, need_for_resources, operation_assembly, item_assembly, precedences, same_types):
+    def __init__(self, items: Tensor, operations: Tensor, resources: Tensor, materials: Tensor, need_for_materials: EdgeStorage, need_for_resources: EdgeStorage, operation_assembly: EdgeStorage, item_assembly: EdgeStorage, precedences: EdgeStorage, same_types: EdgeStorage):
         self.items = copy.deepcopy(items)
         self.operations = copy.deepcopy(operations)
         self.resources = copy.deepcopy(resources)
@@ -440,7 +445,7 @@ class State:
         self.same_types = same_types
 
 class OperationFeatures:
-    def __init__(self, design, sync, timescale_hours, timescale_days, direct_successors, total_successors, remaining_time, remaining_resources, remaining_materials, available_time, end_time, is_possible):
+    def __init__(self, design: num_feature, sync: num_feature, timescale_hours: num_feature, timescale_days: num_feature, direct_successors: num_feature, total_successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, is_possible: num_feature):
         self.design = design
         self.sync = sync
         self.timescale_hours = timescale_hours
@@ -458,7 +463,7 @@ class OperationFeatures:
         return features2tensor([self.design, self.sync, self.timescale_hours, self.timescale_days, self.direct_successors, self.total_successors, self.remaining_time, self.remaining_resources, self.remaining_materials, self.available_time, self.end_time, self.is_possible])
     
 class ResourceFeatures:
-    def __init__(self, utilization_ratio, available_time, executed_operations, remaining_operations, similar_resources):
+    def __init__(self, utilization_ratio: num_feature, available_time: num_feature, executed_operations: num_feature, remaining_operations: num_feature, similar_resources: num_feature):
         self.utilization_ratio = utilization_ratio
         self.available_time = available_time
         self.executed_operations = executed_operations
@@ -469,7 +474,7 @@ class ResourceFeatures:
         return features2tensor([self.utilization_ratio, self.available_time, self.executed_operations, self.remaining_operations, self.similar_resources])
     
 class MaterialFeatures:
-    def __init__(self, remaining_init_quantity, arrival_time, remaining_demand):
+    def __init__(self, remaining_init_quantity: num_feature, arrival_time: num_feature, remaining_demand: num_feature):
        self.remaining_init_quantity = remaining_init_quantity
        self.arrival_time = arrival_time
        self.remaining_demand = remaining_demand
@@ -478,7 +483,7 @@ class MaterialFeatures:
         return features2tensor([self.remaining_init_quantity, self.arrival_time, self.remaining_demand])
     
 class ItemFeatures:
-    def __init__(self, head, external, outsourced, outsourcing_cost, outsourcing_time, remaining_physical_time, remaining_design_time, parents, children, parents_physical_time, children_time, start_time, end_time, is_possible):
+    def __init__(self, head: num_feature, external: num_feature, outsourced: num_feature, outsourcing_cost: num_feature, outsourcing_time: num_feature, remaining_physical_time: num_feature, remaining_design_time: num_feature, parents: num_feature, children: num_feature, parents_physical_time: num_feature, children_time: num_feature, start_time: num_feature, end_time: num_feature, is_possible: num_feature):
         self.head = head
         self.external = external
         self.outsourced = outsourced
@@ -498,7 +503,7 @@ class ItemFeatures:
         return features2tensor([self.head, self.external, self.outsourced, self.outsourcing_cost, self.outsourcing_time, self.remaining_physical_time, self.remaining_design_time, self.parents, self.children, self.parents_physical_time, self.children_time, self.start_time, self.end_time, self.is_possible])
 
 class NeedForResourceFeatures:
-    def __init__(self, status, basic_processing_time, current_processing_time, start_time, end_time):
+    def __init__(self, status: num_feature, basic_processing_time: num_feature, current_processing_time: num_feature, start_time: num_feature, end_time: num_feature):
         self.status = status
         self.basic_processing_time = basic_processing_time
         self.current_processing_time = current_processing_time
@@ -509,7 +514,7 @@ class NeedForResourceFeatures:
         return features2tensor([self.status, self.basic_processing_time, self.current_processing_time, self.start_time, self.end_time])
 
 class NeedForMaterialFeatures:
-    def __init__(self, status, execution_time, quantity_needed):
+    def __init__(self, status: num_feature, execution_time: num_feature, quantity_needed: num_feature):
         self.status = status
         self.execution_time = execution_time
         self.quantity_needed = quantity_needed
@@ -592,15 +597,15 @@ class GraphInstance():
         self.features = FeatureConfiguration()
         self.graph = HeteroData()
 
-    def add_node(self, type, features: Tensor):
+    def add_node(self, type: str, features: Tensor):
         self.graph[type].x = torch.cat([self.graph[type].x, features], dim=0) if type in self.graph.node_types else features
 
-    def add_operation(self, p, o, features: OperationFeatures):
+    def add_operation(self, p: int, o: int, features: OperationFeatures):
         self.operations_g2i.append((p, o))
         self.add_node('operation', features.to_tensor_features())
         return len(self.operations_g2i)-1
 
-    def add_item(self, p, i, features: ItemFeatures):
+    def add_item(self, p: int, i: int, features: ItemFeatures):
         self.items_g2i.append((p, i))
         self.add_node('item', features.to_tensor_features())
         id = len(self.items_g2i)-1
@@ -617,43 +622,43 @@ class GraphInstance():
             if item_id<dummy_item_id and item[self.features.item['children']] == 0:
                 self.add_item_assembly(item_id, dummy_item_id)
 
-    def add_material(self, m, features: MaterialFeatures):
+    def add_material(self, m: int, features: MaterialFeatures):
         self.materials_g2i.append(m)
         self.add_node('material', features.to_tensor_features())
         return len(self.materials_g2i)-1
 
-    def add_resource(self, r, nb_settings, features: ResourceFeatures):
+    def add_resource(self, r: int, nb_settings: int, features: ResourceFeatures):
         self.resources_g2i.append(r)
         self.current_design_value.append([-1 for _ in range(nb_settings)])
         self.current_operation_type.append(-1)
         self.add_node('resource', features.to_tensor_features())
         return len(self.resources_g2i)-1
 
-    def add_edge_no_features(self, node_1, relation, node_2, idx):
+    def add_edge_no_features(self, node_1: str, relation: str, node_2: str, idx: Tensor):
         self.graph[node_1, relation, node_2].edge_index = torch.cat([self.graph[node_1, relation, node_2].edge_index, idx], dim=1) if (node_1, relation, node_2) in self.graph.edge_types else idx
 
-    def add_same_types(self, res_1, res_2):
+    def add_same_types(self, res_1: int, res_2: int):
         self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_1, res_2))
         self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_2, res_1))
 
-    def add_item_assembly(self, parent_id, child_id):
+    def add_item_assembly(self, parent_id: int, child_id: int):
         self.add_edge_no_features('item', 'parent', 'item', id2tensor(parent_id, child_id))
 
-    def add_operation_assembly(self, item_id, operation_id):
+    def add_operation_assembly(self, item_id: int, operation_id: int):
         self.add_edge_no_features('item', 'has', 'operation', id2tensor(item_id, operation_id))
 
-    def add_precedence(self, prec_id, succ_id):
+    def add_precedence(self, prec_id: int, succ_id: int):
         self.add_edge_no_features('operation', 'precedes', 'operation', id2tensor(prec_id, succ_id))
 
-    def add_edge_with_features(self, node_1, relation, node_2, idx, features: Tensor):
+    def add_edge_with_features(self, node_1: str, relation: str, node_2: str, idx: Tensor, features: Tensor):
         exists = (node_1, relation, node_2) in self.graph.edge_types
         self.graph[node_1, relation, node_2].edge_index = torch.cat([self.graph[node_1, relation, node_2].edge_index, idx], dim=1) if exists else idx
         self.graph[node_1, relation, node_2].edge_attr = torch.cat([self.graph[node_1, relation, node_2].edge_attr, features], dim=0) if exists else features
     
-    def add_need_for_materials(self, operation_id, material_id, features: NeedForMaterialFeatures):
+    def add_need_for_materials(self, operation_id: int, material_id: int, features: NeedForMaterialFeatures):
         self.add_edge_with_features('operation', 'needs_mat', 'material', id2tensor(operation_id, material_id), features.to_tensor_features())
 
-    def add_need_for_resources(self, operation_id, resource_id, features: NeedForResourceFeatures):
+    def add_need_for_resources(self, operation_id: int, resource_id: int, features: NeedForResourceFeatures):
         self.add_edge_with_features('operation', 'needs_res', 'resource', id2tensor(operation_id, resource_id), features.to_tensor_features())
 
     def precedences(self):
@@ -686,89 +691,89 @@ class GraphInstance():
     def materials(self):
         return self.graph['material'].x
 
-    def operation(self, id, feature):
+    def operation(self, id: int, feature: str):
         return self.graph['operation'].x[id][self.features.operation[feature]].item()
 
-    def material(self, id, feature):
+    def material(self, id: int, feature: str):
         return self.graph['material'].x[id][self.features.material[feature]].item()
     
-    def resource(self, id, feature):
+    def resource(self, id: int, feature: str):
         return self.graph['resource'].x[id][self.features.resource[feature]].item()
     
-    def need_for_material(self, operation_id, material_id, feature):
+    def need_for_material(self, operation_id: int, material_id: int, feature: str):
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
         return self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]].item()
     
-    def need_for_resource(self, operation_id, resource_id, feature):
+    def need_for_resource(self, operation_id: int, resource_id: int, feature: str):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
         return self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]].item()
 
-    def item(self, id, feature):
+    def item(self, id: int, feature: str):
         return self.graph['item'].x[id][self.features.item[feature]].item()
     
-    def del_edge(self, edge_type, id_1, id_2):
+    def del_edge(self, edge_type: str, id_1: int, id_2: int):
         edges_idx = self.graph[edge_type].edge_index
         mask = ~((edges_idx[0] == id_1) & (edges_idx[1] == id_2))
         self.graph[edge_type].edge_index = edges_idx[:, mask]
         self.graph[edge_type].edge_attr = self.graph[edge_type].edge_attr[mask]
     
-    def del_need_for_resource(self, op_idx, res_idx):
+    def del_need_for_resource(self, op_idx: int, res_idx: int):
         self.del_edge(('operation', 'needs_res', 'resource'), op_idx, res_idx)
 
-    def del_need_for_material(self, op_idx, mat_idx):
+    def del_need_for_material(self, op_idx: int, mat_idx: int):
         self.del_edge(('operation', 'needs_mat', 'material'), op_idx, mat_idx)
 
-    def update_operation(self, id, updates):
+    def update_operation(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['operation'].x[id][self.features.operation[feature]] = value
         
-    def update_resource(self, id, updates):
+    def update_resource(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['resource'].x[id][self.features.resource[feature]] = value
 
-    def inc_resource(self, id, updates):
+    def inc_resource(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['resource'].x[id][self.features.resource[feature]] += value
     
-    def update_material(self, id, updates):
+    def update_material(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['material'].x[id][self.features.material[feature]] = value
 
-    def inc_material(self, id, updates):
+    def inc_material(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['material'].x[id][self.features.material[feature]] += value
     
-    def update_item(self, id, updates):
+    def update_item(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['item'].x[id][self.features.item[feature]] = value
 
-    def inc_item(self, id, updates):
+    def inc_item(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['item'].x[id][self.features.item[feature]] += value
 
-    def update_operation(self, id, updates):
+    def update_operation(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['operation'].x[id][self.features.operation[feature]] = value
     
-    def inc_operation(self, id, updates):
+    def inc_operation(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['operation'].x[id][self.features.operation[feature]] += value
 
-    def update_need_for_material(self, operation_id, material_id, updates):
+    def update_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, int)]):
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
         for feature, value in updates:
             self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]] = value
 
-    def update_need_for_resource(self, operation_id, resource_id, updates):
+    def update_need_for_resource(self, operation_id: int, resource_id: int, updates: list[(str, int)]):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
         for feature, value in updates:
             self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]] = value
 
-    def is_item_complete(self, item_id):
+    def is_item_complete(self, item_id: int):
         if self.item(item_id, 'remaining_physical_time')>0 \
             or self.item(item_id, 'remaining_design_time')>0 \
             or self.item(item_id, 'outsourced')==NOT_YET \
@@ -776,7 +781,7 @@ class GraphInstance():
             return False
         return True
 
-    def is_operation_complete(self, operation_id):
+    def is_operation_complete(self, operation_id: int):
         if self.operation(operation_id, 'is_possible')==NOT_YET \
             or self.operation(operation_id, 'remaining_resources')>0 \
             or self.operation(operation_id, 'remaining_materials')>0 \
@@ -800,7 +805,7 @@ class GraphInstance():
             r_items[i] = adj[:,i].nonzero(as_tuple=True)[0]
         return r_items
 
-    def build_i2g_2D(self, g2i): # items and operations
+    def build_i2g_2D(self, g2i: list[(int, int)]): # items and operations
         nb_project = max(val[0] for val in g2i) + 1
         i2g = [[] for _ in range(nb_project)]
         for position, (project, op_or_item) in enumerate(g2i):
@@ -809,13 +814,13 @@ class GraphInstance():
             i2g[project][op_or_item] = position
         return i2g
     
-    def build_i2g_1D(self, g2i, size): # resources and materials
+    def build_i2g_1D(self, g2i: list[int], size: int): # resources and materials
         i2g = [-1] * size
         for id in range(len(g2i)):
             i2g[g2i[id]] = id
         return i2g
 
-    def get_direct_children(self, instance, item_id):
+    def get_direct_children(self, instance: Instance, item_id):
         p, e = self.items_g2i[item_id]
         children = []
         for child in instance.get_children(p,e,direct=True):
@@ -861,7 +866,7 @@ SCHEDULING = "scheduling"
 MATERIAL_USE = "material_use"
 
 class MaterialEmbeddingLayer(Module):
-    def __init__(self, material_dimension, operation_dimension, embedding_dimension):
+    def __init__(self, material_dimension: int, operation_dimension: int, embedding_dimension: int):
         super(MaterialEmbeddingLayer, self).__init__()
         self.material_transform = Linear(material_dimension, embedding_dimension, bias=False)
         self.att_self_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
@@ -876,7 +881,7 @@ class MaterialEmbeddingLayer(Module):
         torch.nn.init.xavier_uniform_(self.att_coef.data, gain=1.414)
         torch.nn.init.xavier_uniform_(self.att_self_coef.data, gain=1.414)
 
-    def forward(self, materials, operations, need_for_materials):
+    def forward(self, materials: Tensor, operations: Tensor, need_for_materials: EdgeStorage):
         materials = self.material_transform(materials)
         self_attention = self.leaky_relu(torch.matmul(torch.cat([materials, materials], dim=-1), self.att_self_coef))
         
@@ -895,7 +900,7 @@ class MaterialEmbeddingLayer(Module):
         return embedding
 
 class ResourceEmbeddingLayer(Module):
-    def __init__(self, resource_dimension, operation_dimension, embedding_dimension):
+    def __init__(self, resource_dimension: int, operation_dimension: int, embedding_dimension: int):
         super(ResourceEmbeddingLayer, self).__init__()
         self.self_transform = Linear(resource_dimension, embedding_dimension, bias=False)
         self.resource_transform = Linear(resource_dimension, embedding_dimension, bias=False)
@@ -914,7 +919,7 @@ class ResourceEmbeddingLayer(Module):
         torch.nn.init.xavier_uniform_(self.att_resource_coef.data, gain=1.414)
         torch.nn.init.xavier_uniform_(self.att_self_coef.data, gain=1.414)
 
-    def forward(self, resources, operations, need_for_resources, same_types):
+    def forward(self, resources: Tensor, operations: Tensor, need_for_resources: EdgeStorage, same_types: EdgeStorage):
         self_resources = self.self_transform(resources) 
         self_attention = self.leaky_relu(torch.matmul(torch.cat([self_resources, self_resources], dim=-1), self.att_self_coef))
         sum_res_by_edges = torch.zeros_like(self_resources, device=resources.device)
@@ -946,7 +951,7 @@ class ResourceEmbeddingLayer(Module):
         return embedding
 
 class ItemEmbeddingLayer(Module):
-    def __init__(self, operation_dimension, item_dimension, hidden_channels, out_channels):
+    def __init__(self, operation_dimension: int, item_dimension: int, hidden_channels: int, out_channels: int):
         super(ItemEmbeddingLayer, self).__init__()
         self.embedding_size = out_channels
         self.mlp_combined = Sequential(
@@ -975,7 +980,7 @@ class ItemEmbeddingLayer(Module):
             Linear(hidden_channels, out_channels)
         )
 
-    def forward(self, items, parents, operations, item_assembly, operation_assembly):
+    def forward(self, items: Tensor, parents: Tensor, operations: Tensor, item_assembly: EdgeStorage, operation_assembly: EdgeStorage):
         self_embeddings = self.mlp_self(items)
         parent_embeddings = self.mlp_parent(items[parents])
 
@@ -996,7 +1001,7 @@ class ItemEmbeddingLayer(Module):
         return embedding
     
 class OperationEmbeddingLayer(Module):
-    def __init__(self, operation_dimension, item_dimension, resources_dimension, material_dimension, hidden_channels, out_channels):
+    def __init__(self, operation_dimension: int, item_dimension: int, resources_dimension: int, material_dimension: int, hidden_channels: int, out_channels: int):
         super(OperationEmbeddingLayer, self).__init__()
         self.embedding_size = out_channels
         self.mlp_combined = Sequential(
@@ -1035,7 +1040,7 @@ class OperationEmbeddingLayer(Module):
             Linear(hidden_channels, out_channels)
         )
 
-    def forward(self, operations, items, related_items, materials, resources, need_for_resources, need_for_materials, precedences):
+    def forward(self, operations: Tensor, items: Tensor, related_items: Tensor, materials: Tensor, resources: Tensor, need_for_resources: EdgeStorage, need_for_materials: EdgeStorage, precedences: EdgeStorage):
         self_embeddings = self.mlp_self(operations)
         item_embeddings = self.mlp_items(items[related_items])
 
@@ -1068,7 +1073,7 @@ class OperationEmbeddingLayer(Module):
         return embedding
 
 class L1_EmbbedingGNN(Module):
-    def __init__(self, embedding_size, embedding_hidden_channels, nb_embedding_layers):
+    def __init__(self, embedding_size: int, embedding_hidden_channels: int, nb_embedding_layers: int):
         super(L1_EmbbedingGNN, self).__init__()
         conf = FeatureConfiguration()
         self.embedding_size = embedding_size
@@ -1087,7 +1092,7 @@ class L1_EmbbedingGNN(Module):
             self.item_layers.append(ItemEmbeddingLayer(embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
             self.operation_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
 
-    def forward(self, state: State, related_items, parents, alpha):
+    def forward(self, state: State, related_items: Tensor, parents: Tensor, alpha: float):
         for l in range(self.nb_embedding_layers):
             state.materials = self.material_layers[l](state.materials, state.operations, state.need_for_materials)
             state.resources = self.resource_layers[l](state.resources, state.operations, state.need_for_resources, state.same_types)
@@ -1101,7 +1106,7 @@ class L1_EmbbedingGNN(Module):
         return state, torch.cat([state_embedding, torch.tensor([alpha])], dim=0)
 
 class L1_OutousrcingActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size, actor_critic_hidden_channels):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size: int, actor_critic_hidden_channels: int):
         super(L1_OutousrcingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.actor_input_size = (embedding_size * 5) + 2
@@ -1116,7 +1121,7 @@ class L1_OutousrcingActor(Module):
             Linear(actor_critic_hidden_channels, 1)
         )
 
-    def forward(self, state: State, actions, related_items, parents, alpha):
+    def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: float):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
         inputs = torch.zeros((len(actions), self.actor_input_size))
         for i, (item_id, outsourcing_choice) in enumerate(actions):
@@ -1127,7 +1132,7 @@ class L1_OutousrcingActor(Module):
         return action_probs, state_value
     
 class L1_SchedulingActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size, actor_critic_hidden_channels):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size: int, actor_critic_hidden_channels: int):
         super(L1_SchedulingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.actor_input_size = (embedding_size * 6) + 1
@@ -1142,7 +1147,7 @@ class L1_SchedulingActor(Module):
             Linear(actor_critic_hidden_channels, 1)
         )
 
-    def forward(self, state: State, actions, related_items, parents, alpha):
+    def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: float):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
         inputs = torch.zeros((len(actions), self.actor_input_size))
         for i, (operation_id, resource_id) in enumerate(actions):
@@ -1153,7 +1158,7 @@ class L1_SchedulingActor(Module):
         return action_probs, state_value
 
 class L1_MaterialActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size, actor_critic_hidden_channels):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size: int, actor_critic_hidden_channels: int):
         super(L1_MaterialActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.actor_input_size = (embedding_size * 6) + 1
@@ -1168,7 +1173,7 @@ class L1_MaterialActor(Module):
             Linear(actor_critic_hidden_channels, 1)
         )
 
-    def forward(self, state: State, actions, related_items, parents, alpha):
+    def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: float):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
         inputs = torch.zeros((len(actions), self.actor_input_size))
         for i, (operation_id, material_id) in enumerate(actions):

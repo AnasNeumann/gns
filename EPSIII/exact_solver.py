@@ -369,7 +369,7 @@ def c27(model: cp_model.CpModel, i: Instance, s: Solution):
                         model.Add(s.O_executed[p][o][r1] + s.O_executed[p][o][r2] <= 1)
     return model, s
 
-def solve_one(instance: Instance, solution_path):
+def solve_one(instance: Instance, solution_path: str):
     start_time = systime.time()
     model = cp_model.CpModel()
     solver = cp_model.CpSolver()

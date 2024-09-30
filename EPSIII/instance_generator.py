@@ -2,7 +2,7 @@ import argparse
 import random
 import pickle
 from model import Instance
-from common import init_several_1D, init_several_2D, init_2D, init_1D, init_3D, init_several_3D
+from common import init_several_1D, init_several_2D, init_2D, init_1D, init_several_3D
 
 PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 SIZE = 0
@@ -38,10 +38,10 @@ NB_ELTS_PER_PROJECT = [7, 7, 10, 10, 10, 10] # 7, 21, 30, 40, 50, 60 elements
 MEAN_OPS_PER_ELT = [3, 3, 3, 3, 4, 5]
 # 21 (23), 63 (65), 90 (97), 120 (133), 200 (225), 300 (337) tasks
 
-def bias_generator(prop_false):
+def bias_generator(prop_false: float):
     return random.uniform(0.0,1.000001)>=prop_false
 
-def init_array(size, min, max, rdm=True):
+def init_array(size: int, min: int, max: int, rdm: bool=True):
     result = []
     for _ in range(size):
         result.append(random.randint(min, max) if rdm else max)
@@ -124,7 +124,7 @@ def build_operations(i: Instance):
                     i.external_cost[p][e] = i.external_cost[p][e] * 2
     return i
 
-def build_assembly(i: Instance, p, parent, ancestors):
+def build_assembly(i: Instance, p: int, parent: int, ancestors: list[int]):
     ancestors.append(parent)
     for child in i.get_children(p, parent, True):
         for ancestor in ancestors:
@@ -187,7 +187,7 @@ def build_projects(i: Instance):
         i.O_size[p] = ops_p
     return i
 
-def build_one(size, id, w_makespan):
+def build_one(size: int, id: int, w_makespan: float):
     nb_projects = NB_PROJECTS[SIZE]
     elts_per_project = NB_ELTS_PER_PROJECT[SIZE]
     i = Instance(size, id, w_makespan, H)

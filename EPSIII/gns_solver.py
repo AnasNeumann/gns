@@ -2,14 +2,17 @@ import argparse
 import pickle
 from torch.multiprocessing import Pool, set_start_method
 import os
-from model import Instance, GraphInstance, L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, ItemFeatures, OperationFeatures, MaterialFeatures, ResourceFeatures, NeedForMaterialFeatures, NeedForResourceFeatures, NO, NOT_YET, YES
-from common import load_instance, to_bool, init_several_1D, search_object_by_id
+from model import Instance, GraphInstance, L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, ItemFeatures, OperationFeatures, MaterialFeatures, ResourceFeatures, NeedForMaterialFeatures, NeedForResourceFeatures, State, NO, NOT_YET, YES
+from common import load_instance, to_bool, init_several_1D, search_object_by_id, generic_object
 import torch
 torch.autograd.set_detect_anomaly(True)
 import random
 import multiprocessing
 import pandas as pd
 import time as systime
+from typing import Callable, Tuple
+from torch import Tensor, Module
+from torch.optim import Optimizer
 
 PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 OUTSOURCING = 0
@@ -48,78 +51,77 @@ BASIC_PATH = "./"
 # =*= MODEL LOADING METHOD =*=
 # =====================================================
 
-def save_models(agents):
+def save_models(agents: list[(Module, str)]):
     torch.save(agents[0].shared_embedding_layers.state_dict(), BASIC_PATH+'models/gnn_weights.pth')
     for agent, name in agents:
         torch.save(agent.state_dict(), BASIC_PATH+'models/'+name+'_weights.pth')
 
 def load_trained_models():
-    shared_GNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
+    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
     shared_GNN.load_state_dict(torch.load(BASIC_PATH+'models/gnn_weights.pth'))
-    outsourcing_actor = L1_OutousrcingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    scheduling_actor = L1_SchedulingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    material_actor = L1_MaterialActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     outsourcing_actor.load_state_dict(torch.load(BASIC_PATH+'models/outsourcing_weights.pth'))
     scheduling_actor.load_state_dict(torch.load(BASIC_PATH+'models/scheduling_weights.pth'))
     material_actor.load_state_dict(torch.load(BASIC_PATH+'models/material_weights.pth'))
     return [(outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 def init_new_models():
-    shared_GNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
-    outsourcing_actor = L1_OutousrcingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    scheduling_actor = L1_SchedulingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    material_actor = L1_MaterialActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
+    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     return [(outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
 
 # =====================================================
 # =*= TRANSLATE INSTANCE TO GRAPH =*=
 # =====================================================
 
-def build_item(i: Instance, graph: GraphInstance, p, e, head):
-    design_time, physical_time = i.item_processing_time(p, e)
-    children_time = 0
+def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, estimated_start: int):
+    design_load, physical_load = i.item_processing_time(p, e, total_load=True)
+    design_mean_time, physical_mean_time = i.item_processing_time(p, e, total_load=False)
     childrens = i.get_children(p, e, direct=False)
+    children_time = 0
     childrens_physical_operations = 0
     childrens_design_operations = 0
     for children in childrens:
-        cdt, cpt = i.item_processing_time(p, children)
+        cdt, cpt = i.item_processing_time(p, e=children, total_load=True)
         children_time += (cdt+cpt)
-        start_c, end_c = i.get_operations_idx(p, children)
-        for child_op in range(start_c, end_c):
+        for child_op in i.loop_item_operations(p, e=children):
             if not i.is_design[p][child_op]:
                 childrens_physical_operations += 1
             else:
                 childrens_design_operations +=1
-    parents_design_time = 0
     parents_physical_time = 0
     ancestors = i.get_ancestors(p, e)
     for ancestor in ancestors:
-            adt, apt = i.item_processing_time(p, ancestor)
-            parents_physical_time += apt
-            parents_design_time += adt
-    estimated_end = design_time + parents_design_time + physical_time + children_time
+        _, apt = i.item_processing_time(p, e=ancestor, total_load=True)
+        parents_physical_time += apt
     item_id = graph.add_item(p, e, ItemFeatures(
-        head = head, 
+        head = head,
         external = i.external[p][e],
         outsourced = NOT_YET if i.external[p][e] else NO,
         outsourcing_cost = i.external_cost[p][e],
         outsourcing_time = i.outsourcing_time[p][e],
-        remaining_physical_time = physical_time,
-        remaining_design_time = design_time,
+        remaining_physical_time = physical_load,
+        remaining_design_time = design_load,
         parents = len(ancestors),
         children = len(childrens),
         parents_physical_time = parents_physical_time,
         children_time = children_time,
-        start_time = parents_design_time,
-        end_time = estimated_end,
+        start_time = estimated_start,
+        end_time = -1,
         is_possible = YES if head else NOT_YET))
-    op_start = parents_design_time
     start, end = i.get_operations_idx(p,e)
     for o in range(start, end):
         if o > start:
-            op_start = op_start+operation_time
+            op_start = op_start+operation_mean_time
+        else:
+            op_start = estimated_start
         succs = end-(o+1)
-        operation_time = i.operation_time(p,o)
+        operation_load = i.operation_time(p,o, total_load=True)
+        operation_mean_time = i.operation_time(p,o, total_load=False)
         required_res = 0
         required_mat = 0
         for rt in i.required_rt(p, o):
@@ -136,11 +138,11 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head):
             timescale_days = i.in_days[p][o],
             direct_successors = succs,
             total_successors = childrens_physical_operations + succs + (childrens_design_operations if i.is_design[p][o] else 0),
-            remaining_time = operation_time,
+            remaining_time = operation_load,
             remaining_resources = required_res,
             remaining_materials = required_mat,
             available_time = op_start,
-            end_time = op_start+operation_time,
+            end_time = op_start+operation_mean_time,
             is_possible = YES if (head and (o == start)) else NOT_YET))
         graph.add_operation_assembly(item_id, op_id)
         for r in i.required_resources(p,o):
@@ -156,10 +158,13 @@ def build_item(i: Instance, graph: GraphInstance, p, e, head):
                     status = NOT_YET,
                     execution_time = op_start,
                     quantity_needed = i.quantity_needed[r][p][o]))
+    estimated_start_child = estimated_start if i.external[p][e] else design_mean_time
     for children in i.get_children(p, e, True):
-        graph, child_id, estimated_end_child = build_item(i, graph, p, children, head=False)
+        graph, child_id, estimated_end_child = build_item(i, graph, p, e=children, head=False, estimated_start=estimated_start_child)
         graph.add_item_assembly(item_id, child_id)
         estimated_end = max(estimated_end, estimated_end_child)
+    estimated_end = min(estimated_start + i.outsourcing_time[p][e], estimated_end + physical_mean_time) if i.external[p][e] else (estimated_end+physical_mean_time)
+    graph.update_item(item_id, [('end_time', estimated_end)])
     return graph, item_id, estimated_end
 
 def build_precedence(i: Instance, graph: GraphInstance):
@@ -215,7 +220,7 @@ def translate(i: Instance):
     graph.materials_i2g = graph.build_i2g_1D(graph.materials_g2i, i.nb_resources)
     for p in i.loop_projects():
         head = i.project_head(p)
-        graph, _, lower_bound = build_item(i, graph, p, head, head=True)
+        graph, _, lower_bound = build_item(i, graph, p, e=head, head=True, estimated_start=0)
     graph.operations_i2g = graph.build_i2g_2D(graph.operations_g2i)
     graph.items_i2g = graph.build_i2g_2D(graph.items_g2i)
     graph.add_dummy_item()
@@ -226,7 +231,7 @@ def translate(i: Instance):
 # =*= SEARCH FOR FEASIBLE ACTIONS =*=
 # =====================================================
 
-def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item_id):
+def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item_id: int):
     actions = []
     external = graph.item(item_id, 'external')
     decision_made = graph.item(item_id, 'outsourced')
@@ -257,7 +262,7 @@ def get_outourcing_actions(instance: Instance, graph: GraphInstance):
         actions.extend(reccursive_outourcing_actions(instance, graph, project_head))
     return actions
 
-def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInstance, operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time, debug_print):
+def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInstance, operations: list[int], required_types_of_resources: list[list[list[int]]], required_types_of_materials: list[list[list[int]]], res_by_types: list[list[int]], current_time: int, debug_print: Callable):
     scheduling_actions = []
     material_use_actions = []
     ops_to_test = operations if operations else graph.loop_operations()
@@ -310,11 +315,11 @@ def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInst
                             material_use_actions.append((operation_id, mat_id))
     return scheduling_actions, material_use_actions
 
-def get_feasible_actions(instance: Instance, graph: GraphInstance, operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time, debug_print):
+def get_feasible_actions(instance: Instance, graph: GraphInstance, operations: list[int], required_types_of_resources: list[list[list[int]]], required_types_of_materials: list[list[list[int]]], res_by_types: list[list[int]], current_time: int, debug_print: Callable):
     actions = get_outourcing_actions(instance, graph)
     type = OUTSOURCING
     if not actions:
-        scheduling_actions, material_use_actions = get_scheduling_and_material_use_actions(instance, graph, operations,required_types_of_resources, required_types_of_materials, res_by_types, current_time, debug_print)
+        scheduling_actions, material_use_actions = get_scheduling_and_material_use_actions(instance, graph, operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time, debug_print)
         if scheduling_actions:
             actions = scheduling_actions
             type = SCHEDULING
@@ -327,7 +332,7 @@ def get_feasible_actions(instance: Instance, graph: GraphInstance, operations, r
 # =*= EXECUTE ONE INSTANCE =*=
 # =====================================================
 
-def objective_value(cmax, cost, cmax_weight):
+def objective_value(cmax: int, cost: int, cmax_weight: float):
     cmax_weight = int(100 * cmax_weight)
     cost_weight = 100 - cmax_weight
     return cmax*cmax_weight + cost*cost_weight
@@ -351,45 +356,43 @@ def build_required_resources(i: Instance):
                     print(f'\t -> Operation ({p},{o}) requires type ({rt}), which does not have any resources!')
     return required_types_of_resources, required_types_of_materials, res_by_types
 
-def policy(probabilities, greedy=True):
+def policy(probabilities: Tensor, greedy: bool=True):
     return torch.argmax(probabilities.view(-1)).item() if greedy else torch.multinomial(probabilities.view(-1), 1).item()
 
-def reward(a, cost_old, cost_new, makespan_old, makespan_new):
+def reward(a: float, cost_old: int, cost_new: int, makespan_old: int, makespan_new: int):
     return a * (cost_old - cost_new) + (1-a) * (makespan_old - makespan_new)
 
-def update_processing_time(instance: Instance, graph: GraphInstance, op_id, res_id):
+def update_processing_time(instance: Instance, graph: GraphInstance, op_id: int, res_id: int):
     p, o = graph.operations_g2i[op_id]
     r = graph.resources_g2i[res_id]
-    processing_time =  graph.need_for_resource(op_id, res_id, 'basic_processing_time')
     op_setup_time = 0 if (instance.get_operation_type(p, o) == graph.current_operation_type[res_id] or graph.current_operation_type[res_id]<0) else instance.operation_setup[r]
     for d in range(instance.nb_settings):
-        dtime = 0 if (graph.current_design_value[res_id][d] == instance.design_value[p][o][d] or graph.current_design_value[res_id][d]<0) else instance.design_setup[r][d] 
-        op_setup_time = op_setup_time + dtime
-    return processing_time + op_setup_time
+        op_setup_time += 0 if (graph.current_design_value[res_id][d] == instance.design_value[p][o][d] or graph.current_design_value[res_id][d]<0) else instance.design_setup[r][d] 
+    return graph.need_for_resource(op_id, res_id, 'basic_processing_time') + op_setup_time
 
-def next_possible_time(instance: Instance, current_time, p, o):
+def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
     scale = 60*instance.H if instance.in_days[p][o] else 60 if instance.in_hours[p][o] else 1
     if current_time % scale == 0:
         return current_time
     else:
         return ((current_time // scale) + 1) * scale
 
-def outsource_item(graph: GraphInstance, instance: Instance, item_id, t, enforce_time=False):
+def outsource_item(graph: GraphInstance, instance: Instance, item_id: int, t: int, enforce_time: bool=False):
     cost = graph.item(item_id, 'outsourcing_cost')
-    outsourcing_time = t if enforce_time else max(graph.item(item_id, 'start_time'), t) 
-    end_date = outsourcing_time + graph.item(item_id, 'outsourcing_time')
+    outsourcing_start_time = t if enforce_time else max(graph.item(item_id, 'start_time'), t) 
+    p, e = graph.items_g2i[item_id]
+    end_date = outsourcing_start_time + instance.outsourcing_time[p][e]
     graph.update_item(item_id, [
         ('outsourced', YES),
         ('is_possible', YES),
         ('remaining_physical_time', 0),
         ('remaining_design_time', 0),
         ('children_time', 0),
-        ('start_time', outsourcing_time),
+        ('start_time', outsourcing_start_time),
         ('end_time', end_date)])
-    p, e = graph.items_g2i[item_id]
     for o in instance.loop_item_operations(p,e):
         op_id = graph.operations_i2g[p][o]
-        available_time = next_possible_time(instance, outsourcing_time, p, o)
+        available_time = next_possible_time(instance, outsourcing_start_time, p, o)
         graph.update_operation(op_id, [
             ('remaining_resources', 0),
             ('remaining_materials', 0),
@@ -408,12 +411,12 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id, t, enforce
                 graph.del_need_for_material(op_id, mat_id)
                 graph.inc_material(mat_id, [('remaining_demand', -1 * quantity_needed)])
     for child in instance.get_children(p, e):
-        graph, child_time, child_cost = outsource_item(graph, instance, graph.items_i2g[p][child], outsourcing_time, enforce_time=True)
+        graph, child_time, child_cost = outsource_item(graph, instance, graph.items_i2g[p][child], outsourcing_start_time, enforce_time=True)
         cost += child_cost
         end_date = max(t, child_time)
     return graph, end_date, cost
 
-def apply_use_material(graph: GraphInstance, instance: Instance, operation_id, material_id, required_types_of_materials, current_time):
+def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: int, material_id: int, required_types_of_materials:list[list[list[int]]], current_time: int):
     p, o = graph.operations_g2i[operation_id]
     rt = instance.get_resource_familly(graph.materials_g2i[material_id])
     quantity_needed = graph.need_for_material(operation_id, material_id, 'quantity_needed')
@@ -439,14 +442,14 @@ def apply_use_material(graph: GraphInstance, instance: Instance, operation_id, m
     required_types_of_materials[p][o].remove(rt)
     return graph, required_types_of_materials
 
-def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, resource_id, required_types_of_resources, utilization, current_time):
+def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: int, resource_id: int, required_types_of_resources: list[list[list[int]]], utilization: list[float], current_time: int):
     current_processing_time = graph.need_for_resource(operation_id, resource_id, 'current_processing_time')
     operation_end = current_time + current_processing_time
     p, o = graph.operations_g2i[operation_id]
     e = instance.get_item_of_operation(p, o)
     r = graph.resources_g2i[resource_id]
     rt = instance.get_resource_familly(r)
-    estimated_processing_time = instance.operation_resource_time(p, o, rt)
+    estimated_processing_time = instance.operation_resource_time(p, o, rt, max_load=True)
     item_id = graph.items_i2g[p][e]
     graph.inc_resource(resource_id, [('executed_operations', 1), ('remaining_operations', -1)])
     graph.update_resource(resource_id, [('available_time', operation_end)])
@@ -466,7 +469,9 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
             graph.inc_resource(similar_id, [('remaining_operations', -1)])
             graph.del_need_for_resource(operation_id, similar_id)
     graph.inc_operation(operation_id, [('remaining_resources', -1), ('remaining_time', -estimated_processing_time)])
-    graph.update_operation(operation_id, [('end_time', operation_end)])
+    graph.update_operation(operation_id, [
+        ('end_time', max(operation_end, graph.operation(operation_id, 'end_time')))
+    ])
     for ancestor in instance.get_ancestors(p, e):
         graph.inc_item(graph.items_i2g[p][ancestor], [
             ('children_time', -estimated_processing_time)
@@ -484,7 +489,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id, r
         graph.inc_item(item_id, [('remaining_physical_time', -estimated_processing_time)])
     return graph, utilization, required_types_of_resources, operation_end
 
-def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previous_operations, next_operations, operation_id, available_time, debug_print): 
+def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previous_operations: list[list[list[int]]], next_operations: list[list[list[int]]], operation_id: int, available_time: int, debug_print: Callable): 
     if graph.is_operation_complete(operation_id):
         p, o = graph.operations_g2i[operation_id]
         e = instance.get_item_of_operation(p, o)
@@ -509,7 +514,7 @@ def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previo
                 graph.update_item(child_id, [('is_possible', YES), ('start_time', available_time)])
     return graph
 
-def check_completeness(graph: GraphInstance, debug_print):
+def check_completeness(graph: GraphInstance, debug_print: Callable):
     for item_id in graph.loop_items():
         outsourced = graph.item(item_id, 'outsourced')
         e = graph.items_g2i[item_id]
@@ -556,7 +561,7 @@ def check_completeness(graph: GraphInstance, debug_print):
         if graph.operation(operation_id, 'remaining_time')>0:
             debug_print(f"PROBLEM OPERATION ({p},{o}) STILL {graph.operation(operation_id, 'remaining_time')} REMAINING TIME!")
 
-def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False):
+def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", train: bool=False, debug_mode: bool=False):
     if debug_mode:
         def debug_print(*args):
             print(*args)
@@ -564,7 +569,7 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
                 file.write(*args)
                 file.write('\n')
     else:
-        def debug_print(*args):
+        def debug_print(*_):
             pass
     debug_print(instance.display())
     start_time = systime.time()
@@ -602,12 +607,12 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
                 if outsourcing_choice == YES:
                     graph, end_date, local_price = outsource_item(graph, instance, item_id, t, enforce_time=False)
                     debug_print(f"Outsourcing item {item_id} -> ({p},{e})...")
-                    approximate_d_time, approximate_p_time = instance.item_processing_time(p, e)
+                    approximate_design_load, approximate_physical_load = instance.item_processing_time(p, e, total_load=True)
                     for ancestor in instance.get_ancestors(p, e):
                         ancestor_id = graph.items_i2g[p][ancestor]
                         max_ancestor_end = max(end_date, graph.item(ancestor_id, 'end_time'))
                         graph.update_item(ancestor_id, [
-                            ('children_time', graph.item(ancestor_id, 'children_time')-(approximate_d_time+approximate_p_time)),
+                            ('children_time', graph.item(ancestor_id, 'children_time')-(approximate_design_load+approximate_physical_load)),
                             ('end_time', max_ancestor_end)
                         ])
                     for o in instance.first_physical_operations(p, instance.get_direct_parent(p, e)):
@@ -653,7 +658,7 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
                 graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t, debug_print)
                 current_cmax = max(current_cmax, t)
-            reward(instance.w_makespan, old_cost, current_cost, old_cmax, current_cmax)
+            rewards[actions_type] = torch.cat((rewards[actions_type], torch.Tensor([reward(instance.w_makespan, old_cost, current_cost, old_cmax, current_cmax)])))
             old_cost = current_cost
             old_cmax = current_cmax
         else: # NO OPERATIONS LEFT AT TIME T SEARCH FOR NEXT TIME
@@ -695,14 +700,14 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
                     check_completeness(graph, debug_print)
                 terminate = True
     if train:
-        return rewards, values, probabilities, states, actions, actions_idx, [instance.id for _ in rewards], related_items, parents
+        return rewards, values, probabilities, states, actions, actions_idx, [[instance.id for _ in rewards] for _ in agents], related_items, parents
     else:
         solutions_df = pd.DataFrame({
             'index': [instance.id],
             'value': [objective_value(current_cmax, current_cost, instance.w_makespan)/100], 
             'computing_time': [systime.time()-start_time]
         })
-        print(solutions_df)
+        debug_print(solutions_df)
         solutions_df.to_csv(path, index=False)
         return current_cmax, current_cost 
 
@@ -710,13 +715,13 @@ def solve_one(instance: Instance, agents, path="", train=False, debug_mode=False
 # =*= PPO TRAINING PROCESS FOR MULTI-AGENTS WITH SHARED PARAMETERS =*=
 # ====================================================================
 
-def search_instance(instances, id) -> Instance:
+def search_instance(instances: list[Instance], id: int) -> Instance:
     for instance in instances:
         if instance.id == id:
             return instance
     return None
 
-def load_training_dataset(debug_mode):
+def load_training_dataset(debug_mode: bool):
     instances = [] 
     for size in PROBLEM_SIZES if not debug_mode else ['s', 'm']:
         problems = []
@@ -730,7 +735,7 @@ def load_training_dataset(debug_mode):
     print(f"End of loading {len(instances)} instances!")
     return instances
 
-def calculate_returns(rewards, gamma=PPO_CONF['discount_factor']):
+def calculate_returns(rewards: list[int], gamma: float=PPO_CONF['discount_factor']):
     R = 0
     returns = []
     for r in reversed(rewards):
@@ -738,7 +743,7 @@ def calculate_returns(rewards, gamma=PPO_CONF['discount_factor']):
         returns.insert(0, R)
     return torch.tensor(returns, dtype=torch.float32)
 
-def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_factor'], lam=PPO_CONF['bias_variance_tradeoff']):
+def generalized_advantage_estimate(rewards: list[int], values: list[float], gamma: float=PPO_CONF['discount_factor'], lam: float=PPO_CONF['bias_variance_tradeoff']):
     GAE = 0
     advantages = []
     for t in reversed(range(len(rewards))):
@@ -749,7 +754,7 @@ def generalized_advantage_estimate(rewards, values, gamma=PPO_CONF['discount_fac
         advantages.insert(0, GAE)
     return advantages
 
-def PPO_loss(instances, agent, old_probs, states, actions, actions_idx, advantages, old_values, returns, instances_idx, all_related_items, all_parents, e=PPO_CONF['clip_ratio']):
+def PPO_loss(instances: list[Instance], agent: list, old_probs: Tensor, states: list[State], actions: list[list[(int, int)]], actions_idx: list[int], advantages: list[float], old_values: list[Tensor], returns: list[Tensor], instances_idx: list[int], all_related_items: list[generic_object], all_parents: list[generic_object], e: float=PPO_CONF['clip_ratio']):
     new_log_probs = torch.Tensor([])
     old_log_probs = torch.Tensor([])
     entropies = torch.Tensor([])
@@ -778,19 +783,19 @@ def PPO_loss(instances, agent, old_probs, states, actions, actions_idx, advantag
     print(f"\t\t entropy loss - {entropy_loss}") 
     return (PPO_CONF['policy_loss']*policy_loss) + (PPO_CONF['value_loss']*value_loss) - (entropy_loss*PPO_CONF['entropy'])
 
-def PPO_optimize(optimizer, loss):
+def PPO_optimize(optimizer: Optimizer, loss: float):
     optimizer.zero_grad()
     loss.backward(retain_graph=False)
     optimizer.step()
 
-def async_solve_one(init_args):
+def async_solve_one(init_args: Tuple[list, Instance, bool]):
     agents, instance, debug_mode = init_args
     print(f"\t start solving instance: {instance.id}...")
     result = solve_one(instance, agents, train=True, debug_mode=debug_mode)
     print(f"\t end solving instance: {instance.id}!")
     return result
 
-def async_solve_batch(agents, batch, num_processes, train, epochs, optimizers, debug):
+def async_solve_batch(agents: list[(Module, str)], batch: list[Instance], num_processes: int, train: bool, epochs: int, optimizers: list[Optimizer], debug: bool):
     all_probabilities, all_states, all_actions, all_actions_idx, all_instances_idx = init_several_1D(len(agents), [], 5)
     all_related_items, all_parents = [], []
     with Pool(num_processes) as pool:
@@ -824,7 +829,7 @@ def async_solve_batch(agents, batch, num_processes, train, epochs, optimizers, d
             loss = PPO_loss(batch, agent, all_probabilities[agent_id], all_states[agent_id], all_actions[agent_id], all_actions_idx[agent_id], advantages[agent_id], flattened_values[agent_id], all_returns[agent_id], all_instances_idx[agent_id], all_related_items, all_parents)
             print(f'\t Average Loss = {loss:.4f}')
 
-def train(instances, agents, iterations, batch_size, epochs, validation_rate, debug_mode=False):
+def train(instances: list[Instance], agents: list[(Module, str)], iterations: int, batch_size: int, epochs: int, validation_rate: int, debug_mode: bool=False):
     if debug_mode:
         def debug_print(*args):
             print(*args)
@@ -832,7 +837,7 @@ def train(instances, agents, iterations, batch_size, epochs, validation_rate, de
                 file.write(*args)
                 file.write('\n')
     else:
-        def debug_print(*args):
+        def debug_print(*_):
             pass
     optimizers = [torch.optim.Adam(agent.parameters(), lr=LEARNING_RATE) for agent,_ in agents]
     for agent,_ in agents:
