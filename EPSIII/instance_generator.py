@@ -24,8 +24,8 @@ MAX_QUANTITY_USED = 100
 NB_TYPES_OF_SETTINGS = [1, 2, 3, 4, 5, 6]
 MAX_SETTINGS_VALUE = 5
 MAX_SETUP_TIME = 3
-MAX_PROCESSING_TIMES_DESIGN = 3
-MAX_PROCESSING_TIMES_ASSEMBLY = 6
+MAX_PROCESSING_TIMES_DESIGN = 5
+MAX_PROCESSING_TIMES_ASSEMBLY = 10
 MAX_PROCESSING_TIMES_PROD = 40
 MIN_OUTSOURCING_PRICE_SHARE = 0.03
 MAX_OUTSOURCING_PRICE_SHARE = 0.15
@@ -138,12 +138,13 @@ def build_elements(i: Instance):
     i.assembly, i.direct_assembly = init_several_3D(nb_projects, elts_per_project, elts_per_project, False, 2)
     i.outsourcing_time, i.external_cost = init_several_2D(nb_projects, elts_per_project, -1, 2)
     i.external = init_2D(nb_projects, elts_per_project, False)
-    mean_elt_op_time = MAX_PROCESSING_TIMES_DESIGN*60;
-    MAX_PRICE = round(mean_elt_op_time*MAX_OUTSOURCING_PRICE_SHARE);
-    MIN_PRICE = round(mean_elt_op_time*MIN_OUTSOURCING_PRICE_SHARE);
-    MAX_TIME  = round(mean_elt_op_time*MAX_OUTSOURCING_TIME_SHARE);
-    MIN_TIME  = round(mean_elt_op_time*MIN_OUTSOURCING_TIME_SHARE);
-    i.M = 5 * mean_elt_op_time * NB_ELTS_PER_PROJECT[SIZE] * NB_PROJECTS[SIZE];
+    mean_elt_op_time = (MAX_PROCESSING_TIMES_DESIGN*60*H) + (MAX_PROCESSING_TIMES_ASSEMBLY*60) + (MEAN_OPS_PER_ELT[SIZE]-2)*MAX_PROCESSING_TIMES_PROD
+    mean_elt_op_price = MAX_PROCESSING_TIMES_DESIGN*60*H
+    MAX_PRICE = round(mean_elt_op_price*MAX_OUTSOURCING_PRICE_SHARE)
+    MIN_PRICE = round(mean_elt_op_price*MIN_OUTSOURCING_PRICE_SHARE)
+    MAX_TIME  = round(mean_elt_op_time*MAX_OUTSOURCING_TIME_SHARE)
+    MIN_TIME  = round(mean_elt_op_time*MIN_OUTSOURCING_TIME_SHARE)
+    i.M = 5 * mean_elt_op_price * NB_ELTS_PER_PROJECT[SIZE] * NB_PROJECTS[SIZE]
     for p in range(nb_projects):
         for e in range(1, elts_per_project):
             i.direct_assembly[p][random.randint(0,e-1)][e] = True

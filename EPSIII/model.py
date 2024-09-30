@@ -13,9 +13,9 @@ NOT_YET = -1
 YES = 1
 NO = 0
 
-# =====================================================
-# =*= SOLUTION DATA STRUCTURE =*=
-# =====================================================
+# =======================================================
+# =*= EXACT (Google OR-Tool) SOLUTION DATA STRUCTURE =*=
+# =======================================================
 class Solution:
     def __init__(self):
         # Elements (p, e)
@@ -31,7 +31,7 @@ class Solution:
         self.obj = []
 
 # =====================================================
-# =*= INSTANCE DATA STRUCTURE =*=
+# =*= INSTANCE DATA STRUCTURE & ACCESS FUNCTIONS =*=
 # =====================================================
 class Instance:
     def __init__(self, size, id, w_makespan, H, **kwargs):
@@ -423,9 +423,9 @@ class Instance:
             projects.append({"project_id:": p, "head": self.recursive_display_item(p, self.project_head(p), -1)})
         return json.dumps({"nb_projects": len(projects), "projects": projects}, indent=4)            
 
-# =====================================================
-# =*= HYPER-GRAPH DATA STRUCTURE =*=
-# =====================================================
+# =============================================================
+# =*= HYPER-GRAPH DATA STRUCTURES & MANIPULATION FUNCTIONS =*=
+# =============================================================
 class State:
     def __init__(self, items, operations, resources, materials, need_for_materials, need_for_resources, operation_assembly, item_assembly, precedences, same_types):
         self.items = copy.deepcopy(items)
