@@ -773,6 +773,18 @@ class GraphInstance():
         for feature, value in updates:
             self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]] = value
 
+    def inc_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, int)]):
+        key = ('operation', 'needs_mat', 'material')
+        idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
+        for feature, value in updates:
+            self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]] += value
+
+    def inc_need_for_resource(self, operation_id: int, resource_id: int, updates: list[(str, int)]):
+        key = ('operation', 'needs_res', 'resource')
+        idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
+        for feature, value in updates:
+            self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]] += value
+
     def is_item_complete(self, item_id: int):
         if self.item(item_id, 'remaining_physical_time')>0 \
             or self.item(item_id, 'remaining_design_time')>0 \
