@@ -444,7 +444,7 @@ def shift_ancestors_physical_operations(graph: GraphInstance, instance: Instance
             for o in instance.loop_item_operations(p, ancestor):
                 if not instance.is_design[p][o]:
                     graph,_ = shift_one_operation(graph, instance, p, o, shift)
-                    max_ancestor_end = max(max_ancestor_end, graph.inc_item(ancestor_id, 'end_time'))
+                    max_ancestor_end = max(max_ancestor_end, graph.item(ancestor_id, 'end_time'))
     return graph, max_ancestor_end
 
 def shift_ancestors_and_operations(graph: GraphInstance, instance: Instance, p: int, e: int, shift: int):
@@ -458,7 +458,7 @@ def shift_ancestors_and_operations(graph: GraphInstance, instance: Instance, p: 
         for o in instance.loop_item_operations(p, ancestor):
             if not instance.is_design[p][o]:
                 graph,_ = shift_one_operation(graph, instance, p, o, shift)
-                max_ancestor_end = max(max_ancestor_end, graph.inc_item(ancestor_id, 'end_time'))
+                max_ancestor_end = max(max_ancestor_end, graph.item(ancestor_id, 'end_time'))
     return graph, max_ancestor_end
 
 def item_local_production(graph: GraphInstance, instance: Instance, item_id: int, p: int, e: int, debug_print: Callable):
@@ -468,7 +468,7 @@ def item_local_production(graph: GraphInstance, instance: Instance, item_id: int
     design_mean_time, physical_mean_time = instance.item_processing_time(p, e, total_load=False)
     graph, max_child_end = shift_children_and_operations(graph, instance, p, e, design_mean_time)
     new_end = physical_mean_time + (max_child_end if max_child_end>0 else (graph.item(item_id, 'start_time')+design_mean_time))
-    graph, max_ancestors_end = shift_ancestors_and_operations(graph, instance, p, e, time=new_end-old_end, shift=True)
+    graph, max_ancestors_end = shift_ancestors_and_operations(graph, instance, p, e, shift=new_end-old_end)
     graph.update_item(item_id, [('outsourced', NO), ('end_time', new_end)])
     return graph, max(new_end, max_ancestors_end)
 
@@ -534,16 +534,14 @@ def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: i
     ])
     e = instance.get_item_of_operation(p,o)
     item_id = graph.items_i2g[p][e]
-    graph, max_next_operation_end = shift_next_operations(graph, instance, p, o, shift)
+    graph, max_next_operation_end = shift_next_operations(graph, instance, p, e, o, shift)
     graph.update_item(item_id, [
         ('end_time', max(current_time, max_next_operation_end, graph.item(item_id, 'end_time'))),
         ('start_time', min(current_time, graph.item(item_id, 'start_time')))
     ])
     for ancestor in instance.get_ancestors(p, e):
         ancestor_id = graph.items_i2g[p][ancestor]
-        graph.inc_item(ancestor_id, [
-            ('end_time', max(current_time, graph.item(ancestor_id, 'end_time')))
-        ])
+        graph.update_item(ancestor_id, [('end_time', max(current_time, graph.item(ancestor_id, 'end_time')))])
     if instance.is_design[p][o]:
         graph,_ = shift_children_and_operations(graph, instance, p, e, shift)
     graph, max_ancestors_end = shift_ancestors_physical_operations(graph, instance, p, e, max_next_operation_end)
@@ -553,8 +551,8 @@ def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: i
 def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: int, resource_id: int, required_types_of_resources: list[list[list[int]]], utilization: list[float], current_time: int):
     current_processing_time = graph.need_for_resource(operation_id, resource_id, 'current_processing_time')
     old_end = graph.operation(operation_id, 'end_time')
-    new_end = max(operation_end, old_end)
     operation_end = current_time + current_processing_time
+    new_end = max(operation_end, old_end)
     shift = max(0, new_end-old_end)
     p, o = graph.operations_g2i[operation_id]
     e = instance.get_item_of_operation(p, o)
@@ -583,11 +581,9 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     graph.update_operation(operation_id, [('end_time', new_end)])
     for ancestor in instance.get_ancestors(p, e):
         ancestor_id = graph.items_i2g[p][ancestor]
-        graph.inc_item(ancestor_id, [
-            ('children_time', -estimated_processing_time)
-            ('end_time', max(operation_end, graph.item(ancestor_id, 'end_time')))
-        ])
-    graph, max_next_operation_end = shift_next_operations(graph, instance, p, o, shift)
+        graph.inc_item(ancestor_id, [('children_time', -estimated_processing_time)])
+        graph.update_item(ancestor_id, [('end_time', max(operation_end, graph.item(ancestor_id, 'end_time')))])
+    graph, max_next_operation_end = shift_next_operations(graph, instance, p, e, o, shift)
     graph.update_item(item_id, [
         ('start_time', min(current_time, graph.item(item_id, 'start_time'))),
         ('end_time', max(operation_end, max_next_operation_end, graph.item(item_id, 'end_time')))
@@ -755,11 +751,13 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
                                 if instance.finite_capacity[r]:
                                     other_resource_id = graph.resources_i2g[r]
                                     if graph.resource(other_resource_id, 'available_time') <= t:
-                                        graph, utilization, required_types_of_resources, op_end = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, utilization, t)
+                                        graph, utilization, required_types_of_resources, op_end, other_max_ancestors_end = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, utilization, t)
                                         operation_end = max(operation_end, op_end)
+                                        max_ancestors_end = max(max_ancestors_end, other_max_ancestors_end)
                                         break
                                 else:
-                                    graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, graph.materials_i2g[r], required_types_of_materials, t)
+                                    graph, required_types_of_materials, other_max_ancestors_end = apply_use_material(graph, instance, operation_id, graph.materials_i2g[r], required_types_of_materials, t)
+                                    max_ancestors_end = max(max_ancestors_end, other_max_ancestors_end)
                                     break
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, operation_end, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
