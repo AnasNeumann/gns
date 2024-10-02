@@ -59,15 +59,13 @@ def search_instance(instances: list[Instance], id: int) -> Instance:
 
 def load_training_dataset(debug_mode: bool, path: str):
     instances = [] 
-    for size in PROBLEM_SIZES if not debug_mode else ['s', 'm']:
-        problems = []
+    for size in PROBLEM_SIZES if not debug_mode else ['m']:
         complete_path = path+directory.instances+'/train/'+size+'/'
-        for i in os.listdir(path):
+        for i in os.listdir(complete_path):
             if i.endswith('.pkl'):
                 file_path = os.path.join(complete_path, i)
                 with open(file_path, 'rb') as file:
-                    problems.append(pickle.load(file))
-        instances.extend(problems)
+                    instances.append(pickle.load(file))
     print(f"End of loading {len(instances)} instances!")
     return instances
 
@@ -102,8 +100,8 @@ def PPO_loss(instances: list[Instance], agent: list, old_probs: Tensor, states: 
         if instances_idx[id] != id:
             id = instances_idx[id]
             instance = search_instance(instances, id)
-            related_items = search_object_by_id(all_related_items, id)['related_item']
-            parents = search_object_by_id(all_parents, id)['parent']
+            related_items = search_object_by_id(all_related_items, id)['related_items']
+            parents = search_object_by_id(all_parents, id)['parents']
         p,_ = agent(states[i], actions[i], related_items, parents, instance.w_makespan)
         a = actions_idx[i]
         entropies = torch.cat((entropies, torch.sum(-p*torch.log(p+1e-8), dim=-1)))
@@ -132,17 +130,21 @@ def async_solve_one(init_args: Tuple[list, Instance, bool, Callable]):
     return result
 
 def async_solve_batch(agents: list[(Module, str)], batch: list[Instance], num_processes: int, train: bool, epochs: int, optimizers: list[Optimizer], solve_function: Callable, debug: bool):
-    all_probabilities, all_states, all_actions, all_actions_idx, all_instances_idx = init_several_1D(len(agents), [], 5)
+    all_probabilities = [[] for _ in agents]
+    all_states = [[] for _ in agents]
+    all_actions = [[] for _ in agents]
+    all_actions_idx = [[] for _ in agents]
+    all_instances_idx = [[] for _ in agents]
     all_related_items, all_parents = [], []
     with Pool(num_processes) as pool:
         results = pool.map(async_solve_one, [(agents, instance, debug, solve_function) for instance in batch])
     all_rewards, all_values, probabilities, states, actions, actions_idx, instances_idx, related_items, parents = zip(*results)
     for instance in range(len(batch)):
-        all_parents.append({'id': instances_idx[0][0], 'parents': parents[instance]})
-        all_related_items.append({'id': instances_idx[0][0], 'related_items': related_items[instance]})
+        all_parents.append({'id': instances_idx[instance][0][0], 'parents': parents[instance]})
+        all_related_items.append({'id': instances_idx[instance][0][0], 'related_items': related_items[instance]}) 
         for agent_id in range(len(agents)):
-            all_probabilities[agent_id].extend(probabilities[instance][agent_id])
             all_states[agent_id].extend(states[instance][agent_id])
+            all_probabilities[agent_id].extend(probabilities[instance][agent_id])
             all_actions[agent_id].extend(actions[instance][agent_id])
             all_actions_idx[agent_id].extend(actions_idx[instance][agent_id])
             all_instances_idx[agent_id].extend(instances_idx[instance][agent_id])
@@ -157,12 +159,36 @@ def async_solve_batch(agents: list[(Module, str)], batch: list[Instance], num_pr
             print(f"\t Optimization epoch: {e+1}/{epochs}")
             for agent_id, (agent, name) in enumerate(agents):
                 print(f"\t\t Optimizing agent: {name}...")
-                loss = PPO_loss(batch, agent, all_probabilities[agent_id], all_states[agent_id], all_actions[agent_id], all_actions_idx[agent_id], advantages[agent_id], flattened_values[agent_id], all_returns[agent_id], all_instances_idx[agent_id], all_related_items, all_parents)
+                loss = PPO_loss(
+                    instances=batch, 
+                    agent=agent, 
+                    old_probs=all_probabilities[agent_id], 
+                    states=all_states[agent_id], 
+                    actions=all_actions[agent_id], 
+                    actions_idx=all_actions_idx[agent_id], 
+                    advantages=advantages[agent_id], 
+                    old_values=flattened_values[agent_id], 
+                    returns=all_returns[agent_id], 
+                    instances_idx=all_instances_idx[agent_id], 
+                    all_related_items=all_related_items, 
+                    all_parents=all_parents)
                 PPO_optimize(optimizers[agent_id], loss)
     else:
         for agent_id, (agent, name) in enumerate(agents):
             print(f"\t\t Evaluating agent: {name}...")
-            loss = PPO_loss(batch, agent, all_probabilities[agent_id], all_states[agent_id], all_actions[agent_id], all_actions_idx[agent_id], advantages[agent_id], flattened_values[agent_id], all_returns[agent_id], all_instances_idx[agent_id], all_related_items, all_parents)
+            loss = PPO_loss(
+                    instances=batch, 
+                    agent=agent, 
+                    old_probs=all_probabilities[agent_id], 
+                    states=all_states[agent_id], 
+                    actions=all_actions[agent_id], 
+                    actions_idx=all_actions_idx[agent_id], 
+                    advantages=advantages[agent_id], 
+                    old_values=flattened_values[agent_id], 
+                    returns=all_returns[agent_id], 
+                    instances_idx=all_instances_idx[agent_id], 
+                    all_related_items=all_related_items, 
+                    all_parents=all_parents)
             print(f'\t Average Loss = {loss:.4f}')
 
 def PPO_train(agents: list[(Module, str)], path: str, solve_function: Callable, debug_mode: bool=False):

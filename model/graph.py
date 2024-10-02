@@ -444,7 +444,7 @@ class GraphInstance():
     def loop_need_for_resource(self):
         return self.graph['operation', 'needs_res', 'resource'].edge_index, range(self.graph['operation', 'needs_res', 'resource'].edge_index.size(1))
     
-    def to_state(self):
+    def to_state(self) -> State:
         return State(self.items(), 
                       self.operations(), 
                       self.resources(), 
