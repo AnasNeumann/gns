@@ -160,11 +160,12 @@ cython_debug/
 #.idea/
 
 .DS_Store
-documentation/
-documentation/**
-EPSIII/jobs/train_gns.sh
-EPSIII/jobs/exact/**
-EPSIII/jobs/gns/**
-EPSIII/log.sh
+jobs/scripts/train_gns.sh
+jobs/scripts/exact/
+jobs/scripts/exact/**
+jobs/scripts/gns/
+jobs/scripts/gns/**
+log.sh
 gns_env/
+gns_env/**
 __pycache__/
