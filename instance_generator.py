@@ -102,6 +102,7 @@ def build_operations(i: Instance):
     i.nb_ops_types = nb_design_operations_types + nb_assembly_operation_types + nb_production_operation_types
     i.design_value, i.is_design, i.in_days, i.in_hours, i.resource_type_needed, i.simultaneous, i.operation_family = init_several_1D(nb_projects, -1, 7)
     for p in range(nb_projects):
+        project_has_material = False
         nb_ops = i.O_size[p]
         i.is_design[p], i.in_days[p], i.in_hours[p], i.simultaneous[p], i.operation_family[p] = init_several_1D(nb_ops, False, 5)
         i.operation_family[p], i.resource_type_needed[p] = init_several_2D(nb_ops, i.nb_ops_types, False, 2)
@@ -124,8 +125,9 @@ def build_operations(i: Instance):
                 maxRT = i.nb_HR_types-1 if (i.in_days[p][o] or i.in_hours[p][o]) else i.nb_resource_types - i.nb_material - UNKOWN_MACHINE_TYPE -1
                 minRT = 0 if (i.in_days[p][o] or i.in_hours[p][o]) else i.nb_HR_types
                 i.resource_type_needed[p][o][random.randint(minRT, maxRT)] = True
-                if not i.in_days[p][o] and not i.in_hours[p][o] and bias_generator(0.6):
+                if not i.in_days[p][o] and not i.in_hours[p][o] and (bias_generator(0.7) or not project_has_material):
                     i.resource_type_needed[p][o][random.randint(maxRT+1, maxRT+i.nb_material)] = True
+                    project_has_material = True
                 if not found_unkown_elt and i.external[p][e] and not i.in_days[p][o] and not i.in_hours[p][o] and len(i.get_children(p,e,True))<=0:
                     found_unkown_elt = True
                     i.resource_type_needed[p][o][maxRT+i.nb_material+UNKOWN_MACHINE_TYPE] = True
