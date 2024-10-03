@@ -97,8 +97,8 @@ def PPO_loss(instances: list[Instance], agent: list, old_probs: Tensor, states: 
     related_items = []
     parents = []
     for i in range(len(states)):
-        if instances_idx[id] != id:
-            id = instances_idx[id]
+        if instances_idx[i] != id:
+            id = instances_idx[i]
             instance = search_instance(instances, id)
             related_items = search_object_by_id(all_related_items, id)['related_items']
             parents = search_object_by_id(all_parents, id)['parents']

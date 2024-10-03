@@ -560,7 +560,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
                     check_completeness(graph, debug_print)
                 terminate = True
     if train:
-        return rewards, values, probabilities, states, actions, actions_idx, [[instance.id for _ in rewards] for _ in agents], related_items, parents
+        instance_id_by_agent_and_state = [[instance.id for _ in states[agent_id]] for agent_id,_ in enumerate(agents)]
+        return rewards, values, probabilities, states, actions, actions_idx, instance_id_by_agent_and_state, related_items, parents
     else:
         solutions_df = pd.DataFrame({
             'index': [instance.id],
