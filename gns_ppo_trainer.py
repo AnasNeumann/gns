@@ -14,6 +14,7 @@ from torch.nn import Module
 from torch.optim import Optimizer
 from debug.debug_gns import debug_printer
 from typing import Callable
+import numpy as np 
 
 # ===========================================================
 # =*= PROXIMAL POLICY OPTIMIZATION (PPO) RELATE FUNCTIONS =*=
@@ -69,23 +70,29 @@ def load_training_dataset(debug_mode: bool, path: str):
     print(f"End of loading {len(instances)} instances!")
     return instances
 
-def calculate_returns(rewards: list[int], gamma: float=PPO_CONF['discount_factor']):
+def calculative_returns(rewards: list[int], gamma: float=PPO_CONF['discount_factor']):
     R = 0
-    returns = []
-    for r in reversed(rewards):
-        R = r + gamma * R
-        returns.insert(0, R)
+    T = len(rewards)
+    returns = np.zeros(T)
+    for t in reversed(range(T)):
+        R = rewards[t] + gamma * R
+        returns[t] = R
     return torch.tensor(returns, dtype=torch.float32)
+
+def temporal_difference_residual(rewards: list[int], values: list[float], t: int, gamma: float=PPO_CONF['discount_factor']):
+    delta = rewards[t] - values[t]
+    if t >= len(rewards) - 1:
+        return delta
+    return delta + (gamma * values[t+1])
 
 def generalized_advantage_estimate(rewards: list[int], values: list[float], gamma: float=PPO_CONF['discount_factor'], lam: float=PPO_CONF['bias_variance_tradeoff']):
     GAE = 0
-    advantages = []
-    for t in reversed(range(len(rewards))):
-        delta = rewards[t] - values[t]
-        if t<len(rewards)-1:
-            delta = delta + (gamma * values[t+1])
+    T = len(rewards)
+    advantages = np.zeros(T)
+    for t in reversed(range(T)):
+        delta = temporal_difference_residual(rewards, values, t, gamma)
         GAE = delta + gamma * lam * GAE
-        advantages.insert(0, GAE)
+        advantages[t] = GAE
     return advantages
 
 def PPO_loss(instances: list[Instance], agent: list, old_probs: Tensor, states: list[State], actions: list[list[(int, int)]], actions_idx: list[int], advantages: list[float], old_values: list[Tensor], returns: list[Tensor], instances_idx: list[int], all_related_items: list[generic_object], all_parents: list[generic_object], e: float=PPO_CONF['clip_ratio']):
@@ -148,7 +155,7 @@ def async_solve_batch(agents: list[(Module, str)], batch: list[Instance], num_pr
             all_actions[agent_id].extend(actions[instance][agent_id])
             all_actions_idx[agent_id].extend(actions_idx[instance][agent_id])
             all_instances_idx[agent_id].extend(instances_idx[instance][agent_id])
-    all_returns = [[ri for r in agent_rewards for ri in calculate_returns(r)] for agent_rewards in all_rewards]
+    all_returns = [[ri for r in agent_rewards for ri in calculative_returns(r)] for agent_rewards in all_rewards]
     advantages = []
     flattened_values = []
     for agent_id, _ in enumerate(agents):
