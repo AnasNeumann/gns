@@ -14,6 +14,7 @@ from torch.nn import Module
 from instance2graph_translator import translate
 from debug.debug_gns import check_completeness, debug_printer
 from gns_ppo_trainer import reward, PPO_train
+from model.agent import MultiAgent_OneInstance
 
 # =====================================================
 # =*= 1st MAIN FILE OF THE PROJECT: GNS SOLVER =*=
@@ -427,17 +428,19 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
     debug_print(instance.display())
     start_time = systime.time()
     graph, current_cmax, current_cost = translate(instance)
-    parents = graph.flatten_parents()
     utilization = [0 for _ in graph.loop_resources()]
-    related_items = graph.flatten_related_items()
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     previous_operations, next_operations = instance.build_next_and_previous_operations()
     t = 0
-    if train:
-        rewards, values = [torch.Tensor([]) for _ in agents], [torch.Tensor([]) for _ in agents]
-        probabilities, states, actions, actions_idx = [[] for _ in agents], [[] for _ in agents], [[] for _ in agents], [[] for _ in agents]
-        old_cmax = current_cmax
-        old_cost = current_cost
+    training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
+        agent_names=[name for _,name in agents], 
+        instance_id=instance.id,
+        related_items=graph.flatten_related_items(), 
+        parent_items=graph.flatten_parents(), 
+        w_makespan=instance.w_makespan,
+        device=device)
+    old_cmax = current_cmax
+    old_cost = current_cost
     terminate = False
     operations_to_test = []
     while not terminate:
@@ -447,14 +450,16 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
-            probs, state_value = agents[actions_type][AGENT](graph.to_state(), poss_actions, related_items, parents, instance.w_makespan)
+            probs, state_value = agents[actions_type][AGENT](graph.to_state(), poss_actions, training_results.related_items, training_results.parents, instance.w_makespan)
             idx = policy(probs, greedy=(not train))
             if train:
-                states[actions_type].append(graph.to_state())
-                values[actions_type] = torch.cat((values[actions_type], torch.Tensor([state_value.detach()])))
-                actions[actions_type].append(poss_actions)
-                probabilities[actions_type].append(probs.detach())
-                actions_idx[actions_type].append(idx)
+                training_results.add_step(
+                    agent_name=actions_type, 
+                    state=graph.to_state(),
+                    probabilities=probs.detach(),
+                    actions=poss_actions,
+                    id=idx,
+                    value=state_value.detach())
             if actions_type == OUTSOURCING:
                 item_id, outsourcing_choice = poss_actions[idx]
                 p, e = graph.items_g2i[item_id]
@@ -484,7 +489,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
                     graph, shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e, debug_print)
                     current_cmax = max(current_cmax, shifted_project_estimated_end)
                 if train:
-                    rewards[OUTSOURCING] = torch.cat((rewards[OUTSOURCING], torch.Tensor([reward(old_cmax, current_cmax, old_cost, current_cost, a=instance.w_makespan, use_cost=True)])))
+                    training_results.add_reward(agent_name=OUTSOURCING, reward=reward(old_cmax, current_cmax, old_cost, current_cost, a=instance.w_makespan, use_cost=True))
             elif actions_type == SCHEDULING:
                 operation_id, resource_id = poss_actions[idx]    
                 p, o = graph.operations_g2i[operation_id]
@@ -509,7 +514,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, operation_end, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
                 if train:
-                    rewards[SCHEDULING] = torch.cat((rewards[SCHEDULING], torch.Tensor([reward(old_cmax, current_cmax)])))
+                    training_results.add_reward(agent_name=SCHEDULING, reward=reward(old_cmax, current_cmax))
             else:
                 operation_id, material_id = poss_actions[idx]
                 p, o = graph.operations_g2i[operation_id]
@@ -518,7 +523,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
                 if train:
-                    rewards[MATERIAL_USE] = torch.cat((rewards[MATERIAL_USE], torch.Tensor([reward(old_cmax, current_cmax)])))
+                    training_results.add_reward(agent_name=MATERIAL_USE, reward=reward(old_cmax, current_cmax))
             old_cost = current_cost
             old_cmax = current_cmax
         else: # NO OPERATIONS LEFT AT TIME T SEARCH FOR NEXT TIME
@@ -560,8 +565,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
                     check_completeness(graph, debug_print)
                 terminate = True
     if train:
-        instance_id_by_agent_and_state = [[instance.id for _ in states[agent_id]] for agent_id,_ in enumerate(agents)]
-        return rewards, values, probabilities, states, actions, actions_idx, instance_id_by_agent_and_state, related_items, parents
+        return training_results
     else:
         solutions_df = pd.DataFrame({
             'index': [instance.id],

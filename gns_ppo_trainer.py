@@ -15,6 +15,7 @@ from torch.optim import Optimizer
 from debug.debug_gns import debug_printer
 from typing import Callable
 import numpy as np 
+from model.agent import MultiAgent_OneInstance, MultiAgents_Batch
 
 # ===========================================================
 # =*= PROXIMAL POLICY OPTIMIZATION (PPO) RELATE FUNCTIONS =*=
@@ -30,7 +31,7 @@ PPO_CONF = {
     "switch_batch": 20,
     "train_iterations": [10, 1000], 
     "opt_epochs": 3,
-    "batch_size": [3, 20],
+    "batch_size": [4, 20],
     "clip_ratio": 0.2,
     "policy_loss": 1.0,
     "value_loss": 0.5,
@@ -70,61 +71,7 @@ def load_training_dataset(debug_mode: bool, path: str):
     print(f"End of loading {len(instances)} instances!")
     return instances
 
-def calculative_returns(rewards: list[int], gamma: float=PPO_CONF['discount_factor']):
-    R = 0
-    T = len(rewards)
-    returns = np.zeros(T)
-    for t in reversed(range(T)):
-        R = rewards[t] + gamma * R
-        returns[t] = R
-    return torch.tensor(returns, dtype=torch.float32)
-
-def temporal_difference_residual(rewards: list[int], values: list[float], t: int, gamma: float=PPO_CONF['discount_factor']):
-    delta = rewards[t] - values[t]
-    if t >= len(rewards) - 1:
-        return delta
-    return delta + (gamma * values[t+1])
-
-def generalized_advantage_estimate(rewards: list[int], values: list[float], gamma: float=PPO_CONF['discount_factor'], lam: float=PPO_CONF['bias_variance_tradeoff']):
-    GAE = 0
-    T = len(rewards)
-    advantages = np.zeros(T)
-    for t in reversed(range(T)):
-        delta = temporal_difference_residual(rewards, values, t, gamma)
-        GAE = delta + gamma * lam * GAE
-        advantages[t] = GAE
-    return advantages
-
-def PPO_loss(instances: list[Instance], agent: list, old_probs: Tensor, states: list[State], actions: list[list[(int, int)]], actions_idx: list[int], advantages: list[float], old_values: list[Tensor], returns: list[Tensor], instances_idx: list[int], all_related_items: list[generic_object], all_parents: list[generic_object], e: float=PPO_CONF['clip_ratio']):
-    new_log_probs = torch.Tensor([])
-    old_log_probs = torch.Tensor([])
-    entropies = torch.Tensor([])
-    id = -1
-    instance = None
-    related_items = []
-    parents = []
-    for i in range(len(states)):
-        if instances_idx[i] != id:
-            id = instances_idx[i]
-            instance = search_instance(instances, id)
-            related_items = search_object_by_id(all_related_items, id)['related_items']
-            parents = search_object_by_id(all_parents, id)['parents']
-        p,_ = agent(states[i], actions[i], related_items, parents, instance.w_makespan)
-        a = actions_idx[i]
-        entropies = torch.cat((entropies, torch.sum(-p*torch.log(p+1e-8), dim=-1)))
-        new_log_probs = torch.cat((new_log_probs, torch.log(p[a]+1e-8)))
-        old_log_probs = torch.cat((old_log_probs, torch.log(old_probs[i][a]+1e-8)))
-    ratio = torch.exp(new_log_probs - old_log_probs)
-    clipped_ratio = torch.clamp(ratio, 1-e, 1+e)
-    policy_loss = -torch.min(ratio * advantages, clipped_ratio * advantages).mean()
-    value_loss = torch.mean(torch.stack([(V_old - r) ** 2 for V_old, r in zip(old_values, returns)]))
-    entropy_loss = torch.mean(entropies)
-    print(f"\t\t value loss - {value_loss}")
-    print(f"\t\t policy loss - {policy_loss}") 
-    print(f"\t\t entropy loss - {entropy_loss}") 
-    return (PPO_CONF['policy_loss']*policy_loss) + (PPO_CONF['value_loss']*value_loss) - (entropy_loss*PPO_CONF['entropy'])
-
-def PPO_optimize(optimizer: Optimizer, loss: float):
+def optimize(optimizer: Optimizer, loss: float):
     optimizer.zero_grad()
     loss.backward(retain_graph=False)
     optimizer.step()
@@ -137,66 +84,28 @@ def async_solve_one(init_args: Tuple[list, Instance, bool, Callable]):
     return result
 
 def async_solve_batch(agents: list[(Module, str)], batch: list[Instance], num_processes: int, train: bool, epochs: int, optimizers: list[Optimizer], solve_function: Callable, debug: bool):
-    all_probabilities = [[] for _ in agents]
-    all_states = [[] for _ in agents]
-    all_actions = [[] for _ in agents]
-    all_actions_idx = [[] for _ in agents]
-    all_instances_idx = [[] for _ in agents]
-    all_related_items, all_parents = [], []
     with Pool(num_processes) as pool:
-        results = pool.map(async_solve_one, [(agents, instance, debug, solve_function) for instance in batch])
-    all_rewards, all_values, probabilities, states, actions, actions_idx, instances_idx, related_items, parents = zip(*results)
-    for instance in range(len(batch)):
-        all_parents.append({'id': instances_idx[instance][0][0], 'parents': parents[instance]})
-        all_related_items.append({'id': instances_idx[instance][0][0], 'related_items': related_items[instance]}) 
-        for agent_id in range(len(agents)):
-            all_states[agent_id].extend(states[instance][agent_id])
-            all_probabilities[agent_id].extend(probabilities[instance][agent_id])
-            all_actions[agent_id].extend(actions[instance][agent_id])
-            all_actions_idx[agent_id].extend(actions_idx[instance][agent_id])
-            all_instances_idx[agent_id].extend(instances_idx[instance][agent_id])
-    all_returns = [[ri for r in agent_rewards for ri in calculative_returns(r)] for agent_rewards in all_rewards]
-    advantages = []
-    flattened_values = []
-    for agent_id, _ in enumerate(agents):
-        advantages.append(torch.Tensor([gae for r, v in zip(all_rewards[agent_id], all_values[agent_id]) for gae in generalized_advantage_estimate(r, v)]))
-        flattened_values.append([v for vals in all_values[agent_id] for v in vals])
+        instances_results: list[MultiAgent_OneInstance] = pool.map(async_solve_one, [(agents, instance, debug, solve_function) for instance in batch])
+    batch_result: MultiAgents_Batch = MultiAgents_Batch(
+        batch=instances_results, 
+        agent_names=[name for _,name in agents], 
+        gamma=PPO_CONF['discount_factor'], 
+        lam=PPO_CONF['bias_variance_tradeoff'],
+        weight_policy_loss=PPO_CONF['policy_loss'],
+        weight_value_loss=PPO_CONF['value_loss'], 
+        weight_entropy_bonus=PPO_CONF['entropy'],
+        clipping_ratio=PPO_CONF['clip_ratio'])
     if train and epochs>0:
         for e in range(epochs):
             print(f"\t Optimization epoch: {e+1}/{epochs}")
-            for agent_id, (agent, name) in enumerate(agents):
+            losses = batch_result.compute_losses(agents)
+            for agent_id, (_, name) in enumerate(agents):
                 print(f"\t\t Optimizing agent: {name}...")
-                loss = PPO_loss(
-                    instances=batch, 
-                    agent=agent, 
-                    old_probs=all_probabilities[agent_id], 
-                    states=all_states[agent_id], 
-                    actions=all_actions[agent_id], 
-                    actions_idx=all_actions_idx[agent_id], 
-                    advantages=advantages[agent_id], 
-                    old_values=flattened_values[agent_id], 
-                    returns=all_returns[agent_id], 
-                    instances_idx=all_instances_idx[agent_id], 
-                    all_related_items=all_related_items, 
-                    all_parents=all_parents)
-                PPO_optimize(optimizers[agent_id], loss)
+                optimize(optimizers[agent_id], losses[agent_id])
     else:
-        for agent_id, (agent, name) in enumerate(agents):
-            print(f"\t\t Evaluating agent: {name}...")
-            loss = PPO_loss(
-                    instances=batch, 
-                    agent=agent, 
-                    old_probs=all_probabilities[agent_id], 
-                    states=all_states[agent_id], 
-                    actions=all_actions[agent_id], 
-                    actions_idx=all_actions_idx[agent_id], 
-                    advantages=advantages[agent_id], 
-                    old_values=flattened_values[agent_id], 
-                    returns=all_returns[agent_id], 
-                    instances_idx=all_instances_idx[agent_id], 
-                    all_related_items=all_related_items, 
-                    all_parents=all_parents)
-            print(f'\t Average Loss = {loss:.4f}')
+        losses = batch_result.compute_losses(agents)
+        for agent_id, (_, name) in enumerate(agents):
+            print(f'\t Average loss of agent {name} = {losses[agent_id]:.4f}')
 
 def PPO_train(agents: list[(Module, str)], path: str, solve_function: Callable, debug_mode: bool=False):
     device = "cuda" if not debug_mode and torch.cuda.is_available() else "cpu"
