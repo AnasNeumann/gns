@@ -28,7 +28,7 @@ class Agent_OneInstance:
         self.values: Tensor = Tensor([])
         self.rewards: Tensor = Tensor([])
         self.cumulative_returns: Tensor = Tensor([])
-        self.advantage: Tensor = Tensor([])
+        self.advantages: Tensor = Tensor([])
         if device == "cuda":
             self.related_items.to(device)
             self.parent_items.to(device)
@@ -36,7 +36,7 @@ class Agent_OneInstance:
             self.values.to(device)
             self.rewards.to(device)
             self.cumulative_returns.to(device)
-            self.advantage.to(device)
+            self.advantages.to(device)
 
     def add_step(self, state: State, probabilities: any, actions: Tuple[int, int], id: int, value: any):
         torch.cat((self.values, torch.Tensor([value])))
@@ -61,7 +61,7 @@ class Agent_OneInstance:
 
     # Value Loss = E_t[(values_t - cumulative_returns_t)^2]
     def compute_value_loss(self):
-        return torch.mean(torch.stack([(value - cumulative_return) ** 2 for value, cumulative_return in zip(self.values, self.returns)]))
+        return torch.mean(torch.stack([(value - cumulative_return) ** 2 for value, cumulative_return in zip(self.values, self.cumulative_returns)]))
     
     # delta_t = reward_t + gamma*value_(t+1) - value_t
     def temporal_difference_residual(self, t):
@@ -72,7 +72,7 @@ class Agent_OneInstance:
 
     # GAE_t [sum version] = delta_t + (lam*gamma)^1 * delta_(t+1) + ... + (lam*gamma)^T-t+1 * delta_T
     # GAE_t [recursive] = delta_t + (lam*gamma) * GAE_(t+1)
-    def compute_generalized_advantage_estimate(self):
+    def compute_generalized_advantage_estimates(self):
         GAE = 0
         T = len(self.states)
         advantages = np.zeros(T)
@@ -80,7 +80,7 @@ class Agent_OneInstance:
             delta = self.temporal_difference_residual(t)
             GAE = delta + self.gamma * self.lam * GAE
             advantages[t] = GAE
-        return advantages
+        self.advantages = torch.tensor(advantages, dtype=torch.float32)
 
     # Entropy bonus = E_t[-1 * SUM_a[probabilities(a|s_t) * LOG(probabilities(a|s_t))]] --> all probabilities!
     # ---------------------------------------------------------------------------------
@@ -106,9 +106,9 @@ class Agent_OneInstance:
 class MultiAgent_OneInstance:
     def __init__(self, agent_names: list[str], instance_id: int, related_items: Tensor, parent_items: Tensor, w_makespan: float, device: str):
         self.instance_id = instance_id
-        agents: list[Agent_OneInstance] = []
+        self.agents: list[Agent_OneInstance] = []
         for name in agent_names:
-            agents.append(Agent_OneInstance(name, related_items, parent_items, w_makespan, device))
+            self.agents.append(Agent_OneInstance(name, related_items, parent_items, w_makespan, device))
 
     def get(self, name: str) -> Agent_OneInstance:
         for agent in self.agents:
@@ -160,7 +160,7 @@ class MultiAgents_Batch:
                     agent_of_instance.lam = lam
                     agent_of_instance.clipping_ratio = clipping_ratio
                     agent_of_instance.compute_cumulative_returns()
-                    agent_of_instance.compute_generalized_advantage_estimate()
+                    agent_of_instance.compute_generalized_advantage_estimates()
                     agent.instances.append(agent_of_instance)
             self.agents_results.append(agent)
 
