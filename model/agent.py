@@ -48,6 +48,8 @@ class Agent_OneInstance:
     def add_reward(self, reward: any):
         torch.cat((self.rewards, torch.Tensor([reward])))
 
+    # R_t [sum version] = reward_t + gamma^1 * reward_(t+1) + ... + gamma^(T-t) * reward_T
+    # R_t [recusive] = reward_t + gamma(R_(t+1))
     def compute_cumulative_returns(self):
         R = 0
         T = len(self.rewards)
@@ -57,12 +59,19 @@ class Agent_OneInstance:
             returns[t] = R
         self.cumulative_returns = torch.tensor(returns, dtype=torch.float32)
 
+    # Value Loss = E_t[(values_t - cumulative_returns_t)^2]
+    def compute_value_loss(self):
+        return torch.mean(torch.stack([(value - cumulative_return) ** 2 for value, cumulative_return in zip(self.values, self.returns)]))
+    
+    # delta_t = reward_t + gamma*value_(t+1) - value_t
     def temporal_difference_residual(self, t):
         delta = self.rewards[t] - self.values[t]
         if t >= len(self.states) - 1:
             return delta
         return delta + (self.gamma * self.values[t+1])
 
+    # GAE_t [sum version] = delta_t + (lam*gamma)^1 * delta_(t+1) + ... + (lam*gamma)^T-t+1 * delta_T
+    # GAE_t [recursive] = delta_t + (lam*gamma) * GAE_(t+1)
     def compute_generalized_advantage_estimate(self):
         GAE = 0
         T = len(self.states)
@@ -73,6 +82,11 @@ class Agent_OneInstance:
             advantages[t] = GAE
         return advantages
 
+    # Entropy bonus = E_t[-1 * SUM_a[probabilities(a|s_t) * LOG(probabilities(a|s_t))]] --> all probabilities!
+    # ---------------------------------------------------------------------------------
+    # probability_ratio_t [basic version] = new_probabilities(a_t|s_t) / old_probabilities(a_t|s_t)  --> only for selected actions!
+    # probability_ratio_t [exp & log version] = e^[log_new_probabilities(a_t|s_t) - log_old_probabilities(a_t|s_t)]
+    # Policy Loss = E_t[min(probability_ratio_t, CLIP[1-e, probability_ratio_t, 1+e]) * GAE_t]
     def compute_PPO_losses(self, agent: Module):
         e = self.clipping_ratio
         log_new_probs = torch.Tensor([])
@@ -85,10 +99,9 @@ class Agent_OneInstance:
             log_new_probs = torch.cat((log_new_probs, torch.log(new_probabilities[old_action_id]+1e-8)))
             log_old_probs = torch.cat((log_old_probs, torch.log(self.probabilities[step][old_action_id]+1e-8)))
         ratio = torch.exp(log_new_probs - log_old_probs)
-        policy_loss = -torch.min(ratio * self.advantages, torch.clamp(ratio, 1-e, 1+e) * self.advantages).mean()
-        value_loss = torch.mean(torch.stack([(value - cumulative_return) ** 2 for value, cumulative_return in zip(self.values, self.returns)]))
+        policy_loss = torch.min(ratio * self.advantages, torch.clamp(ratio, 1-e, 1+e) * self.advantages).mean()
         entropy_bonus = torch.mean(entropies)
-        return policy_loss, value_loss, entropy_bonus
+        return policy_loss, self.compute_value_loss(), entropy_bonus
 
 class MultiAgent_OneInstance:
     def __init__(self, agent_names: list[str], instance_id: int, related_items: Tensor, parent_items: Tensor, w_makespan: float, device: str):
@@ -121,6 +134,8 @@ class Agent_Batch:
         self.weight_entropy_bonus: float = 0.01
         self.instances: list[Agent_OneInstance] = []
 
+    # Loss(max version) = w1*SUM_i[policy_loss] - w2*SUM_i[value_loss] + w3*SUM_i[entropy_bonus]
+    # Loss(min version) = -w1*SUM_i[policy_loss] + w2*SUM_i[value_loss] - w3*SUM_i[entropy_bonus]
     def compute_PPO_loss_over_batch(self, policy_losses: list[Tensor], value_losses: list[Tensor], entropy_bonuses: list[Tensor]):
         total_policy_loss = sum(policy_losses)
         total_value_loss = sum(value_losses)
@@ -128,7 +143,7 @@ class Agent_Batch:
         print(f"\t\t policy loss - {total_policy_loss}") 
         print(f"\t\t value loss - {total_value_loss}")
         print(f"\t\t entropy bonus - {total_entropy_bonus}")
-        return self.weight_policy_loss*total_policy_loss + self.weight_entropy_bonus*total_value_loss + self.weight_entropy_bonus*total_entropy_bonus
+        return -self.weight_policy_loss*total_policy_loss + self.weight_entropy_bonus*total_value_loss - self.weight_entropy_bonus*total_entropy_bonus
 
 class MultiAgents_Batch:
     def __init__(self, batch: list[MultiAgent_OneInstance], agent_names: list[str], gamma: float, lam: float, weight_policy_loss: float, weight_value_loss: float, weight_entropy_bonus: float, clipping_ratio: float):
