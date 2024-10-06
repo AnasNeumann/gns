@@ -25,13 +25,13 @@ __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
 LEARNING_RATE = 2e-4
-PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
+PROBLEM_SIZES = [['s'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
     "validation_rate": 10,
     "switch_batch": 20,
     "train_iterations": [10, 1000], 
     "opt_epochs": 3,
-    "batch_size": [4, 20],
+    "batch_size": [1, 20],
     "clip_ratio": 0.2,
     "policy_loss": 1.0,
     "value_loss": 0.5,
@@ -61,7 +61,7 @@ def search_instance(instances: list[Instance], id: int) -> Instance:
 
 def load_training_dataset(debug_mode: bool, path: str):
     instances = [] 
-    for size in PROBLEM_SIZES if not debug_mode else ['m']:
+    for size in PROBLEM_SIZES[0 if debug_mode else 1]:
         complete_path = path+directory.instances+'/train/'+size+'/'
         for i in os.listdir(complete_path):
             if i.endswith('.pkl'):
