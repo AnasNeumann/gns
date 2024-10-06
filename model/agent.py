@@ -1,4 +1,4 @@
-from graph import State
+from model.graph import State
 import torch
 from torch import Tensor
 from typing import Tuple

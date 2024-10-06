@@ -432,13 +432,16 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     previous_operations, next_operations = instance.build_next_and_previous_operations()
     t = 0
-    training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
-        agent_names=[name for _,name in agents], 
-        instance_id=instance.id,
-        related_items=graph.flatten_related_items(), 
-        parent_items=graph.flatten_parents(), 
-        w_makespan=instance.w_makespan,
-        device=device)
+    related_items = graph.flatten_related_items()
+    parent_items = graph.flatten_parents()
+    if train:
+        training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
+            agent_names=[name for _,name in agents], 
+            instance_id=instance.id,
+            related_items=related_items,
+            parent_items=parent_items,
+            w_makespan=instance.w_makespan,
+            device=device)
     old_cmax = current_cmax
     old_cost = current_cost
     terminate = False
@@ -450,7 +453,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
-            probs, state_value = agents[actions_type][AGENT](graph.to_state(), poss_actions, training_results.related_items, training_results.parents, instance.w_makespan)
+            probs, state_value = agents[actions_type][AGENT](graph.to_state(), poss_actions, related_items, parent_items, instance.w_makespan)
             idx = policy(probs, greedy=(not train))
             if train:
                 training_results.add_step(
