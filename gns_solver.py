@@ -457,7 +457,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
             idx = policy(probs, greedy=(not train))
             if train:
                 training_results.add_step(
-                    agent_name=actions_type, 
+                    agent_name=ACTIONS_NAMES[actions_type], 
                     state=graph.to_state(),
                     probabilities=probs.detach(),
                     actions=poss_actions,
@@ -492,7 +492,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
                     graph, shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e, debug_print)
                     current_cmax = max(current_cmax, shifted_project_estimated_end)
                 if train:
-                    training_results.add_reward(agent_name=OUTSOURCING, reward=reward(old_cmax, current_cmax, old_cost, current_cost, a=instance.w_makespan, use_cost=True))
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(old_cmax, current_cmax, old_cost, current_cost, a=instance.w_makespan, use_cost=True))
             elif actions_type == SCHEDULING:
                 operation_id, resource_id = poss_actions[idx]    
                 p, o = graph.operations_g2i[operation_id]
@@ -517,7 +517,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, operation_end, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
                 if train:
-                    training_results.add_reward(agent_name=SCHEDULING, reward=reward(old_cmax, current_cmax))
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(old_cmax, current_cmax))
             else:
                 operation_id, material_id = poss_actions[idx]
                 p, o = graph.operations_g2i[operation_id]
@@ -526,7 +526,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
                 if train:
-                    training_results.add_reward(agent_name=MATERIAL_USE, reward=reward(old_cmax, current_cmax))
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=reward(old_cmax, current_cmax))
             old_cost = current_cost
             old_cmax = current_cmax
         else: # NO OPERATIONS LEFT AT TIME T SEARCH FOR NEXT TIME
@@ -592,14 +592,14 @@ def load_trained_models(model_path):
     outsourcing_actor.load_state_dict(torch.load(model_path+'/outsourcing_weights.pth'))
     scheduling_actor.load_state_dict(torch.load(model_path+'/scheduling_weights.pth'))
     material_actor.load_state_dict(torch.load(model_path+'/material_weights.pth'))
-    return [(outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])]
 
 def init_new_models():
     shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
     outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    return [(outsourcing_actor, 'outsourcing'), (scheduling_actor, 'scheduling'), (material_actor, 'material')]
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])]
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII exact solver")

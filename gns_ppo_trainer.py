@@ -15,7 +15,7 @@ from torch.optim import Optimizer
 from debug.debug_gns import debug_printer
 from typing import Callable
 import numpy as np 
-from model.agent import MultiAgent_OneInstance, MultiAgents_Batch
+from model.agent import MultiAgent_OneInstance, MultiAgents_Batch, AgentLoss
 
 # ===========================================================
 # =*= PROXIMAL POLICY OPTIMIZATION (PPO) RELATE FUNCTIONS =*=
@@ -98,14 +98,16 @@ def async_solve_batch(agents: list[(Module, str)], batch: list[Instance], num_pr
     if train and epochs>0:
         for e in range(epochs):
             print(f"\t Optimization epoch: {e+1}/{epochs}")
-            losses = batch_result.compute_losses(agents)
+            losses: list[AgentLoss] = batch_result.compute_losses(agents)
             for agent_id, (_, name) in enumerate(agents):
-                print(f"\t\t Optimizing agent: {name}...")
-                optimize(optimizers[agent_id], losses[agent_id])
+                if losses[agent_id].has_states:
+                    print(f"\t\t Optimizing agent: {name}...")
+                    optimize(optimizers[agent_id], losses[agent_id].loss_value)
     else:
-        losses = batch_result.compute_losses(agents)
+        losses: list[AgentLoss] = batch_result.compute_losses(agents)
         for agent_id, (_, name) in enumerate(agents):
-            print(f'\t Average loss of agent {name} = {losses[agent_id]:.4f}')
+            if losses[agent_id].has_states:
+                print(f'\t Average loss of agent {name} = {losses[agent_id].loss_value:.4f}')
 
 def PPO_train(agents: list[(Module, str)], path: str, solve_function: Callable, debug_mode: bool=False):
     device = "cuda" if not debug_mode and torch.cuda.is_available() else "cpu"
