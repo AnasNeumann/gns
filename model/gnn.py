@@ -253,20 +253,28 @@ class L1_EmbbedingGNN(Module):
         state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources], dim=-1)[0]
         return state, torch.cat([state_embedding, torch.tensor([alpha])], dim=0)
 
+class L1_CommonCritic(Module):
+    def __init__(self, embedding_size: int, critic_hidden_channels: int):
+        super(L1_CommonCritic, self).__init__()
+        self.critic_mlp = Sequential(
+            Linear((embedding_size * 4) + 1, critic_hidden_channels), Tanh(),
+            Linear(critic_hidden_channels, critic_hidden_channels), Tanh(), 
+            Linear(critic_hidden_channels, 1)
+        )
+
+    def forward(self, state_embedding: Tensor):
+        return self.critic_mlp(state_embedding)
+
 class L1_OutousrcingActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size: int, actor_critic_hidden_channels: int):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, shared_critic_mlp: L1_CommonCritic, embedding_size: int, actor_hidden_channels: int):
         super(L1_OutousrcingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
+        self.critic_mlp = shared_critic_mlp
         self.actor_input_size = (embedding_size * 5) + 2
         self.actor = Sequential(
-            Linear(self.actor_input_size, actor_critic_hidden_channels), Tanh(),
-            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(),
-            Linear(actor_critic_hidden_channels, 1)
-        )
-        self.critic_mlp = Sequential(
-            Linear((embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
-            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(), 
-            Linear(actor_critic_hidden_channels, 1)
+            Linear(self.actor_input_size, actor_hidden_channels), Tanh(),
+            Linear(actor_hidden_channels, actor_hidden_channels), Tanh(),
+            Linear(actor_hidden_channels, 1)
         )
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: float):
@@ -280,19 +288,15 @@ class L1_OutousrcingActor(Module):
         return action_probs, state_value
     
 class L1_SchedulingActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size: int, actor_critic_hidden_channels: int):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN,  shared_critic_mlp: L1_CommonCritic, embedding_size: int, actor_hidden_channels: int):
         super(L1_SchedulingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
+        self.critic_mlp = shared_critic_mlp
         self.actor_input_size = (embedding_size * 6) + 1
         self.actor = Sequential(
-            Linear(self.actor_input_size, actor_critic_hidden_channels), Tanh(),
-            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(),
-            Linear(actor_critic_hidden_channels, 1)
-        )
-        self.critic_mlp = Sequential(
-            Linear((embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
-            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(), 
-            Linear(actor_critic_hidden_channels, 1)
+            Linear(self.actor_input_size, actor_hidden_channels), Tanh(),
+            Linear(actor_hidden_channels, actor_hidden_channels), Tanh(),
+            Linear(actor_hidden_channels, 1)
         )
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: float):
@@ -306,19 +310,15 @@ class L1_SchedulingActor(Module):
         return action_probs, state_value
 
 class L1_MaterialActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, embedding_size: int, actor_critic_hidden_channels: int):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, shared_critic_mlp: L1_CommonCritic, embedding_size: int, actor_hidden_channels: int):
         super(L1_MaterialActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
+        self.critic_mlp = shared_critic_mlp
         self.actor_input_size = (embedding_size * 6) + 1
         self.actor = Sequential(
-            Linear(self.actor_input_size, actor_critic_hidden_channels), Tanh(),
-            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(),
-            Linear(actor_critic_hidden_channels, 1)
-        )
-        self.critic_mlp = Sequential(
-            Linear((embedding_size * 4) + 1, actor_critic_hidden_channels), Tanh(),
-            Linear(actor_critic_hidden_channels, actor_critic_hidden_channels), Tanh(), 
-            Linear(actor_critic_hidden_channels, 1)
+            Linear(self.actor_input_size, actor_hidden_channels), Tanh(),
+            Linear(actor_hidden_channels, actor_hidden_channels), Tanh(),
+            Linear(actor_hidden_channels, 1)
         )
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: float):

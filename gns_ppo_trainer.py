@@ -46,9 +46,10 @@ def reward(makespan_old: int, makespan_new: int, cost_old: int=-1, cost_new: int
     else:
         return makespan_old - makespan_new
 
-def save_models(agents: list[(Module, str)], embedding_stack: Module, path: str):
+def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, path: str):
     complete_path = path + directory.models
     torch.save(embedding_stack.state_dict(), complete_path+'/gnn_weights.pth')
+    torch.save(shared_critic.state_dict(), complete_path+'/critic_weights.pth')
     for agent, name in agents:
         torch.save(agent.state_dict(), complete_path+'/'+name+'_weights.pth')
 
@@ -70,11 +71,11 @@ def load_training_dataset(debug_mode: bool, path: str):
     print(f"End of loading {len(instances)} instances!")
     return instances
 
-def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, debug: bool):
+def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, debug: bool):
     instances_results: list[MultiAgent_OneInstance] = []
     for instance in batch:
         print(f"\t start solving instance: {instance.id}...")
-        instances_results.append(solve_function(instance, agents, train=True, debug_mode=debug))
+        instances_results.append(solve_function(instance, agents, train=True, device=device, debug_mode=debug))
     batch_result: MultiAgents_Batch = MultiAgents_Batch(
         batch=instances_results, 
         agent_names=[name for _,name in agents], 
@@ -96,7 +97,7 @@ def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],t
         loss: Tensor = batch_result.compute_losses(agents)
         print(f'\t Multi-agent batch loss: {loss:.4f}')
 
-def PPO_train(agents: list[(Module, str)], embedding_stack: Module, path: str, solve_function: Callable, debug_mode: bool=False):
+def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, path: str, solve_function: Callable, debug_mode: bool=False):
     torch.autograd.set_detect_anomaly(True)
     device = "cuda" if not debug_mode and torch.cuda.is_available() else "cpu"
     iterations: int =PPO_CONF['train_iterations'][0 if debug_mode else 1]
@@ -105,11 +106,13 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: Module, path: str, s
     debug_print: Callable = debug_printer(debug_mode)
     instances: list[Instance] = load_training_dataset(path=path, debug_mode=debug_mode)
     optimizer = torch.optim.Adam(
-        list(embedding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()), 
+        list(shared_critic.parameters()) + list(embedding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()), 
         lr=LEARNING_RATE
     )
     embedding_stack.train()
     embedding_stack.to(device)
+    shared_critic.train()
+    shared_critic.to(device)
     for agent,_ in agents:
         agent.train()
         if device == "cuda":
@@ -122,16 +125,16 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: Module, path: str, s
         if iteration % PPO_CONF['switch_batch'] == 0:
             debug_print(f"\t time to sample new batch of size {batch_size}...")
             current_batch = random.sample(train_instances, batch_size)
-        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=optimizer, solve_function=solve_function, debug=debug_mode)
+        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=optimizer, solve_function=solve_function, device=device, debug=debug_mode)
         if iteration % PPO_CONF['validation_rate'] == 0:
             debug_print("\t time to validate the loss...")
             for agent,_ in agents:
                 agent.eval()
             embedding_stack.eval()
             with torch.no_grad():
-                train_or_validate_batch(agents, val_instances, train=False, epochs=-1, optimizer=None, solve_function=solve_function, debug=debug_mode)
+                train_or_validate_batch(agents, val_instances, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode)
             for agent,_ in agents:
                 agent.train()
             embedding_stack.train()
-    save_models(agents, embedding_stack, path=path)
+    save_models(agents, embedding_stack, shared_critic, path=path)
     print("<======***--| END OF TRAINING |--***======>")

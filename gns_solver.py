@@ -1,7 +1,7 @@
 import argparse
 from model.instance import Instance
 from model.graph import GraphInstance, NO, NOT_YET, YES
-from model.gnn import L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor
+from model.gnn import L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, L1_CommonCritic
 from common import load_instance, to_bool, directory
 import torch
 torch.autograd.set_detect_anomaly(True)
@@ -418,11 +418,7 @@ def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
     else:
         return ((current_time // scale) + 1) * scale
 
-def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", train: bool=False, debug_mode: bool=False):
-    device = "cuda" if not debug_mode and torch.cuda.is_available() else "cpu"
-    if device == "cuda":
-        for agent,_ in agents:
-            agent.to(device)
+def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", train: bool=False, device:str = 'cpu', debug_mode: bool=False):
     debug_print = debug_printer(debug_mode)
     debug_print(instance.display())
     start_time = systime.time()
@@ -585,20 +581,23 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
 def load_trained_models(model_path):
     shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
     shared_GNN.load_state_dict(torch.load(model_path+'/gnn_weights.pth'))
-    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    shared_critic.load_state_dict(torch.load(model_path+'/critic_weights.pth'))
+    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     outsourcing_actor.load_state_dict(torch.load(model_path+'/outsourcing_weights.pth'))
     scheduling_actor.load_state_dict(torch.load(model_path+'/scheduling_weights.pth'))
     material_actor.load_state_dict(torch.load(model_path+'/material_weights.pth'))
-    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 def init_new_models():
     shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
-    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN
+    shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII exact solver")
@@ -615,8 +614,8 @@ if __name__ == '__main__':
             Test training mode with: bash _env.sh
             python gns_solver.py --train=true --mode=test --path=./
         '''
-        agent, shared_gnn = init_new_models()
-        PPO_train(agent, shared_gnn, path=args.path, solve_function=solve_one, debug_mode=debug_mode)
+        agent, shared_embbeding_stack, shared_critic = init_new_models()
+        PPO_train(agent, shared_embbeding_stack, shared_critic, path=args.path, solve_function=solve_one, debug_mode=debug_mode)
     else:
         '''
             Test inference mode with: bash _env.sh
@@ -624,6 +623,12 @@ if __name__ == '__main__':
         '''
         print(f"SOLVE TARGET INSTANCE {args.size}_{args.id}...")
         instance: Instance = load_instance(args.path+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl')
-        agents, shared_gnn = init_new_models() if args.mode == 'test' else load_trained_models(args.path+directory.models) 
-        solve_one(instance, agents, path=args.path+directory.instances+'/test/'+args.size+'/solution_gns_'+args.id+'.csv', train=False, debug_mode=debug_mode)
+        agents, shared_embbeding_stack, shared_critic = init_new_models() if args.mode == 'test' else load_trained_models(args.path+directory.models) 
+        device = "cuda" if not debug_mode and torch.cuda.is_available() else "cpu"
+        if device == "cuda":
+            for agent,_ in agents:
+                agent.to(device)
+            shared_embbeding_stack.to(device)
+            shared_critic.to(device)
+        solve_one(instance, agents, path=args.path+directory.instances+'/test/'+args.size+'/solution_gns_'+args.id+'.csv', train=False, device=device, debug_mode=debug_mode)
     print("===* END OF FILE *===")
