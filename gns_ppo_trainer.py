@@ -20,13 +20,13 @@ __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
 LEARNING_RATE = 2e-4
-PROBLEM_SIZES = [['s'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
+PROBLEM_SIZES = [['s', 'm'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
     "validation_rate": 10,
     "switch_batch": 20,
     "train_iterations": [10, 1000], 
     "opt_epochs": 3,
-    "batch_size": [1, 20],
+    "batch_size": [3, 20],
     "clip_ratio": 0.2,
     "policy_loss": 1.0,
     "value_loss": 0.5,
@@ -89,7 +89,7 @@ def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],t
             print(f"\t Optimization epoch: {e+1}/{epochs}")
             optimizer.zero_grad()
             loss: Tensor = batch_result.compute_losses(agents)
-            print(f"\t Multi-agent batch loss: {loss} - Differentiable computation grapgh = {loss.requires_grad}!")
+            print(f"\t Multi-agent batch loss: {loss} - Differentiable computation graph = {loss.requires_grad}!")
             loss.backward(retain_graph=False)
             optimizer.step()
     else:
