@@ -1,21 +1,16 @@
 import pickle
-from torch.multiprocessing import Pool
 import os
 from model.instance import Instance
-from model.graph import State
-from common import init_several_1D, search_object_by_id, generic_object, directory
+from common import directory
 import torch
 torch.autograd.set_detect_anomaly(True)
 import random
-import multiprocessing
-from typing import Tuple
 from torch import Tensor
 from torch.nn import Module
 from torch.optim import Optimizer
 from debug.debug_gns import debug_printer
 from typing import Callable
-import numpy as np 
-from model.agent import MultiAgent_OneInstance, MultiAgents_Batch, AgentLoss
+from model.agent import MultiAgent_OneInstance, MultiAgents_Batch
 
 # ===========================================================
 # =*= PROXIMAL POLICY OPTIMIZATION (PPO) RELATE FUNCTIONS =*=
@@ -40,6 +35,10 @@ PPO_CONF = {
     "bias_variance_tradeoff": 1.0,
     'validation_ratio': 0.1
 }
+AGENT = 0
+OUTSOURCING = 0
+SCHEDULING = 1
+MATERIAL_USE = 2
 
 def reward(makespan_old: int, makespan_new: int, cost_old: int=-1, cost_new: int=-1, a: float=-1, use_cost: bool=False):
     if use_cost:
@@ -47,9 +46,9 @@ def reward(makespan_old: int, makespan_new: int, cost_old: int=-1, cost_new: int
     else:
         return makespan_old - makespan_new
 
-def save_models(agents: list[(Module, str)], path):
+def save_models(agents: list[(Module, str)], embedding_stack: Module, path: str):
     complete_path = path + directory.models
-    torch.save(agents[0].shared_embedding_layers.state_dict(), complete_path+'/gnn_weights.pth')
+    torch.save(embedding_stack.state_dict(), complete_path+'/gnn_weights.pth')
     for agent, name in agents:
         torch.save(agent.state_dict(), complete_path+'/'+name+'_weights.pth')
 
@@ -71,21 +70,11 @@ def load_training_dataset(debug_mode: bool, path: str):
     print(f"End of loading {len(instances)} instances!")
     return instances
 
-def optimize(optimizer: Optimizer, loss: float):
-    optimizer.zero_grad()
-    loss.backward(retain_graph=False)
-    optimizer.step()
-
-def async_solve_one(init_args: Tuple[list, Instance, bool, Callable]):
-    agents, instance, debug_mode, solve_function = init_args
-    print(f"\t start solving instance: {instance.id}...")
-    result = solve_function(instance, agents, train=True, debug_mode=debug_mode)
-    print(f"\t end solving instance: {instance.id}!")
-    return result
-
-def async_solve_batch(agents: list[(Module, str)], batch: list[Instance], num_processes: int, train: bool, epochs: int, optimizers: list[Optimizer], solve_function: Callable, debug: bool):
-    with Pool(num_processes) as pool:
-        instances_results: list[MultiAgent_OneInstance] = pool.map(async_solve_one, [(agents, instance, debug, solve_function) for instance in batch])
+def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, debug: bool):
+    instances_results: list[MultiAgent_OneInstance] = []
+    for instance in batch:
+        print(f"\t start solving instance: {instance.id}...")
+        instances_results.append(solve_function(instance, agents, train=True, debug_mode=debug))
     batch_result: MultiAgents_Batch = MultiAgents_Batch(
         batch=instances_results, 
         agent_names=[name for _,name in agents], 
@@ -95,29 +84,32 @@ def async_solve_batch(agents: list[(Module, str)], batch: list[Instance], num_pr
         weight_value_loss=PPO_CONF['value_loss'], 
         weight_entropy_bonus=PPO_CONF['entropy'],
         clipping_ratio=PPO_CONF['clip_ratio'])
-    if train and epochs>0:
+    if train:
         for e in range(epochs):
             print(f"\t Optimization epoch: {e+1}/{epochs}")
-            losses: list[AgentLoss] = batch_result.compute_losses(agents)
-            for agent_id, (_, name) in enumerate(agents):
-                if losses[agent_id].has_states:
-                    print(f"\t\t Optimizing agent: {name}...")
-                    optimize(optimizers[agent_id], losses[agent_id].loss_value)
+            optimizer.zero_grad()
+            loss: Tensor = batch_result.compute_losses(agents)
+            print(f"\t Multi-agent batch loss: {loss} - Differentiable computation grapgh = {loss.requires_grad}!")
+            loss.backward(retain_graph=False)
+            optimizer.step()
     else:
-        losses: list[AgentLoss] = batch_result.compute_losses(agents)
-        for agent_id, (_, name) in enumerate(agents):
-            if losses[agent_id].has_states:
-                print(f'\t Average loss of agent {name} = {losses[agent_id].loss_value:.4f}')
+        loss: Tensor = batch_result.compute_losses(agents)
+        print(f'\t Multi-agent batch loss: {loss:.4f}')
 
-def PPO_train(agents: list[(Module, str)], path: str, solve_function: Callable, debug_mode: bool=False):
+def PPO_train(agents: list[(Module, str)], embedding_stack: Module, path: str, solve_function: Callable, debug_mode: bool=False):
+    torch.autograd.set_detect_anomaly(True)
     device = "cuda" if not debug_mode and torch.cuda.is_available() else "cpu"
-    iterations=PPO_CONF['train_iterations'][0 if debug_mode else 1]
-    batch_size=PPO_CONF['batch_size'][0 if debug_mode else 1]
-    epochs=PPO_CONF['opt_epochs']
-    validation_rate=PPO_CONF['validation_rate'],
-    debug_print = debug_printer(debug_mode)
-    instances = load_training_dataset(path=path, debug_mode=debug_mode)
-    optimizers = [torch.optim.Adam(agent.parameters(), lr=LEARNING_RATE) for agent,_ in agents]
+    iterations: int =PPO_CONF['train_iterations'][0 if debug_mode else 1]
+    batch_size: int =PPO_CONF['batch_size'][0 if debug_mode else 1]
+    epochs: int =PPO_CONF['opt_epochs']
+    debug_print: Callable = debug_printer(debug_mode)
+    instances: list[Instance] = load_training_dataset(path=path, debug_mode=debug_mode)
+    optimizer = torch.optim.Adam(
+        list(embedding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()), 
+        lr=LEARNING_RATE
+    )
+    embedding_stack.train()
+    embedding_stack.to(device)
     for agent,_ in agents:
         agent.train()
         if device == "cuda":
@@ -125,21 +117,21 @@ def PPO_train(agents: list[(Module, str)], path: str, solve_function: Callable, 
     random.shuffle(instances)
     num_val = int(len(instances) * PPO_CONF['validation_ratio'])
     train_instances, val_instances = instances[num_val:], instances[:num_val]
-    num_processes = multiprocessing.cpu_count() if not debug_mode else 1
-    print(f"Start training models with PPO running on {num_processes} TPUs in parallel...")
     for iteration in range(iterations):
         print(f"PPO iteration: {iteration+1}/{iterations}:")
         if iteration % PPO_CONF['switch_batch'] == 0:
             debug_print(f"\t time to sample new batch of size {batch_size}...")
             current_batch = random.sample(train_instances, batch_size)
-        async_solve_batch(agents, current_batch, num_processes, train=True, epochs=epochs, optimizers=optimizers, solve_function=solve_function, debug=debug_mode)
-        if iteration % validation_rate == 0:
+        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=optimizer, solve_function=solve_function, debug=debug_mode)
+        if iteration % PPO_CONF['validation_rate'] == 0:
             debug_print("\t time to validate the loss...")
             for agent,_ in agents:
                 agent.eval()
+            embedding_stack.eval()
             with torch.no_grad():
-                async_solve_batch(agents, val_instances, num_processes, train=False, epochs=-1, optimizers=[], debug=debug_mode)
+                train_or_validate_batch(agents, val_instances, train=False, epochs=-1, optimizer=None, solve_function=solve_function, debug=debug_mode)
             for agent,_ in agents:
                 agent.train()
-    save_models(agents, path=path)
+            embedding_stack.train()
+    save_models(agents, embedding_stack, path=path)
     print("<======***--| END OF TRAINING |--***======>")

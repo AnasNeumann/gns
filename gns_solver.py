@@ -1,5 +1,4 @@
 import argparse
-from torch.multiprocessing import set_start_method
 from model.instance import Instance
 from model.graph import GraphInstance, NO, NOT_YET, YES
 from model.gnn import L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor
@@ -592,14 +591,14 @@ def load_trained_models(model_path):
     outsourcing_actor.load_state_dict(torch.load(model_path+'/outsourcing_weights.pth'))
     scheduling_actor.load_state_dict(torch.load(model_path+'/scheduling_weights.pth'))
     material_actor.load_state_dict(torch.load(model_path+'/material_weights.pth'))
-    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])]
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN
 
 def init_new_models():
     shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
     outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])]
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII exact solver")
@@ -611,16 +610,13 @@ if __name__ == '__main__':
     args = parser.parse_args()
     print(f"Execution mode: {args.mode}...")
     debug_mode = (args.mode == 'test')
-    try:
-        set_start_method('spawn')
-    except RuntimeError:
-        pass
     if to_bool(args.train):
         '''
             Test training mode with: bash _env.sh
             python gns_solver.py --train=true --mode=test --path=./
         '''
-        PPO_train(init_new_models(), path=args.path, solve_function=solve_one, debug_mode=debug_mode)
+        agent, shared_gnn = init_new_models()
+        PPO_train(agent, shared_gnn, path=args.path, solve_function=solve_one, debug_mode=debug_mode)
     else:
         '''
             Test inference mode with: bash _env.sh
@@ -628,6 +624,6 @@ if __name__ == '__main__':
         '''
         print(f"SOLVE TARGET INSTANCE {args.size}_{args.id}...")
         instance: Instance = load_instance(args.path+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl')
-        agents: list[(Module, str)] = init_new_models() if args.mode == 'test' else load_trained_models(args.path+directory.models) 
+        agents, shared_gnn = init_new_models() if args.mode == 'test' else load_trained_models(args.path+directory.models) 
         solve_one(instance, agents, path=args.path+directory.instances+'/test/'+args.size+'/solution_gns_'+args.id+'.csv', train=False, debug_mode=debug_mode)
     print("===* END OF FILE *===")

@@ -13,10 +13,6 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-OUTSOURCING = "outsourcing"
-SCHEDULING = "scheduling"
-MATERIAL_USE = "material_use"
-
 class MaterialEmbeddingLayer(Module):
     def __init__(self, material_dimension: int, operation_dimension: int, embedding_dimension: int):
         super(MaterialEmbeddingLayer, self).__init__()
