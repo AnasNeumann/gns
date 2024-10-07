@@ -1,6 +1,5 @@
 import sys
 import argparse
-from common import directory
 
 # =====================================================
 # =*= CODE TO GENERATE JOBS FOR THE GNS SOLVER =*=
@@ -15,7 +14,7 @@ SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 
 '''
     TEST WITH
-    python gns_builder.py --account=x --parent=y --mail=x@mail.com --time=10 --memory=187 --cpu=16
+    python gns_builder.py --account=x --parent=y --mail=x@mail.com --time=20 --memory=187 --cpu=16
 '''
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII job builder")
@@ -38,12 +37,12 @@ if __name__ == '__main__':
     f.write(f"#SBATCH --mail-user={args.mail}\n")
     f.write("#SBATCH --gres=gpu:1\n")
     f.write("#SBATCH --mail-type=FAIL\n")
-    f.write(f"#SBATCH --output={BASIC_PATH+directory.out}/train_gns.out\n")  
+    f.write(f"#SBATCH --output={BASIC_PATH}data/out/train_gns.out\n")  
     f.write("module load python/3.12\n")
     f.write("virtualenv --no-download $SLURM_TMPDIR/env\n")
     f.write("source $SLURM_TMPDIR/env/bin/activate\n")
     f.write("pip install --upgrade pip --no-index\n")
     f.write("pip install --no-index -r "+BASIC_PATH+"requirements.txt\n")
-    f.write(f"python {BASIC_PATH}/gns_solver.py --train=1 --mode=prod --path="+BASIC_PATH+" \n")
+    f.write(f"python {BASIC_PATH}gns_solver.py --train=true --mode=prod --path="+BASIC_PATH+" \n")
     f.write("deactivate\n")
     f.close()

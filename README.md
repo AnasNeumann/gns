@@ -35,7 +35,8 @@ python gns_solver.py --train=true --mode=test --path=./
 # Generate exact jobs for DRAC production
 * _DRAC = Digital Research Alliance of Canada_
 ```python
-python ./jobs/exact_builder.py --account=x --parent=y --mail=x@mail.com --time=3 --memory=187 --cpu=16
+# job duration, number of CPUs, and memory used are dynamically related to the instance size (no GPU/TPU for exact jobs)
+python ./jobs/exact_builder.py --account=x --parent=y --mail=x@mail.com
 ```
 
 # Generate the GNS training job for DRAC production
