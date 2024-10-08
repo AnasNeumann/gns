@@ -25,12 +25,12 @@ if __name__ == '__main__':
     parser.add_argument("--memory", help="Computing RAM", required=True)
     parser.add_argument("--cpu", help="Computing CPUs", required=True)
     args = parser.parse_args()
-    BASIC_PATH = "/home/"+args.account+"/projects/def-"+args.parent+"/"+args.account+"/GNS/"
+    BASIC_PATH = "/home/"+args.account+"/projects/def-"+args.parent+"/"+args.account+"/gns/"
 
     f = open("./scripts/train_gns.sh", "w+")
     f.write("#!/bin/bash\n")
     f.write("#SBATCH --nodes 1\n")
-    f.write(f"#SBATCH --time={args.time}\n")
+    f.write(f"#SBATCH --time={args.time}:00:00\n")
     f.write(f"#SBATCH --mem={args.memory}G\n")
     f.write(f"#SBATCH --cpus-per-task={args.cpu}\n")
     f.write(f"#SBATCH --account=def-{args.parent}\n")

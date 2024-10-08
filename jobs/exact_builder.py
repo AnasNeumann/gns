@@ -25,7 +25,7 @@ if __name__ == '__main__':
     parser.add_argument("--parent", help="Compute Canada Parent Account", required=True)
     parser.add_argument("--mail", help="Compute Canada Email Adress", required=True)
     args = parser.parse_args()
-    BASIC_PATH = "/home/"+args.account+"/projects/def-"+args.parent+"/"+args.account+"/GNS/"
+    BASIC_PATH = "/home/"+args.account+"/projects/def-"+args.parent+"/"+args.account+"/gns/"
     for size_id, size in enumerate(SIZES):
         for instance in range(START_IDX, END_IDX+1):
             f = open(f"./scripts/exact/{size}/{instance}.sh", "w+")
