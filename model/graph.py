@@ -245,17 +245,17 @@ class GraphInstance():
         self.graph[node_1, relation, node_2].edge_index = torch.cat([self.graph[node_1, relation, node_2].edge_index, idx], dim=1) if (node_1, relation, node_2) in self.graph.edge_types else idx
 
     def add_same_types(self, res_1: int, res_2: int):
-        self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_1, res_2), self.device)
-        self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_2, res_1), self.device)
+        self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_1, res_2, self.device))
+        self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_2, res_1, self.device))
 
     def add_item_assembly(self, parent_id: int, child_id: int):
-        self.add_edge_no_features('item', 'parent', 'item', id2tensor(parent_id, child_id), self.device)
+        self.add_edge_no_features('item', 'parent', 'item', id2tensor(parent_id, child_id, self.device))
 
     def add_operation_assembly(self, item_id: int, operation_id: int):
-        self.add_edge_no_features('item', 'has', 'operation', id2tensor(item_id, operation_id), self.device)
+        self.add_edge_no_features('item', 'has', 'operation', id2tensor(item_id, operation_id, self.device))
 
     def add_precedence(self, prec_id: int, succ_id: int):
-        self.add_edge_no_features('operation', 'precedes', 'operation', id2tensor(prec_id, succ_id), self.device)
+        self.add_edge_no_features('operation', 'precedes', 'operation', id2tensor(prec_id, succ_id, self.device))
 
     def add_edge_with_features(self, node_1: str, relation: str, node_2: str, idx: Tensor, features: Tensor):
         exists = (node_1, relation, node_2) in self.graph.edge_types
