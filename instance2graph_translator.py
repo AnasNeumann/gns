@@ -131,7 +131,7 @@ def build_precedence(i: Instance, graph: GraphInstance):
     return graph
 
 def translate(i: Instance, device: str):
-    graph = GraphInstance()
+    graph = GraphInstance(device=device)
     for rt in range(i.nb_resource_types):
         resources = i.resources_by_type(rt)
         operations = i.operations_by_resource_type(rt)
@@ -167,5 +167,4 @@ def translate(i: Instance, device: str):
     graph.items_i2g = graph.build_i2g_2D(graph.items_g2i)
     graph.add_dummy_item(device=device)
     graph = build_precedence(i, graph)
-    graph.to(device)
     return graph, Cmax_lower_bound, cost_lower_bound

@@ -64,8 +64,8 @@ class OperationFeatures:
         self.end_time = end_time
         self.is_possible = is_possible
     
-    def to_tensor_features(self):
-        return features2tensor([self.design, self.sync, self.timescale_hours, self.timescale_days, self.direct_successors, self.total_successors, self.remaining_time, self.remaining_resources, self.remaining_materials, self.available_time, self.end_time, self.is_possible])
+    def to_tensor_features(self, device: str):
+        return features2tensor([self.design, self.sync, self.timescale_hours, self.timescale_days, self.direct_successors, self.total_successors, self.remaining_time, self.remaining_resources, self.remaining_materials, self.available_time, self.end_time, self.is_possible], device)
     
 class ResourceFeatures:
     def __init__(self, utilization_ratio: num_feature, available_time: num_feature, executed_operations: num_feature, remaining_operations: num_feature, similar_resources: num_feature):
@@ -75,8 +75,8 @@ class ResourceFeatures:
         self.remaining_operations = remaining_operations
         self.similar_resources = similar_resources
     
-    def to_tensor_features(self):
-        return features2tensor([self.utilization_ratio, self.available_time, self.executed_operations, self.remaining_operations, self.similar_resources])
+    def to_tensor_features(self, device: str):
+        return features2tensor([self.utilization_ratio, self.available_time, self.executed_operations, self.remaining_operations, self.similar_resources], device)
     
 class MaterialFeatures:
     def __init__(self, remaining_init_quantity: num_feature, arrival_time: num_feature, remaining_demand: num_feature):
@@ -84,8 +84,8 @@ class MaterialFeatures:
        self.arrival_time = arrival_time
        self.remaining_demand = remaining_demand
 
-    def to_tensor_features(self):
-        return features2tensor([self.remaining_init_quantity, self.arrival_time, self.remaining_demand])
+    def to_tensor_features(self, device: str):
+        return features2tensor([self.remaining_init_quantity, self.arrival_time, self.remaining_demand], device)
     
 class ItemFeatures:
     def __init__(self, head: num_feature, external: num_feature, outsourced: num_feature, outsourcing_cost: num_feature, outsourcing_time: num_feature, remaining_physical_time: num_feature, remaining_design_time: num_feature, parents: num_feature, children: num_feature, parents_physical_time: num_feature, children_time: num_feature, start_time: num_feature, end_time: num_feature, is_possible: num_feature):
@@ -104,8 +104,8 @@ class ItemFeatures:
         self.end_time = end_time
         self.is_possible = is_possible
 
-    def to_tensor_features(self):
-        return features2tensor([self.head, self.external, self.outsourced, self.outsourcing_cost, self.outsourcing_time, self.remaining_physical_time, self.remaining_design_time, self.parents, self.children, self.parents_physical_time, self.children_time, self.start_time, self.end_time, self.is_possible])
+    def to_tensor_features(self, device: str):
+        return features2tensor([self.head, self.external, self.outsourced, self.outsourcing_cost, self.outsourcing_time, self.remaining_physical_time, self.remaining_design_time, self.parents, self.children, self.parents_physical_time, self.children_time, self.start_time, self.end_time, self.is_possible], device)
 
 class NeedForResourceFeatures:
     def __init__(self, status: num_feature, basic_processing_time: num_feature, current_processing_time: num_feature, start_time: num_feature, end_time: num_feature):
@@ -115,8 +115,8 @@ class NeedForResourceFeatures:
         self.start_time = start_time
         self.end_time = end_time
 
-    def to_tensor_features(self):
-        return features2tensor([self.status, self.basic_processing_time, self.current_processing_time, self.start_time, self.end_time])
+    def to_tensor_features(self, device: str):
+        return features2tensor([self.status, self.basic_processing_time, self.current_processing_time, self.start_time, self.end_time], device)
 
 class NeedForMaterialFeatures:
     def __init__(self, status: num_feature, execution_time: num_feature, quantity_needed: num_feature):
@@ -124,8 +124,8 @@ class NeedForMaterialFeatures:
         self.execution_time = execution_time
         self.quantity_needed = quantity_needed
 
-    def to_tensor_features(self):
-        return features2tensor([self.status, self.execution_time, self.quantity_needed])
+    def to_tensor_features(self, device: str):
+        return features2tensor([self.status, self.execution_time, self.quantity_needed], device)
 
 class FeatureConfiguration:
     def __init__(self):
@@ -185,7 +185,7 @@ class FeatureConfiguration:
         }
 
 class GraphInstance():
-    def __init__(self):
+    def __init__(self, device: str):
         self.operations_g2i = []
         self.items_g2i = []
         self.resources_g2i = []
@@ -201,22 +201,20 @@ class GraphInstance():
         self.project_heads = []
         self.features = FeatureConfiguration()
         self.graph = HeteroData()
-        self.device = 'cpu'
-
-    def to(self, device: str):
-        self.graph.to(device=device)
+        self.device = device
+        self.graph.to(device)
 
     def add_node(self, type: str, features: Tensor):
         self.graph[type].x = torch.cat([self.graph[type].x, features], dim=0) if type in self.graph.node_types else features
 
     def add_operation(self, p: int, o: int, features: OperationFeatures):
         self.operations_g2i.append((p, o))
-        self.add_node('operation', features.to_tensor_features())
+        self.add_node('operation', features.to_tensor_features(self.device))
         return len(self.operations_g2i)-1
 
     def add_item(self, p: int, i: int, features: ItemFeatures):
         self.items_g2i.append((p, i))
-        self.add_node('item', features.to_tensor_features())
+        self.add_node('item', features.to_tensor_features(self.device))
         id = len(self.items_g2i)-1
         if features.head == YES:
             self.project_heads.append(id)
@@ -233,31 +231,31 @@ class GraphInstance():
 
     def add_material(self, m: int, features: MaterialFeatures):
         self.materials_g2i.append(m)
-        self.add_node('material', features.to_tensor_features())
+        self.add_node('material', features.to_tensor_features(self.device))
         return len(self.materials_g2i)-1
 
     def add_resource(self, r: int, nb_settings: int, features: ResourceFeatures):
         self.resources_g2i.append(r)
         self.current_design_value.append([-1 for _ in range(nb_settings)])
         self.current_operation_type.append(-1)
-        self.add_node('resource', features.to_tensor_features())
+        self.add_node('resource', features.to_tensor_features(self.device))
         return len(self.resources_g2i)-1
 
     def add_edge_no_features(self, node_1: str, relation: str, node_2: str, idx: Tensor):
         self.graph[node_1, relation, node_2].edge_index = torch.cat([self.graph[node_1, relation, node_2].edge_index, idx], dim=1) if (node_1, relation, node_2) in self.graph.edge_types else idx
 
     def add_same_types(self, res_1: int, res_2: int):
-        self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_1, res_2))
-        self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_2, res_1))
+        self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_1, res_2), self.device)
+        self.add_edge_no_features('resource', 'same', 'resource', id2tensor(res_2, res_1), self.device)
 
     def add_item_assembly(self, parent_id: int, child_id: int):
-        self.add_edge_no_features('item', 'parent', 'item', id2tensor(parent_id, child_id))
+        self.add_edge_no_features('item', 'parent', 'item', id2tensor(parent_id, child_id), self.device)
 
     def add_operation_assembly(self, item_id: int, operation_id: int):
-        self.add_edge_no_features('item', 'has', 'operation', id2tensor(item_id, operation_id))
+        self.add_edge_no_features('item', 'has', 'operation', id2tensor(item_id, operation_id), self.device)
 
     def add_precedence(self, prec_id: int, succ_id: int):
-        self.add_edge_no_features('operation', 'precedes', 'operation', id2tensor(prec_id, succ_id))
+        self.add_edge_no_features('operation', 'precedes', 'operation', id2tensor(prec_id, succ_id), self.device)
 
     def add_edge_with_features(self, node_1: str, relation: str, node_2: str, idx: Tensor, features: Tensor):
         exists = (node_1, relation, node_2) in self.graph.edge_types
@@ -265,10 +263,10 @@ class GraphInstance():
         self.graph[node_1, relation, node_2].edge_attr = torch.cat([self.graph[node_1, relation, node_2].edge_attr, features], dim=0) if exists else features
     
     def add_need_for_materials(self, operation_id: int, material_id: int, features: NeedForMaterialFeatures):
-        self.add_edge_with_features('operation', 'needs_mat', 'material', id2tensor(operation_id, material_id), features.to_tensor_features())
+        self.add_edge_with_features('operation', 'needs_mat', 'material', id2tensor(operation_id, material_id, self.device), features.to_tensor_features(self.device))
 
     def add_need_for_resources(self, operation_id: int, resource_id: int, features: NeedForResourceFeatures):
-        self.add_edge_with_features('operation', 'needs_res', 'resource', id2tensor(operation_id, resource_id), features.to_tensor_features())
+        self.add_edge_with_features('operation', 'needs_res', 'resource', id2tensor(operation_id, resource_id, self.device), features.to_tensor_features(self.device))
 
     def precedences(self):
         return self.graph['operation', 'precedes', 'operation']

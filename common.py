@@ -69,14 +69,14 @@ def init_several_3D(a: int, b: int, c: int, default_value: all_types_feature, nb
 def to_bool(s: str):
     return s.lower() in ['true', '1', 't', 'y', 'yes']
 
-def features2tensor(features: list):
+def features2tensor(features: list, device: str):
     for f in features:
         if isinstance(f, bool):
             f = to_binary(f)
-    return torch.tensor([[f for f in features]], dtype=torch.float)
+    return torch.tensor([[f for f in features]], dtype=torch.float, device=device)
 
-def id2tensor(id1: int, id2: int):
-    return torch.tensor([[id1], [id2]], dtype=torch.long)
+def id2tensor(id1: int, id2: int, device: str):
+    return torch.tensor([[id1], [id2]], dtype=torch.long, device=device)
 
 def search_object_by_id(objects: list[generic_object], id: int):
     for obj in objects:
