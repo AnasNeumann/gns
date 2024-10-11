@@ -16,7 +16,7 @@ __license__ = "Apache 2.0 License"
 CUDA = "cude"
 
 class Agent_OneInstance:
-    def __init__(self, name: str, related_items: Tensor, parent_items: Tensor, w_makespan: float, device: str):
+    def __init__(self, name: str, related_items: Tensor, parent_items: Tensor, w_makespan: Tensor, device: str):
         self.name = name
         self.device = device
         self.gamma = 1
@@ -33,9 +33,6 @@ class Agent_OneInstance:
         self.rewards: Tensor = None
         self.cumulative_returns: Tensor = None
         self.advantages: Tensor = None
-        if device == CUDA:
-            self.related_items.to(CUDA)
-            self.parent_items.to(CUDA)
 
     def add_step(self, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, value: Tensor):
         if self.values is None:
@@ -50,10 +47,10 @@ class Agent_OneInstance:
     
     def add_reward(self, reward: float):
         if self.rewards is None:
-            self.rewards = torch.Tensor([reward])
+            self.rewards = Tensor([reward], device=self.device)
             self.rewards.to(self.device)
         else:
-            self.rewards = torch.cat((self.rewards, torch.Tensor([reward])), dim=0)
+            self.rewards = torch.cat((self.rewards, Tensor([reward], device=self.device)), dim=0)
 
     # R_t [sum version] = reward_t + gamma^1 * reward_(t+1) + ... + gamma^(T-t) * reward_T
     # R_t [recusive] = reward_t + gamma(R_(t+1))
@@ -64,7 +61,7 @@ class Agent_OneInstance:
         for t in reversed(range(T)):
             R = self.rewards[t] + self.gamma * R
             returns[t] = R
-        self.cumulative_returns = torch.tensor(returns, dtype=torch.float32)
+        self.cumulative_returns = torch.tensor(returns, dtype=torch.float32, device=self.device)
         if self.device == CUDA:
            self.cumulative_returns.to(CUDA)
 
@@ -89,7 +86,7 @@ class Agent_OneInstance:
             delta = self.temporal_difference_residual(t)
             GAE = delta + self.gamma * self.lam * GAE
             advantages[t] = GAE
-        self.advantages = torch.tensor(advantages, dtype=torch.float32)
+        self.advantages = torch.tensor(advantages, dtype=torch.float32, device=self.device)
         if self.device == CUDA:
             self.advantages.to(CUDA)
 
@@ -104,7 +101,9 @@ class Agent_OneInstance:
         log_old_probs: Tensor = None
         entropies: Tensor = None
         for step, state in enumerate(self.states):
-            new_probabilities,_ = agent(copy.deepcopy(state), self.possibles_actions[step], self.related_items, self.parent_items, self.w_makespan)
+            temp_state: State = copy.deepcopy(state)
+            temp_state.to(device=self.device)
+            new_probabilities,_ = agent(temp_state, self.possibles_actions[step], self.related_items, self.parent_items, self.w_makespan)
             old_action_id: int = self.actions_idx[step]
             entropy = torch.sum(-new_probabilities*torch.log(new_probabilities+1e-8), dim=-1)
             new_log = torch.log(new_probabilities[old_action_id]+1e-8)
@@ -131,7 +130,7 @@ class Agent_OneInstance:
         return policy_loss, value_loss, entropy_bonus
 
 class MultiAgent_OneInstance:
-    def __init__(self, agent_names: list[str], instance_id: int, related_items: Tensor, parent_items: Tensor, w_makespan: float, device: str):
+    def __init__(self, agent_names: list[str], instance_id: int, related_items: Tensor, parent_items: Tensor, w_makespan: Tensor, device: str):
         self.instance_id = instance_id
         self.agents: list[Agent_OneInstance] = []
         for name in agent_names:
@@ -151,7 +150,7 @@ class MultiAgent_OneInstance:
     def add_reward(self, agent_name: str, reward: any):
         agent = self.get(name=agent_name)
         if agent is not None:
-            agent.add_reward(reward)
+            agent.add_reward(reward=reward)
 
 class Agent_Batch:
     def __init__(self, name: str):

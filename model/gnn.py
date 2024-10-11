@@ -240,18 +240,18 @@ class L1_EmbbedingGNN(Module):
             self.item_layers.append(ItemEmbeddingLayer(embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
             self.operation_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
 
-    def forward(self, state: State, related_items: Tensor, parents: Tensor, alpha: float):
+    def forward(self, state: State, related_items: Tensor, parents: Tensor, alpha: Tensor):
         for l in range(self.nb_embedding_layers):
             state.materials = self.material_layers[l](state.materials, state.operations, state.need_for_materials)
             state.resources = self.resource_layers[l](state.resources, state.operations, state.need_for_resources, state.same_types)
             state.items = self.item_layers[l](state.items, parents, state.operations, state.item_assembly, state.operation_assembly)
             state.operations = self.operation_layers[l](state.operations, state.items, related_items, state.materials, state.resources, state.need_for_resources, state.need_for_materials, state.precedences)
-        pooled_materials = global_mean_pool(state.materials, torch.zeros(state.materials.shape[0], dtype=torch.long))
-        pooled_resources = global_mean_pool(state.resources, torch.zeros(state.resources.shape[0], dtype=torch.long))
-        pooled_items = global_mean_pool(state.items, torch.zeros(state.items.shape[0], dtype=torch.long))
-        pooled_operations = global_mean_pool(state.operations, torch.zeros(state.operations.shape[0], dtype=torch.long))
+        pooled_materials = global_mean_pool(state.materials, torch.zeros(state.materials.shape[0], dtype=torch.long, device=state.materials.device))
+        pooled_resources = global_mean_pool(state.resources, torch.zeros(state.resources.shape[0], dtype=torch.long, device=state.resources.device))
+        pooled_items = global_mean_pool(state.items, torch.zeros(state.items.shape[0], dtype=torch.long, device=state.items.device))
+        pooled_operations = global_mean_pool(state.operations, torch.zeros(state.operations.shape[0], dtype=torch.long, device=state.operations.device))
         state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources], dim=-1)[0]
-        return state, torch.cat([state_embedding, torch.tensor([alpha])], dim=0)
+        return state, torch.cat([state_embedding, alpha], dim=0)
 
 class L1_CommonCritic(Module):
     def __init__(self, embedding_size: int, critic_hidden_channels: int):
@@ -277,11 +277,11 @@ class L1_OutousrcingActor(Module):
             Linear(actor_hidden_channels, 1)
         )
 
-    def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: float):
+    def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
-        inputs = torch.zeros((len(actions), self.actor_input_size))
+        inputs = torch.zeros((len(actions), self.actor_input_size), device=parents.device)
         for i, (item_id, outsourcing_choice) in enumerate(actions):
-            inputs[i] = torch.cat([state.items[item_id], torch.tensor([outsourcing_choice], dtype=torch.long), state_embedding], dim=-1)
+            inputs[i] = torch.cat([state.items[item_id], torch.tensor([outsourcing_choice], dtype=torch.long, device=parents.device), state_embedding], dim=-1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
@@ -299,9 +299,9 @@ class L1_SchedulingActor(Module):
             Linear(actor_hidden_channels, 1)
         )
 
-    def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: float):
+    def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
-        inputs = torch.zeros((len(actions), self.actor_input_size))
+        inputs = torch.zeros((len(actions), self.actor_input_size), device=parents.device)
         for i, (operation_id, resource_id) in enumerate(actions):
             inputs[i] = torch.cat([state.operations[operation_id], state.resources[resource_id], state_embedding], dim=-1)
         action_logits = self.actor(inputs)
@@ -321,9 +321,9 @@ class L1_MaterialActor(Module):
             Linear(actor_hidden_channels, 1)
         )
 
-    def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: float):
+    def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
-        inputs = torch.zeros((len(actions), self.actor_input_size))
+        inputs = torch.zeros((len(actions), self.actor_input_size), device=parents.device)
         for i, (operation_id, material_id) in enumerate(actions):
             inputs[i] = torch.cat([state.operations[operation_id], state.materials[material_id], state_embedding], dim=-1)
         action_logits = self.actor(inputs)
