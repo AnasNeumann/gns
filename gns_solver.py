@@ -571,7 +571,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
         solutions_df = pd.DataFrame({
             'index': [instance.id],
             'value': [objective_value(current_cmax, current_cost, instance.w_makespan)/100], 
-            'computing_time': [systime.time()-start_time]
+            'computing_time': [systime.time()-start_time],
             'device_used': [device]
         })
         print(solutions_df)
