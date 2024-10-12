@@ -99,24 +99,23 @@ def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],t
 
 def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, path: str, solve_function: Callable, debug_mode: bool=False):
     torch.autograd.set_detect_anomaly(True)
-    device = "cuda" if not debug_mode and torch.cuda.is_available() else "cpu"
+    device = "cuda" if torch.cuda.is_available() else "cpu"
     iterations: int =PPO_CONF['train_iterations'][0 if debug_mode else 1]
     batch_size: int =PPO_CONF['batch_size'][0 if debug_mode else 1]
     epochs: int =PPO_CONF['opt_epochs']
     debug_print: Callable = debug_printer(debug_mode)
     instances: list[Instance] = load_training_dataset(path=path, debug_mode=debug_mode)
-    optimizer = torch.optim.Adam(
-        list(shared_critic.parameters()) + list(embedding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()), 
-        lr=LEARNING_RATE
-    )
     embedding_stack.train()
     embedding_stack.to(device)
     shared_critic.train()
     shared_critic.to(device)
     for agent,_ in agents:
         agent.train()
-        if device == "cuda":
-            agent.to(device)
+        agent.to(device)
+    optimizer = torch.optim.Adam(
+        list(shared_critic.parameters()) + list(embedding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()), 
+        lr=LEARNING_RATE
+    )
     random.shuffle(instances)
     num_val = int(len(instances) * PPO_CONF['validation_ratio'])
     train_instances, val_instances = instances[num_val:], instances[:num_val]

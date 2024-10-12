@@ -397,7 +397,7 @@ def build_required_resources(i: Instance):
                     else:
                         required_types_of_materials[p][o].append(rt)
                 else:
-                    print(f'\t -> Operation ({p},{o}) requires type ({rt}), which does not have any resources!')
+                    print(f'\t -> Operation ({p},{o}) requires RT = ({rt}), which does not have any resources!')
     return required_types_of_resources, required_types_of_materials, res_by_types
 
 def policy(probabilities: Tensor, greedy: bool=True):
@@ -572,6 +572,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
             'index': [instance.id],
             'value': [objective_value(current_cmax, current_cost, instance.w_makespan)/100], 
             'computing_time': [systime.time()-start_time]
+            'device_used': [device]
         })
         print(solutions_df)
         solutions_df.to_csv(path, index=False)
@@ -627,11 +628,10 @@ if __name__ == '__main__':
         print(f"SOLVE TARGET INSTANCE {args.size}_{args.id}...")
         instance: Instance = load_instance(args.path+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl')
         agents, shared_embbeding_stack, shared_critic = init_new_models() if args.mode == 'test' else load_trained_models(args.path+directory.models) 
-        device = "cuda" if not debug_mode and torch.cuda.is_available() else "cpu"
-        if device == "cuda":
-            for agent,_ in agents:
-                agent.to(device)
-            shared_embbeding_stack.to(device)
-            shared_critic.to(device)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        for agent,_ in agents:
+            agent.to(device)
+        shared_embbeding_stack.to(device)
+        shared_critic.to(device)
         solve_one(instance, agents, path=args.path+directory.instances+'/test/'+args.size+'/solution_gns_'+args.id+'.csv', train=False, device=device, debug_mode=debug_mode)
     print("===* END OF FILE *===")

@@ -48,7 +48,6 @@ class Agent_OneInstance:
     def add_reward(self, reward: float):
         if self.rewards is None:
             self.rewards = Tensor([reward], device=self.device)
-            self.rewards.to(self.device)
         else:
             self.rewards = torch.cat((self.rewards, Tensor([reward], device=self.device)), dim=0)
 
@@ -62,8 +61,7 @@ class Agent_OneInstance:
             R = self.rewards[t] + self.gamma * R
             returns[t] = R
         self.cumulative_returns = torch.tensor(returns, dtype=torch.float32, device=self.device)
-        if self.device == CUDA:
-           self.cumulative_returns.to(CUDA)
+        self.cumulative_returns.to(self.device)
 
     # Value Loss = E_t[(values_t - cumulative_returns_t)^2]
     def compute_value_loss(self) -> Tensor:
@@ -87,8 +85,7 @@ class Agent_OneInstance:
             GAE = delta + self.gamma * self.lam * GAE
             advantages[t] = GAE
         self.advantages = torch.tensor(advantages, dtype=torch.float32, device=self.device)
-        if self.device == CUDA:
-            self.advantages.to(CUDA)
+        self.advantages.to(self.device)
 
     # Entropy bonus = E_t[-1 * SUM_a[probabilities(a|s_t) * LOG(probabilities(a|s_t))]] --> all probabilities!
     # ---------------------------------------------------------------------------------
@@ -123,10 +120,9 @@ class Agent_OneInstance:
         policy_loss: Tensor = torch.min(ratio * self.advantages, torch.clamp(ratio, 1-e, 1+e) * self.advantages).mean()
         entropy_bonus: Tensor = torch.mean(entropies)
         value_loss: Tensor = self.compute_value_loss()
-        if self.device == CUDA:
-            policy_loss.to(CUDA)
-            entropy_bonus.to(CUDA)
-            value_loss.to(CUDA)
+        policy_loss.to(self.device)
+        entropy_bonus.to(self.device)
+        value_loss.to(self.device)
         return policy_loss, value_loss, entropy_bonus
 
 class MultiAgent_OneInstance:
