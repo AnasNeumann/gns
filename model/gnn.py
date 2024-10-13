@@ -282,6 +282,9 @@ class L1_OutousrcingActor(Module):
         inputs = torch.zeros((len(actions), self.actor_input_size), device=parents.device)
         for i, (item_id, outsourcing_choice) in enumerate(actions):
             inputs[i] = torch.cat([state.items[item_id], torch.tensor([outsourcing_choice], dtype=torch.long, device=parents.device), state_embedding], dim=-1)
+        print(f"Outsourcing Inputs: {inputs.is_cuda}")
+        print(f"Outsourcing Actor [next]: {next(self.actor.parameters()).is_cuda}")
+        print(f"Outsourcing Actor [all]: {all(param.is_cuda for param in self.actor.parameters())}")
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
@@ -304,6 +307,9 @@ class L1_SchedulingActor(Module):
         inputs = torch.zeros((len(actions), self.actor_input_size), device=parents.device)
         for i, (operation_id, resource_id) in enumerate(actions):
             inputs[i] = torch.cat([state.operations[operation_id], state.resources[resource_id], state_embedding], dim=-1)
+        print(f"Scheduling Inputs: {inputs.is_cuda}")
+        print(f"Scheduling Actor [next]: {next(self.actor.parameters()).is_cuda}")
+        print(f"Scheduling Actor [all]: {all(param.is_cuda for param in self.actor.parameters())}")
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
