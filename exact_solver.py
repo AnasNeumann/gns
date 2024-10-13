@@ -402,7 +402,7 @@ def solve_one(instance: Instance, solution_path: str):
     python exact_solver.py --size=s --id=151 --path=./
 '''
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="EPSIII exact solver")
+    parser = argparse.ArgumentParser(description="EPSIII/L1 exact solver")
     parser.add_argument("--size", help="Size of the solved instance", required=True)
     parser.add_argument("--id", help="Id of the solved instance", required=True)
     parser.add_argument("--path", help="Saving path on the server", required=True)

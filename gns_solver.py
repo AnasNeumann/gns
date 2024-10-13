@@ -602,7 +602,7 @@ def init_new_models():
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="EPSIII exact solver")
+    parser = argparse.ArgumentParser(description="EPSIII/L1 GNS solver")
     parser.add_argument("--size", help="Size of the solved instance", required=False)
     parser.add_argument("--id", help="Id of the solved instance", required=False)
     parser.add_argument("--train", help="Do you want to load a pre-trained model", required=True)

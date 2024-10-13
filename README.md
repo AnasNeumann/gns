@@ -65,3 +65,8 @@ cd jobs/scripts/
 bash 0_run_purge.sh
 bash 1_run_all.sh train exact_s exact_m exact_l exact_xl exact_xxl exact_xxxl
 ```
+
+# Locally analyze the final results with (no hard resources required): 
+```python
+python results_analysis.py --path=./
+```
