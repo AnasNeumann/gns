@@ -47,9 +47,9 @@ class Agent_OneInstance:
     
     def add_reward(self, reward: float):
         if self.rewards is None:
-            self.rewards = Tensor([reward], device=self.device)
+            self.rewards = torch.tensor([reward], device=self.device)
         else:
-            self.rewards = torch.cat((self.rewards, Tensor([reward], device=self.device)), dim=0)
+            self.rewards = torch.cat((self.rewards, torch.tensor([reward], device=self.device)), dim=0)
 
     # R_t [sum version] = reward_t + gamma^1 * reward_(t+1) + ... + gamma^(T-t) * reward_T
     # R_t [recusive] = reward_t + gamma(R_(t+1))
