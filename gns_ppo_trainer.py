@@ -10,7 +10,7 @@ from torch.nn import Module
 from torch.optim import Optimizer
 from debug.debug_gns import debug_printer
 from typing import Callable
-from model.agent import MultiAgent_OneInstance, MultiAgents_Batch
+from model.agent import MultiAgent_OneInstance, MultiAgents_Batch, MAPPO_Loss, MAPPO_Losses
 
 # ===========================================================
 # =*= PROXIMAL POLICY OPTIMIZATION (PPO) RELATE FUNCTIONS =*=
@@ -24,7 +24,7 @@ PROBLEM_SIZES = [['s', 'm'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
     "validation_rate": 10,
     "switch_batch": 20,
-    "train_iterations": [10, 1000], 
+    "train_iterations": [3, 1000], 
     "opt_epochs": 3,
     "batch_size": [3, 20],
     "clip_ratio": 0.2,
@@ -89,26 +89,28 @@ def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],t
         for e in range(epochs):
             print(f"\t Optimization epoch: {e+1}/{epochs}")
             optimizer.zero_grad()
-            loss: Tensor = batch_result.compute_losses(agents)
-            print(f"\t Multi-agent batch loss: {loss} - Differentiable computation graph = {loss.requires_grad}!")
-            loss.backward(retain_graph=False)
+            training_loss: Tensor = batch_result.compute_losses(agents, return_details=False)
+            print(f"\t Multi-agent batch loss: {training_loss} - Differentiable computation graph = {training_loss.requires_grad}!")
+            training_loss.backward(retain_graph=False)
             optimizer.step()
     else:
-        loss: Tensor = batch_result.compute_losses(agents)
-        print(f'\t Multi-agent batch loss: {loss:.4f}')
+        current_vloss, current_details = batch_result.compute_losses(agents, return_details=True)
+        print(f'\t Multi-agent batch loss: {current_vloss:.4f}')
+        return current_details
 
 def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, path: str, solve_function: Callable, debug_mode: bool=False):
     torch.autograd.set_detect_anomaly(True)
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    iterations: int =PPO_CONF['train_iterations'][0 if debug_mode else 1]
-    batch_size: int =PPO_CONF['batch_size'][0 if debug_mode else 1]
-    epochs: int =PPO_CONF['opt_epochs']
+    iterations: int = PPO_CONF['train_iterations'][0 if debug_mode else 1]
+    batch_size: int = PPO_CONF['batch_size'][0 if debug_mode else 1]
+    epochs: int = PPO_CONF['opt_epochs']
     debug_print: Callable = debug_printer(debug_mode)
     instances: list[Instance] = load_training_dataset(path=path, debug_mode=debug_mode)
     embedding_stack.train()
     embedding_stack.to(device)
     shared_critic.train()
     shared_critic.to(device)
+    vlosses = MAPPO_Losses(agent_names=[name for _,name in agents])
     for agent,_ in agents:
         agent.train()
         agent.to(device)
@@ -131,9 +133,12 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_criti
                 agent.eval()
             embedding_stack.eval()
             with torch.no_grad():
-                train_or_validate_batch(agents, val_instances, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode)
+                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_instances, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode)
+                vlosses.add(current_vloss)
             for agent,_ in agents:
                 agent.train()
             embedding_stack.train()
+    with open(directory.models+'/validation.pkl', 'wb') as f:
+        pickle.dump(vlosses, f)
     save_models(agents, embedding_stack, shared_critic, path=path)
     print("<======***--| END OF TRAINING |--***======>")

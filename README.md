@@ -67,6 +67,10 @@ bash 1_run_all.sh train exact_s exact_m exact_l exact_xl exact_xxl exact_xxxl
 ```
 
 ## Locally analyze the final results with (no hard resources required): 
+The main results we analyze are:
+* Solution Quality: _deviation between GNS and EPSIII per instance size_
+* Scalability: _computing time and memory per instance size and solution type (GNS versus EPSIII)_
+* Convergence: _value loss over iterations as well as policy loss and entroy per agent and over time [GNS only]_
 ```python
 python results_analysis.py --path=./
 ```

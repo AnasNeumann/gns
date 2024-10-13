@@ -13,7 +13,41 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-CUDA = "cude"
+
+class Agent_Loss:
+    def __init__(self, name: str):
+        self.name = name
+        self.policy_loss: Tensor = None
+        self.entropy_bonus: Tensor = None
+
+class MAPPO_Loss:
+    def __init__(self, agent_names: list[str]):
+        self.value_loss: Tensor = None
+        self.agents: list[Agent_Loss] = [Agent_Loss(name) for name in agent_names]
+
+    def get(self, name) -> Agent_Loss:
+        for agent in self.agents:
+            if agent.name == name:
+                return agent
+        return None
+
+class Agent_Losses:
+    def __init__(self, name: str):
+        self.name = name
+        self.policy_loss: list[Tensor] = []
+        self.entropy_bonus: list[Tensor] = []
+
+class MAPPO_Losses:
+    def __init__(self, agent_names: list[str]):
+        self.value_loss: list[Tensor] = []
+        self.agents: list[Agent_Losses] = [Agent_Losses(name) for name in agent_names]
+
+    def add(self, losses: MAPPO_Loss):
+        self.value_loss.append(losses.value_loss)
+        for agent in self.agents:
+            corresponding_agent = losses.get(agent.name)
+            agent.policy_loss.append(corresponding_agent.policy_loss)
+            agent.entropy_bonus.append(corresponding_agent.entropy_bonus)
 
 class Agent_OneInstance:
     def __init__(self, name: str, related_items: Tensor, parent_items: Tensor, w_makespan: Tensor, device: str):
@@ -158,7 +192,7 @@ class Agent_Batch:
 
     # Loss(max version) = w1*SUM_i[policy_loss] - w2*SUM_i[value_loss] + w3*SUM_i[entropy_bonus]
     # Loss(min version) = -w1*SUM_i[policy_loss] + w2*SUM_i[value_loss] - w3*SUM_i[entropy_bonus]
-    def compute_PPO_loss_over_batch(self, policy_losses: list[Tensor], value_losses: list[Tensor], entropy_bonuses: list[Tensor]) -> Tensor:
+    def compute_PPO_loss_over_batch(self, policy_losses: list[Tensor], value_losses: list[Tensor], entropy_bonuses: list[Tensor]):
         total_policy_loss: Tensor = sum(policy_losses)
         total_value_loss: Tensor = sum(value_losses)
         total_entropy_bonus: Tensor = sum(entropy_bonuses)
@@ -167,8 +201,9 @@ class Agent_Batch:
         print(f"\t\t value loss: {total_value_loss}")
         print(f"\t\t entropy bonus: {total_entropy_bonus}")
         print("\t\t -----------------")
-        return -self.weight_policy_loss*total_policy_loss + self.weight_entropy_bonus*total_value_loss - self.weight_entropy_bonus*total_entropy_bonus
-    
+        total_loss = -self.weight_policy_loss*total_policy_loss + self.weight_entropy_bonus*total_value_loss - self.weight_entropy_bonus*total_entropy_bonus
+        return total_loss, total_policy_loss, total_value_loss, total_entropy_bonus
+        
 class MultiAgents_Batch:
     def __init__(self, batch: list[MultiAgent_OneInstance], agent_names: list[str], gamma: float, lam: float, weight_policy_loss: float, weight_value_loss: float, weight_entropy_bonus: float, clipping_ratio: float):
         self.agents_results: list[Agent_Batch] = []
@@ -188,8 +223,9 @@ class MultiAgents_Batch:
                     agent.instances.append(agent_of_instance)
             self.agents_results.append(agent)
 
-    def compute_losses(self, agents: list[(Module, str)]) -> Tensor:
+    def compute_losses(self, agents: list[(Module, str)], return_details: bool) -> Tensor:
         losses: list[Tensor] = []
+        details: MAPPO_Loss = MAPPO_Loss([name for _,name in agents])
         for agent, agent_name in agents:
             for results_of_one_agent in self.agents_results:
                 if results_of_one_agent.name == agent_name:
@@ -205,5 +241,15 @@ class MultiAgents_Batch:
                             value_losses.append(v)
                             entropy_bonuses.append(e)
                     if has_states:
-                        losses.append(results_of_one_agent.compute_PPO_loss_over_batch(policy_losses, value_losses, entropy_bonuses))
-        return sum(losses)
+                        total_loss, p, v, e = results_of_one_agent.compute_PPO_loss_over_batch(policy_losses, value_losses, entropy_bonuses)
+                        losses.append(total_loss)
+                        details.get(agent_name).policy_loss = p
+                        details.get(agent_name).entropy_bonus = e
+                        if details.value_loss is None:
+                            details.value_loss = v
+                        else:
+                            details.value_loss += v
+        if return_details:
+            return sum(losses), details
+        else:
+            return sum(losses)
