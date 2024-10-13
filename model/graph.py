@@ -408,18 +408,18 @@ class GraphInstance():
             return False
         return True
 
-    def flatten_parents(self):
+    def flatten_parents(self, device: str):
         adj = to_dense_adj(self.item_assembly().edge_index)[0]
         nb_items = self.items().size(0)
-        parents = torch.zeros(nb_items, dtype=torch.long)
+        parents = torch.zeros(nb_items, dtype=torch.long, device=device)
         for i in range(nb_items-1):
             parents[i] = adj[:,i].nonzero(as_tuple=True)[0]
         return parents
 
-    def flatten_related_items(self):
+    def flatten_related_items(self, device: str):
         adj = to_dense_adj(self.operation_assembly().edge_index)[0]
         nb_ops = self.operations().size(0)
-        r_items = torch.zeros(nb_ops, dtype=torch.long)
+        r_items = torch.zeros(nb_ops, dtype=torch.long, device=device)
         for i in range(nb_ops):
             r_items[i] = adj[:,i].nonzero(as_tuple=True)[0]
         return r_items

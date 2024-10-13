@@ -418,7 +418,7 @@ def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
     else:
         return ((current_time // scale) + 1) * scale
 
-def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", train: bool=False, device:str = 'cpu', debug_mode: bool=False):
+def solve_one(instance: Instance, agents: list[(Module, str)], path: str, train: bool, device: str, debug_mode: bool):
     debug_print = debug_printer(debug_mode)
     debug_print(instance.display())
     start_time = systime.time()
@@ -427,11 +427,9 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str="", tra
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     previous_operations, next_operations = instance.build_next_and_previous_operations()
     t = 0
-    related_items = graph.flatten_related_items()
-    parent_items = graph.flatten_parents()
+    related_items = graph.flatten_related_items(device)
+    parent_items = graph.flatten_parents(device)
     alpha = torch.tensor([instance.w_makespan], device=device)
-    related_items.to(device)
-    parent_items.to(device)
     if train:
         training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
             agent_names=[name for _,name in agents], 

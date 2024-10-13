@@ -75,7 +75,7 @@ def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],t
     instances_results: list[MultiAgent_OneInstance] = []
     for instance in batch:
         print(f"\t start solving instance: {instance.id}...")
-        instances_results.append(solve_function(instance, agents, train=True, device=device, debug_mode=debug))
+        instances_results.append(solve_function(instance, agents, path="", train=True, device=device, debug_mode=debug))
     batch_result: MultiAgents_Batch = MultiAgents_Batch(
         batch=instances_results, 
         agent_names=[name for _,name in agents], 
