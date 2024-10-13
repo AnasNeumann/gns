@@ -20,7 +20,7 @@ A small Graph Attention Network (GAT) to schedule jobs in a ETO manufacturing en
 1. `python -m venv ./gns_env`
 2. `source ./gns_env/bin/activate`
 3. `pip install --upgrade -r requirements.txt`
-4. CHOOSE EITHER GNS_SOLVER, EXACT_SOLVER, or INSTANCE_GENERATOR (_see bellow for the rest_)
+4. CHOOSE EITHER GNS_SOLVER, EXACT_SOLVER, INSTANCE_GENERATOR, or RESULTS_ANALYS (_see bellow for the rest_)
 5. `desactivate`
 
 ## Test the instance generator
