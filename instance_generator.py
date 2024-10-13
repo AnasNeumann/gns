@@ -49,10 +49,10 @@ MEAN_OPS_PER_ELT = [3, 3, 3, 3, 4, 5]
 def bias_generator(prop_false: float):
     return random.uniform(0.0,1.000001)>=prop_false
 
-def init_array(size: int, min: int, max: int, rdm: bool=True):
+def random_init_array(size: int, min: int, max: int):
     result = []
     for _ in range(size):
-        result.append(random.randint(min, max) if rdm else max)
+        result.append(random.randint(min, max))
     return result
 
 def build_resources(i: Instance):
@@ -100,7 +100,7 @@ def build_operations(i: Instance):
     nb_assembly_operation_types = NB_ASSEMBLY_OPERATION_TYPES[SIZE]
     nb_production_operation_types = NB_PRODUCTION_OPERATION_TYPES[SIZE]
     i.nb_ops_types = nb_design_operations_types + nb_assembly_operation_types + nb_production_operation_types
-    i.design_value, i.is_design, i.in_days, i.in_hours, i.resource_type_needed, i.simultaneous, i.operation_family = init_several_1D(nb_projects, -1, 7)
+    i.design_value, i.is_design, i.in_days, i.in_hours, i.resource_type_needed, i.simultaneous, i.operation_family = init_several_1D(nb_projects, 0, 7)
     for p in range(nb_projects):
         project_has_material = False
         nb_ops = i.O_size[p]
@@ -111,7 +111,9 @@ def build_operations(i: Instance):
             first, last = i.get_operations_idx(p, e)
             for idx, o in enumerate(range(first, last)):
                 if idx > 0:
-                    i.design_value[p][o] = init_array(i.nb_settings, 0, MAX_SETTINGS_VALUE)
+                    i.design_value[p][o] = random_init_array(size=i.nb_settings, min=0, max=MAX_SETTINGS_VALUE)
+                else:
+                    i.design_value[p][o] = [0] * i.nb_settings
                 ot = random.randint(0, nb_design_operations_types-1) if idx==0 \
                     else random.randint(nb_design_operations_types, nb_assembly_operation_types+nb_design_operations_types-1) if idx==1 \
                     else random.randint(nb_assembly_operation_types+nb_design_operations_types, i.nb_ops_types-1)
