@@ -2,7 +2,7 @@
 A small Graph Attention Network (GAT) to schedule jobs in a ETO manufacturing environement, trained with the Proxmimal Policy gradient Optimization (PPO) reinforcement learning algorithm.
 
 ## Refer to this repository in scientific documents
-Neumann, Anas (2024). A hyper-graph neural network trained with multi-Agent proximal policy optimization to schedule projects in engineer-to-order environments *GitHub repository: https://github.com/AnasNeumann/gns*.
+`Neumann, Anas (2024). A hyper-graph neural network trained with multi-agent proximal policy optimization to schedule projects in engineer-to-order environments *GitHub repository: https://github.com/AnasNeumann/gns*.`
 
 ```bibtex
     @misc{simplemaml,
@@ -14,6 +14,7 @@ Neumann, Anas (2024). A hyper-graph neural network trained with multi-Agent prox
       howpublished = {\url{https://github.com/AnasNeumann/gns}},
       commit = {main}
     }
+```
 
 ## Locally try the project
 1. `python -m venv ./gns_env`
