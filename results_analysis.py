@@ -11,18 +11,22 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-problem_sizes = ['s'] # ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
+problem_sizes = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 solution_types = ['exact', 'gns']
 index_column = 'index'
 
 # Combine the solutions of all instances by size and by type of solver
 def combine_results_by_size_and_type(path:str, type: str):
     csv_files = glob.glob(os.path.join(path, 'solution_'+type+'_*.csv'))
-    dfs = []
-    for file in csv_files:
-        df = pd.read_csv(file)
-        dfs.append(df)
-    return(pd.concat(dfs, ignore_index=True))
+    if csv_files:
+        dfs = []
+        for file in csv_files:
+            df = pd.read_csv(file)
+            dfs.append(df)
+        return(pd.concat(dfs, ignore_index=True))
+    else:
+        print(f"No files at path={path} for solution type={type}")
+        return None
 
 # Combine all solution in a single object
 def combine_all_results(basic_path: str):
@@ -31,8 +35,11 @@ def combine_all_results(basic_path: str):
         combined_solutions[size] = {}
         path = basic_path+size+'/'
         for type in solution_types:
-            combined_solutions[size][type] = combine_results_by_size_and_type(path=path, type=type).sort_values(by=index_column)
-            print(combined_solutions[size][type])
+            combined = combine_results_by_size_and_type(path=path, type=type)
+            if combined is not None:
+                combined_solutions[size][type] = combined.sort_values(by=index_column)
+                print(combined_solutions[size][type])
+    print(combined_solutions)
 
 '''
     TEST WITH
