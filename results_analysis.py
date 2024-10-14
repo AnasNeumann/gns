@@ -3,6 +3,11 @@ import argparse
 import glob
 import os
 from common import directory
+import pickle
+from model.agent import MAPPO_Losses
+from torch import Tensor
+import matplotlib.pyplot as plt
+import numpy as np
 
 # =====================================================
 # =*= EXPERIMENTS: RESULTS ANALYSIS =*=
@@ -41,6 +46,25 @@ def combine_all_results(basic_path: str):
                 print(combined_solutions[size][type])
     print(combined_solutions)
 
+def display_one(losses: list[Tensor], loss_name: str):
+    plt.figure(figsize=(10, 5))
+    plt.plot(losses, label=loss_name)
+    plt.xlabel('MAPPO Iteration')
+    plt.ylabel('Loss')
+    plt.title('Training Convergence: '+loss_name)
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+
+# Display losses
+def display_losses(path: str):
+    with open(path, 'rb') as file:
+        losses: MAPPO_Losses = pickle.load(file)
+        display_one(losses.value_loss, 'Shared value loss')
+        for agent in losses.agents:
+            display_one(agent.policy_loss, 'Agent: '+agent.name+' - Policy loss')
+            display_one(agent.entropy_bonus, 'Agent: '+agent.name+' - Entropy bonus')
+
 '''
     TEST WITH
     python results_analysis.py --path=./
@@ -49,5 +73,7 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 results analysis")
     parser.add_argument("--path", help="Path of the test instances", required=True)
     args = parser.parse_args()
-    basic_path = args.path+directory.instances+'/test/'
-    combine_all_results(basic_path=basic_path)
+    instances_path = args.path+directory.instances+'/test/'
+    losses_path = args.path+directory.models+'/validation.pkl'
+    combine_all_results(basic_path=instances_path)
+    display_losses(losses_path)

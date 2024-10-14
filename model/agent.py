@@ -13,16 +13,15 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-
 class Agent_Loss:
     def __init__(self, name: str):
         self.name = name
-        self.policy_loss: Tensor = None
-        self.entropy_bonus: Tensor = None
+        self.policy_loss: float = 0.0
+        self.entropy_bonus: float = 0.0
 
 class MAPPO_Loss:
     def __init__(self, agent_names: list[str]):
-        self.value_loss: Tensor = None
+        self.value_loss: float = 0.0
         self.agents: list[Agent_Loss] = [Agent_Loss(name) for name in agent_names]
 
     def get(self, name) -> Agent_Loss:
@@ -34,12 +33,12 @@ class MAPPO_Loss:
 class Agent_Losses:
     def __init__(self, name: str):
         self.name = name
-        self.policy_loss: list[Tensor] = []
-        self.entropy_bonus: list[Tensor] = []
+        self.policy_loss: list[float] = []
+        self.entropy_bonus: list[float] = []
 
 class MAPPO_Losses:
     def __init__(self, agent_names: list[str]):
-        self.value_loss: list[Tensor] = []
+        self.value_loss: list[float] = []
         self.agents: list[Agent_Losses] = [Agent_Losses(name) for name in agent_names]
 
     def add(self, losses: MAPPO_Loss):
@@ -243,12 +242,9 @@ class MultiAgents_Batch:
                     if has_states:
                         total_loss, p, v, e = results_of_one_agent.compute_PPO_loss_over_batch(policy_losses, value_losses, entropy_bonuses)
                         losses.append(total_loss)
-                        details.get(agent_name).policy_loss = p
-                        details.get(agent_name).entropy_bonus = e
-                        if details.value_loss is None:
-                            details.value_loss = v
-                        else:
-                            details.value_loss += v
+                        details.get(agent_name).policy_loss = p.item()
+                        details.get(agent_name).entropy_bonus = e.item()
+                        details.value_loss += v.item()
         if return_details:
             return sum(losses), details
         else:
