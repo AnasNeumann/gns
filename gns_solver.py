@@ -617,6 +617,7 @@ if __name__ == '__main__':
             python gns_solver.py --train=true --mode=test --path=./
         '''
         agent, shared_embbeding_stack, shared_critic = init_new_models()
+        print("Training models with MAPPO...")
         PPO_train(agent, shared_embbeding_stack, shared_critic, path=args.path, solve_function=solve_one, debug_mode=debug_mode)
     else:
         '''

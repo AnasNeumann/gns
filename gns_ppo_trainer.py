@@ -11,6 +11,7 @@ from torch.optim import Optimizer
 from debug.debug_gns import debug_printer
 from typing import Callable
 from model.agent import MultiAgent_OneInstance, MultiAgents_Batch, MAPPO_Loss, MAPPO_Losses
+import time as systime
 
 # ===========================================================
 # =*= PROXIMAL POLICY OPTIMIZATION (PPO) RELATE FUNCTIONS =*=
@@ -99,13 +100,15 @@ def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],t
         return current_details
 
 def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, path: str, solve_function: Callable, debug_mode: bool=False):
-    torch.autograd.set_detect_anomaly(True)
+    start_time = systime.time()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     iterations: int = PPO_CONF['train_iterations'][0 if debug_mode else 1]
     batch_size: int = PPO_CONF['batch_size'][0 if debug_mode else 1]
     epochs: int = PPO_CONF['opt_epochs']
     debug_print: Callable = debug_printer(debug_mode)
+    print("Loading dataset....")
     instances: list[Instance] = load_training_dataset(path=path, debug_mode=debug_mode)
+    print(f"Dataset loaded after {(systime.time()-start_time)} seconds!")
     embedding_stack.train()
     embedding_stack.to(device)
     shared_critic.train()
@@ -115,7 +118,7 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_criti
         agent.train()
         agent.to(device)
     optimizer = torch.optim.Adam(
-        list(shared_critic.parameters()) + list(embedding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()), 
+        list(shared_critic.parameters()) + list(embedding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
         lr=LEARNING_RATE
     )
     random.shuffle(instances)
