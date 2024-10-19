@@ -86,7 +86,9 @@ def simulate_solving_for_gradients(instance_id: int, related_items: Tensor, pare
             w_makespan=alpha,
             device=device)
     for t, state in enumerate(states):
-        probs, state_value = agents[agent_by_state[t]][AGENT](copy.deepcopy(state), possible_actions_by_state[t], related_items, parent_items, alpha)
+        temp_state = copy.deepcopy(state)
+        temp_state.to(device=device)
+        probs, state_value = agents[agent_by_state[t]][AGENT](temp_state, possible_actions_by_state[t], related_items, parent_items, alpha)
         training_results.add_step(
             agent_name=ACTIONS_NAMES[agent_by_state[t]], 
             state=state,
