@@ -129,7 +129,9 @@ class Agent_OneInstance:
         log_old_probs: Tensor = None
         entropies: Tensor = None
         for step, state in enumerate(self.states):
-            new_probabilities,_ = agent(state, self.possibles_actions[step], self.related_items, self.parent_items, self.w_makespan)
+            temp_state: State = copy.deepcopy(state)
+            temp_state.to(device=self.device)
+            new_probabilities,_ = agent(temp_state, self.possibles_actions[step], self.related_items, self.parent_items, self.w_makespan)
             old_action_id: int = self.actions_idx[step]
             entropy = torch.sum(-new_probabilities*torch.log(new_probabilities+1e-8), dim=-1)
             new_log = torch.log(new_probabilities[old_action_id]+1e-8)
@@ -167,10 +169,11 @@ class MultiAgent_OneInstance:
                 return agent
         return None
     
-    def add_step(self, agent_name: str, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, reward: float, value: Tensor):
+    def add_step(self, agent_name: str, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, value: Tensor):
         agent = self.get(name=agent_name)
         if agent is not None:
-            agent.add_step(state=state, probabilities=probabilities, actions=actions, id=id, reward=reward, value=value)    
+            agent.add_step(state, probabilities, actions, id, value, reward)
+            
 
 class Agent_Batch:
     def __init__(self, name: str):
