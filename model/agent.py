@@ -73,7 +73,7 @@ class Agent_OneInstance:
         self.advantages: Tensor = None
 
     def add_step(self, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, value: Tensor):
-        self.values = add_into_tensor(self.values, value, self.device)
+        self.values = add_into_tensor(self.values, value)
         self.probabilities.append(probabilities)
         self.actions_idx.append(id)
         self.states.append(state)
@@ -81,7 +81,7 @@ class Agent_OneInstance:
     
     def add_reward(self, reward: float):
         r = torch.tensor([reward], device=self.device)
-        self.rewards = add_into_tensor(self.values, r, self.device)
+        self.rewards = add_into_tensor(self.values, r)
 
     # R_t [sum version] = reward_t + gamma^1 * reward_(t+1) + ... + gamma^(T-t) * reward_T
     # R_t [recusive] = reward_t + gamma(R_(t+1))
@@ -221,7 +221,7 @@ class MultiAgents_Batch:
                     agent.instances.append(agent_of_instance)
             self.agents_results.append(agent)
 
-    def compute_losses(self, agents: list[(Module, str)], device: str, return_details: bool) -> Tensor:
+    def compute_losses(self, agents: list[(Module, str)], return_details: bool) -> Tensor:
         losses: Tensor = None
         details: MAPPO_Loss = MAPPO_Loss([name for _,name in agents])
         for agent, agent_name in agents:
@@ -235,12 +235,12 @@ class MultiAgents_Batch:
                         if agent_instance.states:
                             has_states = True
                             p, v, e, = agent_instance.compute_PPO_losses(agent)
-                            policy_losses = add_into_tensor(policy_losses, p, device)
-                            value_losses = add_into_tensor(value_losses, e, device)
-                            entropy_bonuses = add_into_tensor(entropy_bonuses, e, device)
+                            policy_losses = add_into_tensor(policy_losses, p)
+                            value_losses = add_into_tensor(value_losses, e)
+                            entropy_bonuses = add_into_tensor(entropy_bonuses, e)
                     if has_states:
                         total_loss, p, v, e = results_of_one_agent.compute_PPO_loss_over_batch(policy_losses, value_losses, entropy_bonuses)
-                        losses = add_into_tensor(losses, total_loss, device)
+                        losses = add_into_tensor(losses, total_loss)
                         details.get(agent_name).policy_loss = p.item()
                         details.get(agent_name).entropy_bonus = e.item()
                         details.value_loss += v.item()

@@ -27,14 +27,14 @@ num_feature = Union[int, float]
 all_types_feature = Union[int, float, bool, list]
 generic_object = Union[object, Dict[Any, Any]]
 
-def add_into_tensor(tensor_list: Tensor|None, tensor_val: Tensor, device: str):
+def add_into_tensor(tensor_list: Tensor | None, tensor_val: Tensor):
         if tensor_list is None:
-            tensor_list = tensor_val
-            tensor_list.to(device)
+            if tensor_val is not None:
+                tensor_list = tensor_val
         else:
             tensor_list = torch.cat((tensor_list, tensor_val), dim=0)
         return tensor_list
-      
+
 def load_instance(path: str):
     with open(path, 'rb') as file:
         return pickle.load(file)

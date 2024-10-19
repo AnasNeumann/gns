@@ -90,12 +90,12 @@ def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],t
         for e in range(epochs):
             print(f"\t Optimization epoch: {e+1}/{epochs}")
             optimizer.zero_grad()
-            training_loss: Tensor = batch_result.compute_losses(agents, device, return_details=False)
+            training_loss: Tensor = batch_result.compute_losses(agents, return_details=False)
             print(f"\t Multi-agent batch loss: {training_loss} - Differentiable computation graph = {training_loss.requires_grad}!")
             training_loss.backward(retain_graph=False)
             optimizer.step()
     else:
-        current_vloss, current_details = batch_result.compute_losses(agents, device, return_details=True)
+        current_vloss, current_details = batch_result.compute_losses(agents, return_details=True)
         print(f'\t Multi-agent batch loss: {current_vloss:.4f}')
         return current_details
 
