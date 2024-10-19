@@ -223,7 +223,8 @@ class MultiAgents_Batch:
 
     def compute_losses(self, agents: list[(Module, str)], return_details: bool) -> Tensor:
         losses: Tensor = None
-        details: MAPPO_Loss = MAPPO_Loss([name for _,name in agents])
+        if return_details:
+            details: MAPPO_Loss = MAPPO_Loss([name for _,name in agents])
         for agent, agent_name in agents:
             for results_of_one_agent in self.agents_results:
                 if results_of_one_agent.name == agent_name:
@@ -234,16 +235,17 @@ class MultiAgents_Batch:
                     for agent_instance in results_of_one_agent.instances:
                         if agent_instance.states:
                             has_states = True
-                            p, v, e, = agent_instance.compute_PPO_losses(agent)
-                            policy_losses = add_into_tensor(policy_losses, p)
-                            value_losses = add_into_tensor(value_losses, e)
-                            entropy_bonuses = add_into_tensor(entropy_bonuses, e)
+                            pi, vi, ei, = agent_instance.compute_PPO_losses(agent)
+                            policy_losses = add_into_tensor(policy_losses, pi.unsqueeze(0))
+                            value_losses = add_into_tensor(value_losses, vi.unsqueeze(0))
+                            entropy_bonuses = add_into_tensor(entropy_bonuses, ei.unsqueeze(0))
                     if has_states:
                         total_loss, p, v, e = results_of_one_agent.compute_PPO_loss_over_batch(policy_losses, value_losses, entropy_bonuses)
-                        losses = add_into_tensor(losses, total_loss)
-                        details.get(agent_name).policy_loss = p.item()
-                        details.get(agent_name).entropy_bonus = e.item()
-                        details.value_loss += v.item()
+                        losses = add_into_tensor(losses, total_loss.unsqueeze(0))
+                        if return_details:
+                            details.get(agent_name).policy_loss = p.item()
+                            details.get(agent_name).entropy_bonus = e.item()
+                            details.value_loss += v.item()
         if return_details:
             return torch.sum(losses), details
         else:

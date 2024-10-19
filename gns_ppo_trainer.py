@@ -23,18 +23,18 @@ __license__ = "Apache 2.0 License"
 LEARNING_RATE = 2e-4
 PROBLEM_SIZES = [['s', 'm'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
-    "validation_rate": 10,
+    "validation_rate": 20,
     "switch_batch": 20,
     "train_iterations": [3, 1000], 
     "opt_epochs": 3,
-    "batch_size": [3, 15],
+    "batch_size": [3, 10],
     "clip_ratio": 0.2,
     "policy_loss": 1.0,
     "value_loss": 0.5,
     "entropy": 0.01,
     "discount_factor": 1.0,
     "bias_variance_tradeoff": 1.0,
-    'validation_ratio': 0.1
+    'validation': 10
 }
 AGENT = 0
 OUTSOURCING = 0
@@ -122,7 +122,7 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_criti
         lr=LEARNING_RATE
     )
     random.shuffle(instances)
-    num_val = int(len(instances) * PPO_CONF['validation_ratio'])
+    num_val = PPO_CONF['validation']
     train_instances, val_instances = instances[num_val:], instances[:num_val]
     for iteration in range(iterations):
         print(f"PPO iteration: {iteration+1}/{iterations}:")
