@@ -4,6 +4,7 @@ import resource
 import torch
 from typing import Union, Any, Dict
 from model.instance import Instance
+from torch import Tensor
 
 # =====================================================================
 # =*= COMMON TOOLS (objects and functions) USED ACCROSS THE PROJECT =*=
@@ -25,6 +26,14 @@ directory = ProjectDirectory('data', 'instances', 'models', 'out', 'jobs/scripts
 num_feature = Union[int, float]
 all_types_feature = Union[int, float, bool, list]
 generic_object = Union[object, Dict[Any, Any]]
+
+def add_into_tensor(tensor_list: Tensor|None, tensor_val: Tensor, device: str):
+        if tensor_list is None:
+            tensor_list = tensor_val
+            tensor_list.to(device)
+        else:
+            tensor_list = torch.cat((tensor_list, tensor_val), dim=0)
+        return tensor_list
       
 def load_instance(path: str):
     with open(path, 'rb') as file:
