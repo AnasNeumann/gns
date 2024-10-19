@@ -449,7 +449,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str, train:
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
-            probs,_ = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
+            with torch.no_grad():
+                probs,_ = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
             idx = policy(probs, greedy=(not train))
             if train:
                 states.append(graph.to_state(device=device))

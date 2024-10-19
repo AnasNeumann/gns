@@ -113,8 +113,7 @@ def models_to_eval(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN
 
 def async_real_solve(init_args):
     solve_function, instance, agents, device, debug = init_args
-    with torch.no_grad():
-        result =  solve_function(instance, agents, "", True, device, debug)
+    result =  solve_function(instance, agents, "", True, device, debug)
     return result
 
 def train_or_validate_batch(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN, shared_critic: L1_CommonCritic, batch: list[Instance],train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, num_processes: int, debug: bool):
@@ -201,19 +200,18 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN, sha
                                 debug=debug_mode)
         if iteration % PPO_CONF['validation_rate'] == 0:
             debug_print("\t time to validate the loss...")
-            with torch.no_grad():
-                current_vloss: MAPPO_Loss = train_or_validate_batch(agents=agents, 
-                                                                    embedding_stack=embedding_stack, 
-                                                                    shared_critic=shared_critic, 
-                                                                    batch=val_instances, 
-                                                                    train=False, 
-                                                                    epochs=-1, 
-                                                                    optimizer=None, 
-                                                                    solve_function=solve_function, 
-                                                                    device=device, 
-                                                                    num_processes=num_processes,
-                                                                    debug=debug_mode)
-                vlosses.add(current_vloss)
+            current_vloss: MAPPO_Loss = train_or_validate_batch(agents=agents, 
+                                                                embedding_stack=embedding_stack, 
+                                                                shared_critic=shared_critic, 
+                                                                batch=val_instances, 
+                                                                train=False, 
+                                                                epochs=-1, 
+                                                                optimizer=None, 
+                                                                solve_function=solve_function, 
+                                                                device=device, 
+                                                                num_processes=num_processes,
+                                                                debug=debug_mode)
+            vlosses.add(current_vloss)
     with open(directory.models+'/validation.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
     save_models(agents, embedding_stack, shared_critic, path=path)
