@@ -80,7 +80,8 @@ class Agent_OneInstance:
         self.possibles_actions.append(actions)
     
     def add_reward(self, reward: float):
-        self.rewards = add_into_tensor(self.values, reward, self.device)
+        r = torch.tensor([reward], device=self.device)
+        self.rewards = add_into_tensor(self.values, r, self.device)
 
     # R_t [sum version] = reward_t + gamma^1 * reward_(t+1) + ... + gamma^(T-t) * reward_T
     # R_t [recusive] = reward_t + gamma(R_(t+1))
