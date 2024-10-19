@@ -1,6 +1,6 @@
 import argparse
 from model.instance import Instance
-from model.graph import GraphInstance, NO, NOT_YET, YES
+from model.graph import GraphInstance, NO, NOT_YET, YES, State
 from model.gnn import L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, L1_CommonCritic
 from common import load_instance, to_bool, directory
 import torch
@@ -13,7 +13,8 @@ from torch.nn import Module
 from instance2graph_translator import translate
 from debug.debug_gns import check_completeness, debug_printer
 from gns_ppo_trainer import reward, PPO_train
-from model.agent import MultiAgent_OneInstance
+import multiprocessing
+from torch.multiprocessing import set_start_method
 
 # =====================================================
 # =*= 1st MAIN FILE OF THE PROJECT: GNS SOLVER =*=
@@ -419,6 +420,7 @@ def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
         return ((current_time // scale) + 1) * scale
 
 def solve_one(instance: Instance, agents: list[(Module, str)], path: str, train: bool, device: str, debug_mode: bool):
+    print(f"Starting the actual solving of {instance.id}...")
     debug_print = debug_printer(debug_mode)
     debug_print(instance.display())
     start_time = systime.time()
@@ -430,18 +432,16 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str, train:
     related_items = graph.flatten_related_items(device)
     parent_items = graph.flatten_parents(device)
     alpha = torch.tensor([instance.w_makespan], device=device)
-    if train:
-        training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
-            agent_names=[name for _,name in agents], 
-            instance_id=instance.id,
-            related_items=related_items,
-            parent_items=parent_items,
-            w_makespan=alpha,
-            device=device)
     old_cmax = current_cmax
     old_cost = current_cost
     terminate = False
     operations_to_test = []
+    if train:
+        states: list[State] = []
+        agent_by_state: list[int] = []
+        possible_actions_by_state: list[(int, int)] = []
+        action_id_by_state: list[int] = []
+        reward_by_state: list[float] = []
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t, debug_print)
         debug_print(f"Current possible actions: {poss_actions}")
@@ -449,16 +449,13 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str, train:
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
-            probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
+            probs,_ = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
             idx = policy(probs, greedy=(not train))
             if train:
-                training_results.add_step(
-                    agent_name=ACTIONS_NAMES[actions_type], 
-                    state=graph.to_state(device=device),
-                    probabilities=probs.detach(),
-                    actions=poss_actions,
-                    id=idx,
-                    value=state_value.detach())
+                states.append(graph.to_state(device=device))
+                agent_by_state.append(actions_type)
+                possible_actions_by_state.append(poss_actions)
+                action_id_by_state.append(idx)
             if actions_type == OUTSOURCING:
                 item_id, outsourcing_choice = poss_actions[idx]
                 p, e = graph.items_g2i[item_id]
@@ -488,7 +485,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str, train:
                     graph, shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e, debug_print)
                     current_cmax = max(current_cmax, shifted_project_estimated_end)
                 if train:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(old_cmax, current_cmax, old_cost, current_cost, a=instance.w_makespan, use_cost=True))
+                    reward_by_state.append(reward(old_cmax, current_cmax, old_cost, current_cost, a=instance.w_makespan, use_cost=True))
             elif actions_type == SCHEDULING:
                 operation_id, resource_id = poss_actions[idx]    
                 p, o = graph.operations_g2i[operation_id]
@@ -513,7 +510,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str, train:
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, operation_end, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
                 if train:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(old_cmax, current_cmax))
+                    reward_by_state.append(reward(old_cmax, current_cmax))
             else:
                 operation_id, material_id = poss_actions[idx]
                 p, o = graph.operations_g2i[operation_id]
@@ -522,7 +519,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str, train:
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
                 if train:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=reward(old_cmax, current_cmax))
+                    reward_by_state.append(reward(old_cmax, current_cmax))
             old_cost = current_cost
             old_cmax = current_cmax
         else: # NO OPERATIONS LEFT AT TIME T SEARCH FOR NEXT TIME
@@ -564,7 +561,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], path: str, train:
                     check_completeness(graph, debug_print)
                 terminate = True
     if train:
-        return training_results
+        return instance.id, related_items, parent_items, alpha, states, agent_by_state, possible_actions_by_state, action_id_by_state, reward_by_state
     else:
         solutions_df = pd.DataFrame({
             'index': [instance.id],
@@ -616,9 +613,14 @@ if __name__ == '__main__':
             Test training mode with: bash _env.sh
             python gns_solver.py --train=true --mode=test --path=./
         '''
+        try:
+            set_start_method('spawn')
+        except RuntimeError:
+            pass
+        num_processes = multiprocessing.cpu_count()
+        print(f"Training models with MAPPO on {num_processes} CPUs...")
         agent, shared_embbeding_stack, shared_critic = init_new_models()
-        print("Training models with MAPPO...")
-        PPO_train(agent, shared_embbeding_stack, shared_critic, path=args.path, solve_function=solve_one, debug_mode=debug_mode)
+        PPO_train(agent, shared_embbeding_stack, shared_critic, path=args.path, solve_function=solve_one, num_processes=num_processes, debug_mode=debug_mode)
     else:
         '''
             Test inference mode with: bash _env.sh
