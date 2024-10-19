@@ -215,8 +215,7 @@ class MultiAgents_Batch:
 
     def compute_losses(self, agents: list[(Module, str)], return_details: bool) -> Tensor:
         losses: list[Tensor] = []
-        if return_details:
-            details: MAPPO_Loss = MAPPO_Loss([name for _,name in agents])
+        details: MAPPO_Loss = MAPPO_Loss([name for _,name in agents])
         for agent, agent_name in agents:
             for results_of_one_agent in self.agents_results:
                 if results_of_one_agent.name == agent_name:
@@ -227,21 +226,16 @@ class MultiAgents_Batch:
                     for agent_instance in results_of_one_agent.instances:
                         if agent_instance.states:
                             has_states = True
-                            if return_details:
-                                with torch.no_grad():
-                                    pi, vi, ei, = agent_instance.compute_PPO_losses(agent)
-                            else:
-                                pi, vi, ei, = agent_instance.compute_PPO_losses(agent)
+                            pi, vi, ei, = agent_instance.compute_PPO_losses(agent)
                             policy_losses.append(pi)
                             value_losses.append(vi)
                             entropy_bonuses.append(ei)
                     if has_states:
                         total_loss, p, v, e = results_of_one_agent.compute_PPO_loss_over_batch(policy_losses, value_losses, entropy_bonuses)
                         losses.append(total_loss)
-                        if return_details:
-                            details.get(agent_name).policy_loss = p.item()
-                            details.get(agent_name).entropy_bonus = e.item()
-                            details.value_loss += v.item()
+                        details.get(agent_name).policy_loss = p.item()
+                        details.get(agent_name).entropy_bonus = e.item()
+                        details.value_loss += v.item()
         if return_details:
             return sum(losses), details
         else:
