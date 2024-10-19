@@ -67,7 +67,7 @@ class Agent_OneInstance:
         self.cumulative_returns: Tensor = None
         self.advantages: Tensor = None
 
-    def add_step(self, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, reward: float, value: Tensor):
+    def add_step(self, state: State, probabilities: Tensor, actions: list[(int, int)], id: int, reward: float, value: Tensor):
         if self.values is None:
             self.values = value
             self.values.to(self.device)
@@ -167,7 +167,7 @@ class MultiAgent_OneInstance:
                 return agent
         return None
     
-    def add_step(self, agent_name: str, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, reward: float, value: Tensor):
+    def add_step(self, agent_name: str, state: State, probabilities: Tensor, actions: list[(int, int)], id: int, reward: float, value: Tensor):
         agent = self.get(name=agent_name)
         if agent is not None:
             agent.add_step(state=state, probabilities=probabilities, actions=actions, id=id, reward=reward, value=value)    
@@ -226,10 +226,10 @@ class MultiAgents_Batch:
                     for agent_instance in results_of_one_agent.instances:
                         if agent_instance.states:
                             has_states = True
-                            p, v, e, = agent_instance.compute_PPO_losses(agent)
-                            policy_losses.append(p)
-                            value_losses.append(v)
-                            entropy_bonuses.append(e)
+                            pi, vi, ei, = agent_instance.compute_PPO_losses(agent)
+                            policy_losses.append(pi)
+                            value_losses.append(vi)
+                            entropy_bonuses.append(ei)
                     if has_states:
                         total_loss, p, v, e = results_of_one_agent.compute_PPO_loss_over_batch(policy_losses, value_losses, entropy_bonuses)
                         losses.append(total_loss)

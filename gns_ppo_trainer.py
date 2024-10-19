@@ -93,7 +93,7 @@ def simulate_solving_for_gradients(instance_id: int, related_items: Tensor, pare
             agent_name=ACTIONS_NAMES[agent_by_state[t]], 
             state=state,
             probabilities=probs.detach(),
-            actions=action_id_by_state[t],
+            actions=possible_actions_by_state[t],
             id=action_id_by_state[t],
             reward=reward_by_state[t],
             value=state_value.detach())
