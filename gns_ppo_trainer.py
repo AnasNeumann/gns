@@ -1,8 +1,6 @@
 import pickle
 import os
 from model.instance import Instance
-from model.graph import State
-from model.gnn import L1_EmbbedingGNN, L1_CommonCritic
 from common import directory
 import torch
 torch.autograd.set_detect_anomaly(True)
@@ -12,10 +10,8 @@ from torch.nn import Module
 from torch.optim import Optimizer
 from debug.debug_gns import debug_printer
 from typing import Callable
-from model.agent import MultiAgent_OneInstance, MultiAgents_Batch, MAPPO_Loss, MAPPO_Losses,
+from model.agent import MultiAgent_OneInstance, MultiAgents_Batch, MAPPO_Loss, MAPPO_Losses
 import time as systime
-import copy
-from torch.multiprocessing import Pool
 
 # ===========================================================
 # =*= PROXIMAL POLICY OPTIMIZATION (PPO) RELATE FUNCTIONS =*=
@@ -24,7 +20,6 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-ACTIONS_NAMES = ["outsourcing", "scheduling", "material_use"]
 LEARNING_RATE = 2e-4
 PROBLEM_SIZES = [['s', 'm'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
@@ -52,7 +47,7 @@ def reward(makespan_old: int, makespan_new: int, cost_old: int=-1, cost_new: int
     else:
         return makespan_old - makespan_new
 
-def save_models(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN, shared_critic: L1_CommonCritic, path: str):
+def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, path: str):
     complete_path = path + directory.models
     torch.save(embedding_stack.state_dict(), complete_path+'/gnn_weights.pth')
     torch.save(shared_critic.state_dict(), complete_path+'/critic_weights.pth')
@@ -77,60 +72,11 @@ def load_training_dataset(debug_mode: bool, path: str):
     print(f"End of loading {len(instances)} instances!")
     return instances
 
-def simulate_solving_for_gradients(instance_id: int, related_items: Tensor, parent_items: Tensor, alpha: Tensor, agents: list[(Module, str)], states: list[State], agent_by_state: list[int], possible_actions_by_state: list[(int, int)], action_id_by_state: list[int], reward_by_state: list[float], device: str):
-    training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
-            agent_names=[name for _,name in agents], 
-            instance_id=instance_id,
-            related_items=related_items,
-            parent_items=parent_items,
-            w_makespan=alpha,
-            device=device)
-    for t, state in enumerate(states):
-        probs, state_value = agents[agent_by_state[t]][AGENT](copy.deepcopy(state), possible_actions_by_state[t], related_items, parent_items, alpha)
-        training_results.add_step(
-            agent_name=ACTIONS_NAMES[agent_by_state[t]], 
-            state=state,
-            probabilities=probs.detach(),
-            actions=action_id_by_state[t],
-            id=action_id_by_state[t],
-            reward=reward_by_state[t],
-            value=state_value.detach())
-    return training_results
-
-def models_to_train(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN, shared_critic: L1_CommonCritic):
-    embedding_stack.train()
-    shared_critic.train()
-    for agent,_ in agents:
-        agent.train()
-
-def models_to_eval(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN, shared_critic: L1_CommonCritic):
-    embedding_stack.eval()
-    shared_critic.eval()
-    for agent,_ in agents:
-        agent.eval()
-
-def train_or_validate_batch(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN, shared_critic: L1_CommonCritic, batch: list[Instance],train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, num_processes: int, debug: bool):
-    models_to_eval(agents, embedding_stack, shared_critic)
-    print(f"\t Start the real solving in parallel (1/2)...")
-    with Pool(num_processes) as pool:
-        results = pool.map(solve_function, [(instance, agents, "", True, device, debug) for instance in batch])
-    all_instances_idx, all_instances_related_items, all_instances_parent_items, all_instances_alpha, all_instances_states, all_instances_agent_by_state, all_instances_possible_actions_by_state, all_instances_action_id_by_state, all_instances_reward_by_state = zip(*results)
-    if train:
-        models_to_train(agents, embedding_stack, shared_critic)
+def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, debug: bool):
     instances_results: list[MultiAgent_OneInstance] = []
-    for i,_ in enumerate(batch):
-        print(f"\t Start simulating the solving of instance: {all_instances_idx[i]} in serial (2/2)...")
-        instances_results.append(simulate_solving_for_gradients(instance_id=all_instances_idx[i], 
-                                       related_items=all_instances_related_items[i], 
-                                       parent_items=all_instances_parent_items[i], 
-                                       alpha=all_instances_alpha[i],
-                                       agents=agents, 
-                                       states=all_instances_states[i], 
-                                       agent_by_state=all_instances_agent_by_state[i], 
-                                       possible_actions_by_state=all_instances_possible_actions_by_state[i], 
-                                       action_id_by_state=all_instances_action_id_by_state[i], 
-                                       reward_by_state=all_instances_reward_by_state[i], 
-                                       device=device))
+    for instance in batch:
+        print(f"\t start solving instance: {instance.id}...")
+        instances_results.append(solve_function(instance, agents, path="", train=True, device=device, debug_mode=debug))
     batch_result: MultiAgents_Batch = MultiAgents_Batch(
         batch=instances_results, 
         agent_names=[name for _,name in agents], 
@@ -153,7 +99,7 @@ def train_or_validate_batch(agents: list[(Module, str)], embedding_stack: L1_Emb
         print(f'\t Multi-agent batch loss: {current_vloss:.4f}')
         return current_details
 
-def PPO_train(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN, shared_critic: L1_CommonCritic, path: str, solve_function: Callable, num_processes: int, debug_mode: bool=False):
+def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, path: str, solve_function: Callable, debug_mode: bool=False):
     start_time = systime.time()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     iterations: int = PPO_CONF['train_iterations'][0 if debug_mode else 1]
@@ -163,10 +109,13 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN, sha
     print("Loading dataset....")
     instances: list[Instance] = load_training_dataset(path=path, debug_mode=debug_mode)
     print(f"Dataset loaded after {(systime.time()-start_time)} seconds!")
+    embedding_stack.train()
     embedding_stack.to(device)
+    shared_critic.train()
     shared_critic.to(device)
     vlosses = MAPPO_Losses(agent_names=[name for _,name in agents])
     for agent,_ in agents:
+        agent.train()
         agent.to(device)
     optimizer = torch.optim.Adam(
         list(shared_critic.parameters()) + list(embedding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
@@ -180,32 +129,18 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN, sha
         if iteration % PPO_CONF['switch_batch'] == 0:
             debug_print(f"\t time to sample new batch of size {batch_size}...")
             current_batch = random.sample(train_instances, batch_size)
-        train_or_validate_batch(agents=agents, 
-                                embedding_stack=embedding_stack, 
-                                shared_critic=shared_critic, 
-                                batch=current_batch, 
-                                train=True, 
-                                epochs=epochs, 
-                                optimizer=optimizer, 
-                                solve_function=solve_function, 
-                                device=device, 
-                                num_processes=num_processes,
-                                debug=debug_mode)
+        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=optimizer, solve_function=solve_function, device=device, debug=debug_mode)
         if iteration % PPO_CONF['validation_rate'] == 0:
             debug_print("\t time to validate the loss...")
+            for agent,_ in agents:
+                agent.eval()
+            embedding_stack.eval()
             with torch.no_grad():
-                current_vloss: MAPPO_Loss = train_or_validate_batch(agents=agents, 
-                                                                    embedding_stack=embedding_stack, 
-                                                                    shared_critic=shared_critic, 
-                                                                    batch=val_instances, 
-                                                                    train=False, 
-                                                                    epochs=-1, 
-                                                                    optimizer=None, 
-                                                                    solve_function=solve_function, 
-                                                                    device=device, 
-                                                                    num_processes=num_processes,
-                                                                    debug=debug_mode)
+                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_instances, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode)
                 vlosses.add(current_vloss)
+            for agent,_ in agents:
+                agent.train()
+            embedding_stack.train()
     with open(directory.models+'/validation.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
     save_models(agents, embedding_stack, shared_critic, path=path)

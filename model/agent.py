@@ -67,21 +67,23 @@ class Agent_OneInstance:
         self.cumulative_returns: Tensor = None
         self.advantages: Tensor = None
 
-    def add_step(self, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, reward: float, value: Tensor):
+    def add_step(self, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, value: Tensor):
         if self.values is None:
             self.values = value
             self.values.to(self.device)
         else:
             self.values = torch.cat((self.values, value), dim=0)
-        if self.rewards is None:
-            self.rewards = torch.tensor([reward], device=self.device)
-        else:
-            self.rewards = torch.cat((self.rewards, torch.tensor([reward], device=self.device)), dim=0)
         self.probabilities.append(probabilities)
         self.actions_idx.append(id)
         self.states.append(state)
         self.possibles_actions.append(actions)
     
+    def add_reward(self, reward: float):
+        if self.rewards is None:
+            self.rewards = torch.tensor([reward], device=self.device)
+        else:
+            self.rewards = torch.cat((self.rewards, torch.tensor([reward], device=self.device)), dim=0)
+
     # R_t [sum version] = reward_t + gamma^1 * reward_(t+1) + ... + gamma^(T-t) * reward_T
     # R_t [recusive] = reward_t + gamma(R_(t+1))
     def compute_cumulative_returns(self):
@@ -172,8 +174,12 @@ class MultiAgent_OneInstance:
     def add_step(self, agent_name: str, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, value: Tensor):
         agent = self.get(name=agent_name)
         if agent is not None:
-            agent.add_step(state, probabilities, actions, id, value, reward)
-            
+            agent.add_step(state, probabilities, actions, id, value)
+    
+    def add_reward(self, agent_name: str, reward: any):
+        agent = self.get(name=agent_name)
+        if agent is not None:
+            agent.add_reward(reward=reward)
 
 class Agent_Batch:
     def __init__(self, name: str):
