@@ -12,7 +12,7 @@ from torch.nn import Module
 from torch.optim import Optimizer
 from debug.debug_gns import debug_printer
 from typing import Callable
-from model.agent import MultiAgent_OneInstance, MultiAgents_Batch, MAPPO_Loss, MAPPO_Losses,
+from model.agent import MultiAgent_OneInstance, MultiAgents_Batch, MAPPO_Loss, MAPPO_Losses
 import time as systime
 import copy
 from torch.multiprocessing import Pool
