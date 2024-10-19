@@ -111,11 +111,17 @@ def models_to_eval(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN
     for agent,_ in agents:
         agent.eval()
 
+def async_real_solve(init_args):
+    solve_function, instance, agents, "", True, device, debug = init_args
+    with torch.no_grad():
+        result =  solve_function(instance, agents, "", True, device, debug)
+    return result
+
 def train_or_validate_batch(agents: list[(Module, str)], embedding_stack: L1_EmbbedingGNN, shared_critic: L1_CommonCritic, batch: list[Instance],train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, num_processes: int, debug: bool):
     models_to_eval(agents, embedding_stack, shared_critic)
     print(f"\t Start the real solving in parallel (1/2)...")
     with Pool(num_processes) as pool:
-        results = pool.map(solve_function, [(instance, agents, "", True, device, debug) for instance in batch])
+        results = pool.map(async_real_solve, [(solve_function, instance, agents, "", True, device, debug) for instance in batch])
     all_instances_idx, all_instances_related_items, all_instances_parent_items, all_instances_alpha, all_instances_states, all_instances_agent_by_state, all_instances_possible_actions_by_state, all_instances_action_id_by_state, all_instances_reward_by_state = zip(*results)
     if train:
         models_to_train(agents, embedding_stack, shared_critic)
