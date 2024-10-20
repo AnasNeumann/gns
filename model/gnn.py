@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch_geometric.nn import global_mean_pool
 from torch import Tensor
 from .graph import FeatureConfiguration, State
+from torch_geometric.utils import scatter
 
 # =====================================================
 # =*= GRAPH ATTENTION NEURAL NETWORK (GaNN) =*=
@@ -42,8 +43,8 @@ class MaterialEmbeddingLayer(Module):
         norm_cross_attention = normalizer[self_attention.size(0):]
 
         weighted_ops_by_edges = norm_cross_attention * ops_by_edges
-        sum_ops_by_edges = torch.zeros_like(materials, device=materials.device)
-        sum_ops_by_edges.index_add_(0, need_for_materials.edge_index[1], weighted_ops_by_edges)
+        sum_ops_by_edges = scatter(weighted_ops_by_edges, need_for_materials.edge_index[1], dim=0, dim_size=materials.size(0))
+        
         embedding = F.elu(norm_self_attention * materials + sum_ops_by_edges)
         return embedding
 
@@ -70,9 +71,6 @@ class ResourceEmbeddingLayer(Module):
     def forward(self, resources: Tensor, operations: Tensor, need_for_resources: EdgeStorage, same_types: EdgeStorage):
         self_resources = self.self_transform(resources) 
         self_attention = self.leaky_relu(torch.matmul(torch.cat([self_resources, self_resources], dim=-1), self.att_self_coef))
-        sum_res_by_edges = torch.zeros_like(self_resources, device=resources.device)
-        sum_ops_by_edges = torch.zeros_like(self_resources, device=resources.device)
-
         ops_by_need_edges = self.operation_transform(torch.cat([operations[need_for_resources.edge_index[0]], need_for_resources.edge_attr], dim=-1))
         res_by_need_edges = self_resources[need_for_resources.edge_index[1]]
         operations_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res_by_need_edges, ops_by_need_edges], dim=-1), self.att_operation_coef))
@@ -87,15 +85,18 @@ class ResourceEmbeddingLayer(Module):
             norm_resources_cross_attention = normalizer[self_attention.size(0)+operations_cross_attention.size(0):]
 
             weighted_res_by_edges = norm_resources_cross_attention * res1_by_same_edges
-            sum_res_by_edges.index_add_(0, same_types.edge_index[1], weighted_res_by_edges)
+            sum_res_by_edges = scatter(weighted_res_by_edges, same_types.edge_index[1], dim=0, dim_size=self_resources.size(0))
+
+            weighted_ops_by_edges = norm_operations_cross_attention * ops_by_need_edges
+            sum_ops_by_edges = scatter(weighted_ops_by_edges, need_for_resources.edge_index[1], dim=0, dim_size=self_resources.size(0))
+            embedding = F.elu(normalizer[:self_attention.size(0)] * self_resources + sum_ops_by_edges + sum_res_by_edges)
         else:
             normalizer = F.softmax(torch.cat([self_attention, operations_cross_attention], dim=0), dim=0)
             norm_operations_cross_attention = normalizer[self_attention.size(0):]
 
-        weighted_ops_by_edges = norm_operations_cross_attention * ops_by_need_edges
-        sum_ops_by_edges.index_add_(0, need_for_resources.edge_index[1], weighted_ops_by_edges)
-        
-        embedding = F.elu(normalizer[:self_attention.size(0)] * self_resources + sum_ops_by_edges + sum_res_by_edges)
+            weighted_ops_by_edges = norm_operations_cross_attention * ops_by_need_edges
+            sum_ops_by_edges = scatter(weighted_ops_by_edges, need_for_resources.edge_index[1], dim=0, dim_size=self_resources.size(0))
+            embedding = F.elu(normalizer[:self_attention.size(0)] * self_resources + sum_ops_by_edges)
         return embedding
 
 class ItemEmbeddingLayer(Module):
