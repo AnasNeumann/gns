@@ -396,8 +396,6 @@ def build_required_resources(i: Instance):
                         required_types_of_resources[p][o].append(rt)
                     else:
                         required_types_of_materials[p][o].append(rt)
-                else:
-                    print(f'\t -> Operation ({p},{o}) requires RT = ({rt}), which does not have any resources!')
     return required_types_of_resources, required_types_of_materials, res_by_types
 
 def policy(probabilities: Tensor, greedy: bool=True):
