@@ -239,11 +239,11 @@ class L1_EmbbedingGNN(Module):
             state.materials = self.material_layers[l](state.materials, state.operations, state.need_for_materials)
             state.resources = self.resource_layers[l](state.resources, state.operations, state.need_for_resources, state.same_types)
             state.items = self.item_layers[l](state.items, parents, state.operations, state.item_assembly, state.operation_assembly)
-            state.operations = self.operation_layers[l](state.operations, state.items, related_items, state.materials, state.resources, state.need_for_resources, state.need_for_materials, state.precedences)
-        pooled_materials = global_mean_pool(state.materials, torch.zeros(state.materials.shape[0], dtype=torch.long, device=state.materials.device))
-        pooled_resources = global_mean_pool(state.resources, torch.zeros(state.resources.shape[0], dtype=torch.long, device=state.resources.device))
-        pooled_items = global_mean_pool(state.items, torch.zeros(state.items.shape[0], dtype=torch.long, device=state.items.device))
-        pooled_operations = global_mean_pool(state.operations, torch.zeros(state.operations.shape[0], dtype=torch.long, device=state.operations.device))
+            state.operations = self.operation_layers[l](state.operations, state.items, related_items, state.materials, state.resources, state.need_for_resources, state.need_for_materials, state.precedences)     
+        pooled_materials = torch.mean(state.materials, dim=0, keepdim=True)
+        pooled_resources = torch.mean(state.resources, dim=0, keepdim=True)
+        pooled_items = torch.mean(state.items, dim=0, keepdim=True)
+        pooled_operations = torch.mean(state.operations, dim=0, keepdim=True)
         state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources], dim=-1)[0]
         return state, torch.cat([state_embedding, alpha], dim=0)
 
