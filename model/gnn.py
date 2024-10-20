@@ -273,9 +273,10 @@ class L1_OutousrcingActor(Module):
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
-        inputs = torch.zeros((len(actions), self.actor_input_size), device=parents.device)
-        for i, (item_id, outsourcing_choice) in enumerate(actions):
-            inputs[i] = torch.cat([state.items[item_id], torch.tensor([outsourcing_choice], dtype=torch.long, device=parents.device), state_embedding], dim=-1)
+        item_ids, outsourcing_choices = zip(*actions)
+        outsourcing_choices_tensor = torch.tensor(outsourcing_choices, dtype=torch.float32, device=parents.device).unsqueeze(1)
+        state_embedding_expanded = state_embedding.unsqueeze(0).expand(len(actions), -1)
+        inputs = torch.cat([state.items[list(item_ids)], outsourcing_choices_tensor, state_embedding_expanded], dim=1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
@@ -295,9 +296,9 @@ class L1_SchedulingActor(Module):
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
-        inputs = torch.zeros((len(actions), self.actor_input_size), device=parents.device)
-        for i, (operation_id, resource_id) in enumerate(actions):
-            inputs[i] = torch.cat([state.operations[operation_id], state.resources[resource_id], state_embedding], dim=-1)
+        operations_ids, resources_ids = zip(*actions)
+        state_embedding_expanded = state_embedding.unsqueeze(0).expand(len(actions), -1)
+        inputs = torch.cat([state.operations[list(operations_ids)], state.resources[list(resources_ids)], state_embedding_expanded], dim=1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
@@ -317,9 +318,9 @@ class L1_MaterialActor(Module):
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
         state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
-        inputs = torch.zeros((len(actions), self.actor_input_size), device=parents.device)
-        for i, (operation_id, material_id) in enumerate(actions):
-            inputs[i] = torch.cat([state.operations[operation_id], state.materials[material_id], state_embedding], dim=-1)
+        operations_ids, materials_ids = zip(*actions)
+        state_embedding_expanded = state_embedding.unsqueeze(0).expand(len(actions), -1)
+        inputs = torch.cat([state.operations[list(operations_ids)], state.materials[list(materials_ids)], state_embedding_expanded], dim=1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
