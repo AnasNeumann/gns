@@ -4,7 +4,6 @@ from torch import Tensor
 from typing import Tuple
 import numpy as np
 from torch.nn import Module
-import copy
 from common import add_into_tensor
 
 # ===========================================================
@@ -88,16 +87,14 @@ class Agent_OneInstance:
     def compute_cumulative_returns(self):
         R = 0
         T = len(self.states)
-        returns = np.zeros(T)
+        self.cumulative_returns = torch.zeros(T, dtype=torch.float32, device=self.device)
         for t in reversed(range(T)):
             R = self.rewards[t] + self.gamma * R
-            returns[t] = R
-        self.cumulative_returns = torch.tensor(returns, dtype=torch.float32, device=self.device)
-        self.cumulative_returns.to(self.device)
+            self.cumulative_returns[t] = R
 
     # Value Loss = E_t[(values_t - cumulative_returns_t)^2]
     def compute_value_loss(self) -> Tensor:
-        return torch.mean(torch.stack([(value - cumulative_return) ** 2 for value, cumulative_return in zip(self.values, self.cumulative_returns)]))
+        return torch.mean((self.values - self.cumulative_returns) ** 2)
     
     # delta_t = reward_t + gamma*value_(t+1) - value_t
     def temporal_difference_residual(self, t) -> Tensor:
@@ -111,13 +108,11 @@ class Agent_OneInstance:
     def compute_generalized_advantage_estimates(self):
         GAE = 0
         T = len(self.states)
-        advantages = np.zeros(T)
+        self.advantages = torch.zeros(T, dtype=torch.float32, device=self.device)
         for t in reversed(range(T)):
             delta = self.temporal_difference_residual(t)
             GAE = delta + self.gamma * self.lam * GAE
-            advantages[t] = GAE
-        self.advantages = torch.tensor(advantages, dtype=torch.float32, device=self.device)
-        self.advantages.to(self.device)
+            self.advantages[t] = GAE
 
     # Entropy bonus = E_t[-1 * SUM_a[probabilities(a|s_t) * LOG(probabilities(a|s_t))]] --> all probabilities!
     # ---------------------------------------------------------------------------------
@@ -130,8 +125,7 @@ class Agent_OneInstance:
         log_old_probs: Tensor = None
         entropies: Tensor = None
         for step, state in enumerate(self.states):
-            temp_state: State = copy.deepcopy(state)
-            temp_state.to(device=self.device)
+            temp_state: State = state.clone(self.device)
             new_probabilities,_ = agent(temp_state, self.possibles_actions[step], self.related_items, self.parent_items, self.w_makespan)
             old_action_id: int = self.actions_idx[step]
             entropy = torch.sum(-new_probabilities*torch.log(new_probabilities+1e-8), dim=-1)
@@ -141,9 +135,9 @@ class Agent_OneInstance:
                 log_new_probs = new_log
                 log_old_probs = old_log
                 entropies = entropy
-                log_new_probs.to(self.device)
-                log_old_probs.to(self.device)
-                entropies.to(self.device)
+                log_new_probs = log_new_probs.to(self.device)
+                log_old_probs = log_old_probs.to(self.device)
+                entropies = entropies.to(self.device)
             else:
                 entropies = torch.cat((entropies, entropy), dim=0)
                 log_new_probs = torch.cat((log_new_probs, new_log), dim=0)
@@ -152,9 +146,9 @@ class Agent_OneInstance:
         policy_loss: Tensor = torch.min(ratio * self.advantages, torch.clamp(ratio, 1-e, 1+e) * self.advantages).mean()
         entropy_bonus: Tensor = torch.mean(entropies)
         value_loss: Tensor = self.compute_value_loss()
-        policy_loss.to(self.device)
-        entropy_bonus.to(self.device)
-        value_loss.to(self.device)
+        policy_loss = policy_loss.to(self.device)
+        entropy_bonus = entropy_bonus.to(self.device)
+        value_loss = value_loss.to(self.device)
         return policy_loss, value_loss, entropy_bonus
 
 class MultiAgent_OneInstance:

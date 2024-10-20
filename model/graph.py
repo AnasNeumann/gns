@@ -20,34 +20,19 @@ NO = 0
 
 class State:
     def __init__(self, items: Tensor, operations: Tensor, resources: Tensor, materials: Tensor, need_for_materials: EdgeStorage, need_for_resources: EdgeStorage, operation_assembly: EdgeStorage, item_assembly: EdgeStorage, precedences: EdgeStorage, same_types: EdgeStorage, device: str):
-        self.items = copy.deepcopy(items)
-        self.items.to(device)
-        self.operations = copy.deepcopy(operations)
-        self.operations.to(device)
-        self.resources = copy.deepcopy(resources)
-        self.resources.to(device)
-        self.materials = copy.deepcopy(materials)
-        self.materials.to(device)
-        self.need_for_resources = copy.deepcopy(need_for_resources)
-        self.need_for_resources.to(device)
-        self.need_for_materials = copy.deepcopy(need_for_materials)
-        self.need_for_materials.to(device)
+        self.items = items.clone().to(device)
+        self.operations = operations.clone().to(device)
+        self.resources = resources.clone().to(device)
+        self.materials = materials.clone().to(device)
+        self.need_for_resources = need_for_resources.clone().to(device)
+        self.need_for_materials = need_for_materials.clone().to(device)
         self.operation_assembly = operation_assembly
         self.item_assembly = item_assembly
         self.precedences = precedences
         self.same_types = same_types
     
-    def to(self, device: str):
-        self.items.to(device)
-        self.operations.to(device)
-        self.resources.to(device)
-        self.materials.to(device)
-        self.need_for_resources.to(device)
-        self.need_for_materials.to(device)
-        self.operation_assembly.to(device)
-        self.item_assembly.to(device)
-        self.precedences.to(device)
-        self.same_types.to(device)
+    def clone(self, device: str):
+        return State(self.items, self.operations, self.resources, self.materials, self.need_for_materials, self.need_for_resources, self.operation_assembly, self.item_assembly, self.precedences, self.same_types, device)
 
 class OperationFeatures:
     def __init__(self, design: num_feature, sync: num_feature, timescale_hours: num_feature, timescale_days: num_feature, direct_successors: num_feature, total_successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, is_possible: num_feature):

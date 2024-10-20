@@ -10,7 +10,7 @@ import time as systime
 from typing import Callable
 from torch import Tensor
 from torch.nn import Module
-from instance2graph_translator import InstanceTranslator
+from instance2graph_translator import translate
 from debug.debug_gns import check_completeness, debug_printer
 from gns_ppo_trainer import reward, PPO_train
 from model.agent import MultiAgent_OneInstance
@@ -418,20 +418,19 @@ def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
     else:
         return ((current_time // scale) + 1) * scale
 
-def solve_one(data: InstanceTranslator, agents: list[(Module, str)], train: bool, device: str, debug_mode: bool):
+def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, device: str, debug_mode: bool):
     debug_print = debug_printer(debug_mode)
-    current_cmax = data.cmax_lower_bound
-    current_cost = data.cost_lower_bound
-    utilization = [0 for _ in data.graph.loop_resources()]
-    required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(data.i)
+    graph, current_cmax, current_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
+    utilization = [0 for _ in graph.loop_resources()]
+    required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     t = 0
-    alpha = torch.tensor([data.i.w_makespan], device=device)
+    alpha = torch.tensor([instance.w_makespan], device=device)
     if train:
         training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
             agent_names=[name for _,name in agents], 
-            instance_id=data.i.id,
-            related_items=data.related_items,
-            parent_items=data.parent_items,
+            instance_id=instance.id,
+            related_items=related_items,
+            parent_items=parent_items,
             w_makespan=alpha,
             device=device)
     old_cmax = current_cmax
@@ -439,87 +438,87 @@ def solve_one(data: InstanceTranslator, agents: list[(Module, str)], train: bool
     terminate = False
     operations_to_test = []
     while not terminate:
-        poss_actions, actions_type = get_feasible_actions(data.i, data.graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t, debug_print)
+        poss_actions, actions_type = get_feasible_actions(instance, graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t, debug_print)
         debug_print(f"Current possible actions: {poss_actions}")
         if poss_actions:
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
-                    data.graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(data.i, data.graph, op_id, res_id))])
+                    graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
             if train:
-                probs, state_value = agents[actions_type][AGENT](data.graph.to_state(device=device), poss_actions, data.related_items, data.parent_items, alpha)
-            else:
-                with torch.no_grad:
-                    probs, state_value = agents[actions_type][AGENT](data.graph.to_state(device=device), poss_actions, data.related_items, data.parent_items, alpha)
-            idx = policy(probs, greedy=(not train))
-            if train:
+                probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
+                idx = policy(probs, greedy=False)
                 training_results.add_step(
                     agent_name=ACTIONS_NAMES[actions_type], 
-                    state=data.graph.to_state(device=device),
+                    state=graph.to_state(device=device),
                     probabilities=probs.detach(),
                     actions=poss_actions,
                     id=idx,
                     value=state_value.detach())
+            else:
+                with torch.no_grad:
+                    probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
+                idx = policy(probs, greedy=True)
             if actions_type == OUTSOURCING:
                 item_id, outsourcing_choice = poss_actions[idx]
-                p, e = data.graph.items_g2i[item_id]
+                p, e = graph.items_g2i[item_id]
                 if outsourcing_choice == YES:
                     debug_print(f"Outsourcing item {item_id} -> ({p},{e})...")
-                    data.graph, end_date, local_price = outsource_item(data.graph, data.i, item_id, t, enforce_time=False)
-                    approximate_design_load, approximate_physical_load = data.i.item_processing_time(p, e, total_load=True)
-                    for ancestor in data.i.get_ancestors(p, e):
-                        ancestor_id = data.graph.items_i2g[p][ancestor]
-                        data.graph.update_item(ancestor_id, [
-                            ('children_time', data.graph.item(ancestor_id, 'children_time')-(approximate_design_load+approximate_physical_load)),
+                    graph, end_date, local_price = outsource_item(graph, instance, item_id, t, enforce_time=False)
+                    approximate_design_load, approximate_physical_load = instance.item_processing_time(p, e, total_load=True)
+                    for ancestor in instance.get_ancestors(p, e):
+                        ancestor_id = graph.items_i2g[p][ancestor]
+                        graph.update_item(ancestor_id, [
+                            ('children_time', graph.item(ancestor_id, 'children_time')-(approximate_design_load+approximate_physical_load)),
                         ])
-                    data.graph, max_ancestors_end = shift_ancestors_physical_operations(data.graph, data.i, p, e, end_date)
-                    for o in data.i.first_physical_operations(p, data.i.get_direct_parent(p, e)):
+                    graph, max_ancestors_end = shift_ancestors_physical_operations(graph, instance, p, e, end_date)
+                    for o in instance.first_physical_operations(p, instance.get_direct_parent(p, e)):
                         next_good_to_go = True
-                        for previous in data.previous_operations[p][o]:
-                            if not data.graph.is_operation_complete(data.graph.operations_i2g[p][previous]):
+                        for previous in previous_operations[p][o]:
+                            if not graph.is_operation_complete(graph.operations_i2g[p][previous]):
                                 next_good_to_go = False
                                 break
                         if next_good_to_go:
-                            op_id = data.graph.operations_i2g[p][o]
-                            available_time = next_possible_time(data.i, end_date, p, o)
-                            data.graph.update_operation(op_id, [('is_possible', YES), ('available_time', available_time)])
+                            op_id = graph.operations_i2g[p][o]
+                            available_time = next_possible_time(instance, end_date, p, o)
+                            graph.update_operation(op_id, [('is_possible', YES), ('available_time', available_time)])
                     current_cost += local_price
                     current_cmax = max(current_cmax, max_ancestors_end)
                 else:
-                    data.graph, shifted_project_estimated_end = item_local_production(data.graph, data.i, item_id, p, e, debug_print)
+                    graph, shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e, debug_print)
                     current_cmax = max(current_cmax, shifted_project_estimated_end)
                 if train:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(old_cmax, current_cmax, old_cost, current_cost, a=data.i.w_makespan, use_cost=True))
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(old_cmax, current_cmax, old_cost, current_cost, a=instance.w_makespan, use_cost=True))
             elif actions_type == SCHEDULING:
                 operation_id, resource_id = poss_actions[idx]    
-                p, o = data.graph.operations_g2i[operation_id]
-                debug_print(f"Scheduling: operation {operation_id} -> ({p},{o}) on resource {data.graph.resources_g2i[resource_id]} at time {t}...")     
-                data.graph, utilization, required_types_of_resources, operation_end, max_ancestors_end = schedule_operation(data.graph, data.i, operation_id, resource_id, required_types_of_resources, utilization, t)
+                p, o = graph.operations_g2i[operation_id]
+                debug_print(f"Scheduling: operation {operation_id} -> ({p},{o}) on resource {graph.resources_g2i[resource_id]} at time {t}...")     
+                graph, utilization, required_types_of_resources, operation_end, max_ancestors_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, utilization, t)
                 debug_print(f"End of scheduling at time {operation_end}...")
-                if data.i.simultaneous[p][o]:
-                    for rt in data.i.required_rt(p, o):
-                        if rt != data.i.get_resource_familly(data.graph.resources_g2i[resource_id]):
-                            for r in data.i.resources_by_type(rt):
-                                if data.i.finite_capacity[r]:
-                                    other_resource_id = data.graph.resources_i2g[r]
-                                    if data.graph.resource(other_resource_id, 'available_time') <= t:
-                                        data.graph, utilization, required_types_of_resources, op_end, other_max_ancestors_end = schedule_operation(data.graph, data.i, operation_id, other_resource_id, required_types_of_resources, utilization, t)
+                if instance.simultaneous[p][o]:
+                    for rt in instance.required_rt(p, o):
+                        if rt != instance.get_resource_familly(graph.resources_g2i[resource_id]):
+                            for r in instance.resources_by_type(rt):
+                                if instance.finite_capacity[r]:
+                                    other_resource_id = graph.resources_i2g[r]
+                                    if graph.resource(other_resource_id, 'available_time') <= t:
+                                        graph, utilization, required_types_of_resources, op_end, other_max_ancestors_end = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, utilization, t)
                                         operation_end = max(operation_end, op_end)
                                         max_ancestors_end = max(max_ancestors_end, other_max_ancestors_end)
                                         break
                                 else:
-                                    data.graph, required_types_of_materials, other_max_ancestors_end = apply_use_material(data.graph, data.i, operation_id, data.graph.materials_i2g[r], required_types_of_materials, t)
+                                    graph, required_types_of_materials, other_max_ancestors_end = apply_use_material(graph, instance, operation_id, graph.materials_i2g[r], required_types_of_materials, t)
                                     max_ancestors_end = max(max_ancestors_end, other_max_ancestors_end)
                                     break
-                data.graph = try_to_open_next_operations(data.graph, data.i, data.previous_operations, data.next_operations, operation_id, operation_end, debug_print)
+                graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, operation_end, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
                 if train:
                     training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(old_cmax, current_cmax))
             else:
                 operation_id, material_id = poss_actions[idx]
-                p, o = data.graph.operations_g2i[operation_id]
-                debug_print(f"Material use: operation {operation_id} -> ({p},{o}) on material {data.graph.materials_g2i[material_id]}...")  
-                data.graph, required_types_of_materials, max_ancestors_end = apply_use_material(data.graph, data.i, operation_id, material_id, required_types_of_materials, t)
-                data.graph = try_to_open_next_operations(data.graph, data.i, data.previous_operations, data.next_operations, operation_id, t, debug_print)
+                p, o = graph.operations_g2i[operation_id]
+                debug_print(f"Material use: operation {operation_id} -> ({p},{o}) on material {graph.materials_g2i[material_id]}...")  
+                graph, required_types_of_materials, max_ancestors_end = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
+                graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
                 if train:
                     training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=reward(old_cmax, current_cmax))
@@ -528,25 +527,25 @@ def solve_one(data: InstanceTranslator, agents: list[(Module, str)], train: bool
         else: # NO OPERATIONS LEFT AT TIME T SEARCH FOR NEXT TIME
             next_date = -1
             operations_to_test = []
-            for material_id in data.graph.loop_materials():
-                arrival_time = data.graph.material(material_id, 'arrival_time')
+            for material_id in graph.loop_materials():
+                arrival_time = graph.material(material_id, 'arrival_time')
                 if arrival_time>t and (arrival_time<next_date or next_date<0):
                     debug_print(f"\t --> New quantity of material {material_id} is available at time {arrival_time} [t={t}]")
                     next_date = arrival_time
-            for resource_id in data.graph.loop_resources():
-                available_time = data.graph.resource(resource_id, 'available_time')
+            for resource_id in graph.loop_resources():
+                available_time = graph.resource(resource_id, 'available_time')
                 debug_print(f"\t --> Machine {resource_id} is available at time {available_time} [t={t}]")
                 if available_time>t and (available_time<next_date or next_date<0):
                     next_date = available_time
-            for operation_id in data.graph.loop_operations():
-                if data.graph.operation(operation_id, 'is_possible') == YES and (data.graph.operation(operation_id, 'remaining_resources')>0 or data.graph.operation(operation_id, 'remaining_materials')>0):
-                    available_time = data.graph.operation(operation_id, 'available_time')
+            for operation_id in graph.loop_operations():
+                if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
+                    available_time = graph.operation(operation_id, 'available_time')
                     if available_time <= t:
-                        p, o = data.graph.operations_g2i[operation_id]
-                        available_time = next_possible_time(data.i, t, p, o)
-                    if data.graph.operation(operation_id, 'remaining_resources')>0:
+                        p, o = graph.operations_g2i[operation_id]
+                        available_time = next_possible_time(instance, t, p, o)
+                    if graph.operation(operation_id, 'remaining_resources')>0:
                         debug_print(f"\t --> operation {operation_id} can be scheduled at time {available_time} [t={t}]")
-                    elif data.graph.operation(operation_id, 'remaining_materials')>0:
+                    elif graph.operation(operation_id, 'remaining_materials')>0:
                         debug_print(f"\t --> operation {operation_id} can use material at time {available_time} [t={t}]")
                     if available_time>t: 
                         operations_to_test.append(operation_id)
@@ -555,13 +554,13 @@ def solve_one(data: InstanceTranslator, agents: list[(Module, str)], train: bool
             if next_date>=0:
                 t = next_date
                 if t > 0:
-                    for res_id in data.graph.loop_resources():
-                        data.graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
+                    for res_id in graph.loop_resources():
+                        graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
                 debug_print(f"New current time t={t}...")
             else:
                 if debug_mode:
                     debug_print("End of solving stage!")
-                    check_completeness(data.graph, debug_print)
+                    check_completeness(graph, debug_print)
                 terminate = True
     if train:
         return training_results
@@ -622,9 +621,9 @@ if __name__ == '__main__':
         agents, shared_embbeding_stack, shared_critic = init_new_models() if args.mode == 'test' else load_trained_models(args.path+directory.models) 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         for agent,_ in agents:
-            agent.to(device)
-        shared_embbeding_stack.to(device)
-        shared_critic.to(device)
+            agent = agent.to(device)
+        shared_embbeding_stack = shared_embbeding_stack.to(device)
+        shared_critic = shared_critic.to(device)
         data: InstanceTranslator = InstanceTranslator(target_instance, device)
         current_cmax, current_cost = solve_one(data, agents, train=False, device=device, debug_mode=debug_mode)
         solutions_df = pd.DataFrame({

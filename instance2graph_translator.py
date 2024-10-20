@@ -168,17 +168,7 @@ def translate(i: Instance, device: str):
     graph.items_i2g = graph.build_i2g_2D(graph.items_g2i)
     graph.add_dummy_item(device=device)
     graph = build_precedence(i, graph)
-    return graph, Cmax_lower_bound, cost_lower_bound
-
-class InstanceTranslator:
-    def __init__(self, instance: Instance, device: str):
-        self.i = instance
-        graph, cmax_lower_bound, cost_lower_bound = translate(instance, device)
-        previous_operations, next_operations = instance.build_next_and_previous_operations()
-        self.graph: GraphInstance = graph
-        self.cmax_lower_bound: int = cmax_lower_bound
-        self.cost_lower_bound: int = cost_lower_bound
-        self.related_items: Tensor = self.graph.flatten_related_items(device)
-        self.parent_items: Tensor = self.graph.flatten_parents(device)
-        self.previous_operations: list = previous_operations
-        self.next_operations: list = next_operations
+    previous_operations, next_operations = i.build_next_and_previous_operations()
+    related_items: Tensor = graph.flatten_related_items(device)
+    parent_items: Tensor = graph.flatten_parents(device)
+    return graph, Cmax_lower_bound, cost_lower_bound, previous_operations, next_operations, related_items, parent_items
