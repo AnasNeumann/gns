@@ -140,7 +140,7 @@ class ItemEmbeddingLayer(Module):
 
         item_idx_by_edges = operation_assembly.edge_index[0]
         operations_by_edges = operations[operation_assembly.edge_index[1]]
-        agg_ops = scatter(operations_by_edges, item_idx_by_edges, dim=0, dim_size=operations.size(0))
+        agg_ops = scatter(operations_by_edges, item_idx_by_edges, dim=0, dim_size=items.size(0))
         agg_ops_embeddings = self.mlp_operations(agg_ops)
         
         embedding = torch.zeros((items.shape[0], self.embedding_size), device=items.device)
@@ -198,7 +198,7 @@ class OperationEmbeddingLayer(Module):
 
         operations_idx_by_res_edge = need_for_resources.edge_index[0]
         resources_by_edge = resources[need_for_resources.edge_index[1]]
-        agg_resources = scatter(resources_by_edge, operations_idx_by_res_edge, dim=0, dim_size=resources.size(0))
+        agg_resources = scatter(resources_by_edge, operations_idx_by_res_edge, dim=0, dim_size=operations.size(0))
         agg_resources_embeddings = self.mlp_resources(agg_resources)
 
         operations_idx_by_pred_edge = precedences.edge_index[0]
