@@ -135,15 +135,13 @@ class ItemEmbeddingLayer(Module):
 
         parent_idx_by_edge = item_assembly.edge_index[0]
         children_by_edge = items[item_assembly.edge_index[1]]
-        agg_children_embeddings = torch.zeros((items.size(0), items.size(1)), device=items.device)
-        agg_children_embeddings.index_add_(0, parent_idx_by_edge, children_by_edge) 
-        agg_children_embeddings = self.mlp_children(agg_children_embeddings)
+        agg_children = scatter(children_by_edge, parent_idx_by_edge, dim=0, dim_size=items.size(0))
+        agg_children_embeddings = self.mlp_children(agg_children)
 
         item_idx_by_edges = operation_assembly.edge_index[0]
         operations_by_edges = operations[operation_assembly.edge_index[1]]
-        agg_ops_embeddings = torch.zeros((items.size(0), operations.size(1)), device=items.device)
-        agg_ops_embeddings.index_add_(0, item_idx_by_edges, operations_by_edges)
-        agg_ops_embeddings = self.mlp_operations(agg_ops_embeddings)
+        agg_ops = scatter(operations_by_edges, item_idx_by_edges, dim=0, dim_size=operations.size(0))
+        agg_ops_embeddings = self.mlp_operations(agg_ops)
         
         embedding = torch.zeros((items.shape[0], self.embedding_size), device=items.device)
         embedding[:-1] = self.mlp_combined(torch.cat([parent_embeddings[:-1], agg_children_embeddings[:-1], agg_ops_embeddings[:-1], self_embeddings[:-1]], dim=-1))
@@ -195,29 +193,24 @@ class OperationEmbeddingLayer(Module):
 
         operations_idx_by_mat_edge = need_for_materials.edge_index[0]
         materials_by_edge = materials[need_for_materials.edge_index[1]]
-        agg_materials_embeddings = torch.zeros((operations.size(0), materials.size(1)), device=operations.device)
-        agg_materials_embeddings.index_add_(0, operations_idx_by_mat_edge, materials_by_edge) 
-        agg_materials_embeddings = self.mlp_materials(agg_materials_embeddings)
+        agg_materials = scatter(materials_by_edge, operations_idx_by_mat_edge, dim=0, dim_size=operations.size(0))
+        agg_materials_embeddings = self.mlp_materials(agg_materials)
 
         operations_idx_by_res_edge = need_for_resources.edge_index[0]
         resources_by_edge = resources[need_for_resources.edge_index[1]]
-        agg_resources_embeddings = torch.zeros((operations.size(0), resources.size(1)), device=operations.device)
-        agg_resources_embeddings.index_add_(0, operations_idx_by_res_edge, resources_by_edge) 
-        agg_resources_embeddings = self.mlp_resources(agg_resources_embeddings)
+        agg_resources = scatter(resources_by_edge, operations_idx_by_res_edge, dim=0, dim_size=resources.size(0))
+        agg_resources_embeddings = self.mlp_resources(agg_resources)
 
         operations_idx_by_pred_edge = precedences.edge_index[0]
         preds_by_edge = operations[precedences.edge_index[1]]
-        agg_preds_embeddings = torch.zeros((operations.size(0), operations.size(1)), device=operations.device)
-        agg_preds_embeddings.index_add_(0, operations_idx_by_pred_edge, preds_by_edge) 
-        agg_preds_embeddings = self.mlp_predecessors(agg_preds_embeddings)
+        agg_preds = scatter(preds_by_edge, operations_idx_by_pred_edge, dim=0, dim_size=operations.size(0))
+        agg_preds_embeddings = self.mlp_predecessors(agg_preds)
 
         operations_idx_by_succs_edge = precedences.edge_index[1]
         succs_by_edge = operations[precedences.edge_index[0]]
-        agg_succs_embeddings = torch.zeros((operations.size(0), operations.size(1)), device=operations.device)
-        agg_succs_embeddings.index_add_(0, operations_idx_by_succs_edge, succs_by_edge) 
-        agg_succs_embeddings = self.mlp_successors(agg_succs_embeddings)
+        agg_succs = scatter(succs_by_edge, operations_idx_by_succs_edge, dim=0, dim_size=operations.size(0))
+        agg_succs_embeddings = self.mlp_successors(agg_succs)
 
-        embedding = torch.zeros((operations.shape[0], self.embedding_size), device=operations.device)
         embedding = self.mlp_combined(torch.cat([agg_preds_embeddings, agg_succs_embeddings, agg_resources_embeddings, agg_materials_embeddings, item_embeddings, self_embeddings], dim=-1))
         return embedding
 
