@@ -12,6 +12,7 @@ from debug.debug_gns import debug_printer
 from typing import Callable
 from model.agent import MultiAgent_OneInstance, MultiAgents_Batch, MAPPO_Loss, MAPPO_Losses
 import time as systime
+from instance2graph_translator import InstanceTranslator
 
 # ===========================================================
 # =*= PROXIMAL POLICY OPTIMIZATION (PPO) RELATE FUNCTIONS =*=
@@ -24,10 +25,10 @@ LEARNING_RATE = 2e-4
 PROBLEM_SIZES = [['s', 'm'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
     "validation_rate": 20,
-    "switch_batch": 20,
+    "switch_batch": 10,
     "train_iterations": [3, 1000], 
     "opt_epochs": 3,
-    "batch_size": [3, 10],
+    "batch_size": [3, 3],
     "clip_ratio": 0.2,
     "policy_loss": 1.0,
     "value_loss": 0.5,
@@ -72,11 +73,11 @@ def load_training_dataset(debug_mode: bool, path: str):
     print(f"End of loading {len(instances)} instances!")
     return instances
 
-def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance],train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, debug: bool):
+def train_or_validate_batch(agents: list[(Module, str)], batch: list[InstanceTranslator], train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, debug: bool):
     instances_results: list[MultiAgent_OneInstance] = []
-    for instance in batch:
-        print(f"\t start solving instance: {instance.id}...")
-        instances_results.append(solve_function(instance, agents, path="", train=True, device=device, debug_mode=debug))
+    for data in batch:
+        print(f"\t start solving instance: {data.i.id}...")
+        instances_results.append(solve_function(data, agents, train=True, device=device, debug_mode=debug))
     batch_result: MultiAgents_Batch = MultiAgents_Batch(
         batch=instances_results, 
         agent_names=[name for _,name in agents], 
@@ -123,23 +124,28 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_criti
     )
     random.shuffle(instances)
     num_val = PPO_CONF['validation']
-    train_instances, val_instances = instances[num_val:], instances[:num_val]
+    start_time = systime.time()
+    dataset: list[InstanceTranslator] = [InstanceTranslator(instance, device) for instance in instances]
+    print(f"Dataset translated as graphs in {(systime.time()-start_time)} seconds!")
+    train_data, val_data = dataset[num_val:], dataset[:num_val]
     for iteration in range(iterations):
         print(f"PPO iteration: {iteration+1}/{iterations}:")
         if iteration % PPO_CONF['switch_batch'] == 0:
             debug_print(f"\t time to sample new batch of size {batch_size}...")
-            current_batch = random.sample(train_instances, batch_size)
+            current_batch: list[InstanceTranslator] = random.sample(train_data, batch_size)
         train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=optimizer, solve_function=solve_function, device=device, debug=debug_mode)
         if iteration % PPO_CONF['validation_rate'] == 0:
             debug_print("\t time to validate the loss...")
             for agent,_ in agents:
                 agent.eval()
             embedding_stack.eval()
+            shared_critic.eval()
             with torch.no_grad():
-                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_instances, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode)
+                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode)
                 vlosses.add(current_vloss)
             for agent,_ in agents:
                 agent.train()
+            embedding_stack.train()
             embedding_stack.train()
     with open(directory.models+'/validation.pkl', 'wb') as f:
         pickle.dump(vlosses, f)

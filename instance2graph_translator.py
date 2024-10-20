@@ -1,5 +1,6 @@
 from model.instance import Instance
 from model.graph import GraphInstance, ItemFeatures, OperationFeatures, ResourceFeatures, MaterialFeatures, NeedForMaterialFeatures, NeedForResourceFeatures, YES, NO, NOT_YET
+from torch import Tensor
 
 # ====================================================================
 # =*= TRANSLATE INSTANCE 2 GRAPH =*=
@@ -168,3 +169,16 @@ def translate(i: Instance, device: str):
     graph.add_dummy_item(device=device)
     graph = build_precedence(i, graph)
     return graph, Cmax_lower_bound, cost_lower_bound
+
+class InstanceTranslator:
+    def __init__(self, instance: Instance, device: str):
+        self.i = instance
+        graph, cmax_lower_bound, cost_lower_bound = translate(instance, device)
+        previous_operations, next_operations = instance.build_next_and_previous_operations()
+        self.graph: GraphInstance = graph
+        self.cmax_lower_bound: int = cmax_lower_bound
+        self.cost_lower_bound: int = cost_lower_bound
+        self.related_items: Tensor = self.graph.flatten_related_items(device)
+        self.parent_items: Tensor = self.graph.flatten_parents(device)
+        self.previous_operations: list = previous_operations
+        self.next_operations: list = next_operations
