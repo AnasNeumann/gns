@@ -14,7 +14,7 @@ SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 
 '''
     TEST WITH
-    python gns_builder.py --account=x --parent=y --mail=x@mail.com --time=20 --memory=187 --cpu=16
+    python gns_builder.py --account=x --parent=y --mail=x@mail.com --time=20 --memory=187 --cpu=16 --number=1
 '''
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII job builder")

@@ -26,7 +26,7 @@ PPO_CONF = {
     "switch_batch": 10,
     "train_iterations": [2, 200], 
     "opt_epochs": 3,
-    "batch_size": [2, 10],
+    "batch_size": [2, 15],
     "clip_ratio": 0.2,
     "policy_loss": 1.0,
     "value_loss": 0.5,

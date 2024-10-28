@@ -581,7 +581,7 @@ def load_trained_models(model_path:str, run_number:int):
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     outsourcing_actor.load_state_dict(torch.load(model_path+'/outsourcing_weights_'+index+'.pth'))
     scheduling_actor.load_state_dict(torch.load(model_path+'/scheduling_weights_'+index+'.pth'))
-    material_actor.load_state_dict(torch.load(model_path+'/material_weights_'+index+'.pth'))
+    material_actor.load_state_dict(torch.load(model_path+'/material_use_weights_'+index+'.pth'))
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 def init_new_models():
@@ -612,7 +612,7 @@ if __name__ == '__main__':
         previous_run = run_number - 1
         first = (run_number<=1)
         device = "cuda" if torch.cuda.is_available() else "cpu"
-        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(path=args.path+directory.models, run_number=previous_run)
+        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=args.path+directory.models, run_number=previous_run)
         shared_embbeding_stack = shared_embbeding_stack.to(device)
         shared_critic = shared_critic.to(device)
         for agent,_ in agents:
@@ -621,8 +621,8 @@ if __name__ == '__main__':
             list(shared_critic.parameters()) + list(shared_embbeding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
             lr=LEARNING_RATE
         )
-        if first:
-            optimizer.load_state_dict(torch.load(args.path+directory.models+"adam_"+previous_run+".pth"))
+        if not first:
+            optimizer.load_state_dict(torch.load(args.path+directory.models+"/adam_"+str(previous_run)+".pth"))
         print("Training models with MAPPO...")
         PPO_train(agents, shared_embbeding_stack, shared_critic, optimizer=optimizer, path=args.path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
     else:
@@ -633,7 +633,7 @@ if __name__ == '__main__':
         print(f"SOLVE TARGET INSTANCE {args.size}_{args.id}...")
         target_instance: Instance = load_instance(args.path+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl')
         start_time = systime.time()
-        agents, shared_embbeding_stack, shared_critic = init_new_models() if args.mode == 'test' else load_trained_models(path=args.path+directory.models, run_number=run_number) 
+        agents, shared_embbeding_stack, shared_critic = init_new_models() if args.mode == 'test' else load_trained_models(model_path=args.path+directory.models, run_number=run_number) 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         for agent,_ in agents:
             agent = agent.to(device)
