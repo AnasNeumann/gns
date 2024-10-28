@@ -24,7 +24,7 @@ PROBLEM_SIZES = [['s', 'm'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
     "validation_rate": 20,
     "switch_batch": 10,
-    "train_iterations": [2, 200], 
+    "train_iterations": [2, 150], 
     "opt_epochs": 3,
     "batch_size": [2, 15],
     "clip_ratio": 0.2,
