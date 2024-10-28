@@ -20,14 +20,13 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-LEARNING_RATE = 2e-4
 PROBLEM_SIZES = [['s', 'm'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
     "validation_rate": 20,
     "switch_batch": 10,
-    "train_iterations": [3, 1000], 
+    "train_iterations": [2, 200], 
     "opt_epochs": 3,
-    "batch_size": [3, 10],
+    "batch_size": [2, 10],
     "clip_ratio": 0.2,
     "policy_loss": 1.0,
     "value_loss": 0.5,
@@ -47,12 +46,13 @@ def reward(makespan_old: int, makespan_new: int, cost_old: int=-1, cost_new: int
     else:
         return makespan_old - makespan_new
 
-def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, path: str):
-    complete_path = path + directory.models
-    torch.save(embedding_stack.state_dict(), complete_path+'/gnn_weights.pth')
-    torch.save(shared_critic.state_dict(), complete_path+'/critic_weights.pth')
+def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Optimizer, run_number:int, complete_path: str):
+    index = str(run_number)
+    torch.save(embedding_stack.state_dict(), complete_path+'/gnn_weights_'+index+'.pth')
+    torch.save(shared_critic.state_dict(), complete_path+'/critic_weights_'+index+'.pth')
+    torch.save(optimizer.state_dict(), complete_path+'/adam_'+index+'.pth')
     for agent, name in agents:
-        torch.save(agent.state_dict(), complete_path+'/'+name+'_weights.pth')
+        torch.save(agent.state_dict(), complete_path+'/'+name+'_weights_'+index+'.pth')
 
 def search_instance(instances: list[Instance], id: int) -> Instance:
     for instance in instances:
@@ -99,9 +99,8 @@ def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance], 
         print(f'\t Multi-agent batch loss: {current_vloss:.4f}')
         return current_details
 
-def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, path: str, solve_function: Callable, debug_mode: bool=False):
+def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Optimizer, path: str, solve_function: Callable, device: str, run_number:int, debug_mode: bool=False):
     start_time = systime.time()
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     iterations: int = PPO_CONF['train_iterations'][0 if debug_mode else 1]
     batch_size: int = PPO_CONF['batch_size'][0 if debug_mode else 1]
     epochs: int = PPO_CONF['opt_epochs']
@@ -110,17 +109,10 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_criti
     instances: list[Instance] = load_training_dataset(path=path, debug_mode=debug_mode)
     print(f"Dataset loaded after {(systime.time()-start_time)} seconds!")
     embedding_stack.train()
-    embedding_stack = embedding_stack.to(device)
     shared_critic.train()
-    shared_critic = shared_critic.to(device)
-    vlosses = MAPPO_Losses(agent_names=[name for _,name in agents])
     for agent,_ in agents:
         agent.train()
-        agent = agent.to(device)
-    optimizer = torch.optim.Adam(
-        list(shared_critic.parameters()) + list(embedding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
-        lr=LEARNING_RATE
-    )
+    vlosses = MAPPO_Losses(agent_names=[name for _,name in agents])
     random.shuffle(instances)
     num_val = PPO_CONF['validation']
     train_data, val_data = instances[num_val:], instances[:num_val]
@@ -143,7 +135,8 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_criti
                 agent.train()
             embedding_stack.train()
             embedding_stack.train()
-    with open(directory.models+'/validation.pkl', 'wb') as f:
+    complete_path = path + directory.models
+    with open(complete_path+'/validation_'+str(run_number)+'.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
-    save_models(agents, embedding_stack, shared_critic, path=path)
+    save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=optimizer, run_number=run_number, complete_path=complete_path)
     print("<======***--| END OF TRAINING |--***======>")

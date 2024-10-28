@@ -38,13 +38,13 @@ python exact_solver.py --size=s --id=151 --path=./
 ## Test the GNS solver in solving mode
 ```python
 bash _env.sh
-python gns_solver.py --size=s --id=151 --train=false --mode=test --path=./
+python gns_solver.py --size=s --id=151 --train=false --mode=test --number=1 --path=./ 
 ```
 
 ## Test the GNS solver in training mode
 ```python
 bash _env.sh
-python gns_solver.py --train=true --mode=test --path=./
+python gns_solver.py --train=true --mode=test --number=1 --path=./
 ```
 
 ## Generate exact jobs for DRAC production
@@ -56,7 +56,7 @@ python ./jobs/exact_builder.py --account=x --parent=y --mail=x@mail.com
 
 ## Generate the GNS training job for DRAC production
 ```python
-python ./jobs/gns_builder.py --account=x --parent=y --mail=x@mail.com --time=10 --memory=187 --cpu=16
+python ./jobs/gns_builder.py --account=x --parent=y --mail=x@mail.com --time=10 --memory=187 --cpu=16 --number=1
 ```
 
 ## Execute all jobs in DRAC production (_train GNN and solve testing instances with exact solver_)

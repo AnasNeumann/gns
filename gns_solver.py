@@ -22,6 +22,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
+LEARNING_RATE = 2e-4
 OUTSOURCING = 0
 SCHEDULING = 1
 MATERIAL_USE = 2
@@ -569,17 +570,18 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
 # =*= IV. MAIN CODE =*=
 # =====================================================
 
-def load_trained_models(model_path):
+def load_trained_models(model_path:str, run_number:int):
+    index = str(run_number)
     shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
-    shared_GNN.load_state_dict(torch.load(model_path+'/gnn_weights.pth'))
+    shared_GNN.load_state_dict(torch.load(model_path+'/gnn_weights_'+index+'.pth'))
     shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    shared_critic.load_state_dict(torch.load(model_path+'/critic_weights.pth'))
+    shared_critic.load_state_dict(torch.load(model_path+'/critic_weights_'+index+'.pth'))
     outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    outsourcing_actor.load_state_dict(torch.load(model_path+'/outsourcing_weights.pth'))
-    scheduling_actor.load_state_dict(torch.load(model_path+'/scheduling_weights.pth'))
-    material_actor.load_state_dict(torch.load(model_path+'/material_weights.pth'))
+    outsourcing_actor.load_state_dict(torch.load(model_path+'/outsourcing_weights_'+index+'.pth'))
+    scheduling_actor.load_state_dict(torch.load(model_path+'/scheduling_weights_'+index+'.pth'))
+    material_actor.load_state_dict(torch.load(model_path+'/material_weights_'+index+'.pth'))
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 def init_new_models():
@@ -597,33 +599,47 @@ if __name__ == '__main__':
     parser.add_argument("--train", help="Do you want to load a pre-trained model", required=True)
     parser.add_argument("--mode", help="Execution mode (either prod or test)", required=True)
     parser.add_argument("--path", help="Saving path on the server", required=True)
+    parser.add_argument("--number", help="The number of the current run", required=True)
     args = parser.parse_args()
     print(f"Execution mode: {args.mode}...")
     debug_mode = (args.mode == 'test')
+    run_number = int(args.number)
     if to_bool(args.train):
         '''
             Test training mode with: bash _env.sh
-            python gns_solver.py --train=true --mode=test --path=./
+            python gns_solver.py --train=true --mode=test --number=1 --path=./
         '''
-        agent, shared_embbeding_stack, shared_critic = init_new_models()
+        previous_run = run_number - 1
+        first = (run_number<=1)
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(path=args.path+directory.models, run_number=previous_run)
+        shared_embbeding_stack = shared_embbeding_stack.to(device)
+        shared_critic = shared_critic.to(device)
+        for agent,_ in agents:
+            agent = agent.to(device)
+        optimizer = torch.optim.Adam(
+            list(shared_critic.parameters()) + list(shared_embbeding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
+            lr=LEARNING_RATE
+        )
+        if first:
+            optimizer.load_state_dict(torch.load(args.path+directory.models+"adam_"+previous_run+".pth"))
         print("Training models with MAPPO...")
-        PPO_train(agent, shared_embbeding_stack, shared_critic, path=args.path, solve_function=solve_one, debug_mode=debug_mode)
+        PPO_train(agents, shared_embbeding_stack, shared_critic, optimizer=optimizer, path=args.path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
     else:
         '''
             Test inference mode with: bash _env.sh
-            python gns_solver.py --size=s --id=151 --train=false --mode=test --path=./
+            python gns_solver.py --size=s --id=151 --train=false --mode=test --path=./ --number=1
         '''
         print(f"SOLVE TARGET INSTANCE {args.size}_{args.id}...")
         target_instance: Instance = load_instance(args.path+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl')
         start_time = systime.time()
-        agents, shared_embbeding_stack, shared_critic = init_new_models() if args.mode == 'test' else load_trained_models(args.path+directory.models) 
+        agents, shared_embbeding_stack, shared_critic = init_new_models() if args.mode == 'test' else load_trained_models(path=args.path+directory.models, run_number=run_number) 
         device = "cuda" if torch.cuda.is_available() else "cpu"
         for agent,_ in agents:
             agent = agent.to(device)
         shared_embbeding_stack = shared_embbeding_stack.to(device)
         shared_critic = shared_critic.to(device)
-        data: InstanceTranslator = InstanceTranslator(target_instance, device)
-        current_cmax, current_cost = solve_one(data, agents, train=False, device=device, debug_mode=debug_mode)
+        current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, debug_mode=debug_mode)
         solutions_df = pd.DataFrame({
             'index': [target_instance.id],
             'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
