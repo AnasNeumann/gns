@@ -56,7 +56,7 @@ python ./jobs/exact_builder.py --account=x --parent=y --mail=x@mail.com
 
 ## Generate the GNS training job for DRAC production
 ```python
-python ./jobs/gns_builder.py --account=x --parent=y --mail=x@mail.com --time=10 --memory=187 --cpu=16 --number=1
+python ./jobs/gns_builder.py --account=x --parent=y --mail=x@mail.com --time=50 --memory=16 --cpu=2 --number=1
 ```
 
 ## Execute all jobs in DRAC production (_train GNN and solve testing instances with exact solver_)
