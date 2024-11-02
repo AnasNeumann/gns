@@ -5,7 +5,7 @@ A small Graph Attention Network (GAT) to schedule jobs in a ETO manufacturing en
 `Neumann, Anas (2024). A hyper-graph neural network trained with multi-agent proximal policy optimization to schedule projects in engineer-to-order environments *GitHub repository: https://github.com/AnasNeumann/gns*.`
 
 ```bibtex
-    @misc{simplemaml,
+    @misc{HGNS,
       author = {Anas Neumann},
       title = {A hyper-graph neural network trained with multi-Agent proximal policy optimization to schedule projects in engineer-to-order environments},
       year = {2024},
