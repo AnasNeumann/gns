@@ -1,5 +1,5 @@
 # Engineer-To-Order (ETO) Graph Neural Scheduling (GNS) Project
-A small Graph Attention Network (GAT) to schedule jobs in a ETO manufacturing environement, trained with the Proxmimal Policy gradient Optimization (PPO) reinforcement learning algorithm.
+A Graph Attention Network (GAT) to schedule jobs in an ETO manufacturing environment, trained with a Multi-Agent version of the Proximal Policy Optimization (MAPPO) algorithm.
 
 ## Refer to this repository in scientific documents
 `Neumann, Anas (2024). A hyper-graph neural network trained with multi-agent proximal policy optimization to schedule projects in engineer-to-order environments *GitHub repository: https://github.com/AnasNeumann/gns*.`
