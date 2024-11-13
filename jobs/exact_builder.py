@@ -1,5 +1,6 @@
 import sys
 import argparse
+import os
 
 # =====================================================
 # =*= CODE TO GENERATE JOBS FOR THE EXACT SOLVER =*=
@@ -27,6 +28,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
     BASIC_PATH = "/home/"+args.account+"/projects/def-"+args.parent+"/"+args.account+"/gns/"
     for size_id, size in enumerate(SIZES):
+        os.makedirs(f"./scripts/exact/{size}/", exist_ok=True) 
         for instance in range(START_IDX, END_IDX+1):
             f = open(f"./scripts/exact/{size}/{instance}.sh", "w+")
             f.write("#!/bin/bash\n")
