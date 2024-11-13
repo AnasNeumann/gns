@@ -1,3 +1,4 @@
+ortools
 numpy
 pandas
 seaborn
@@ -7,4 +8,3 @@ torch
 torchvision
 torchaudio
 torch_geometric
-ortools
