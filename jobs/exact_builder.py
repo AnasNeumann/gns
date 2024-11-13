@@ -11,9 +11,9 @@ __license__ = "Apache 2.0 License"
 START_IDX: int = 151
 END_IDX: int = 200
 SIZES: list[str] = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
-MINUTES: list[int] = [10, 20, 45, 0, 0, 0]
-HOURS: list[int] = [0, 0, 0, 3, 3, 3]
-MEMORY: list[int] = [12, 12, 32, 64, 64, 64]
+MINUTES: list[int] = [10, 20, 45, 30, 30, 30]
+HOURS: list[int] = [0, 0, 0, 5, 5, 5]
+MEMORY: list[int] = [12, 12, 120, 120, 200, 200]
 
 '''
     TEST WITH
@@ -43,6 +43,6 @@ if __name__ == '__main__':
             f.write("source $SLURM_TMPDIR/env/bin/activate\n")
             f.write("pip install --upgrade pip --no-index\n")
             f.write("pip install --no-index -r "+BASIC_PATH+"requirements.txt\n")
-            f.write(f"python {BASIC_PATH}exact_solver.py --size={size} --number={instance} --path="+BASIC_PATH+" \n")
+            f.write(f"python {BASIC_PATH}exact_solver.py --mode=prod --size={size} --number={instance} --path="+BASIC_PATH+" \n")
             f.write("desactivate\n")
             f.close()

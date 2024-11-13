@@ -15,7 +15,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-MAX_COMPUTING_HOURS = 3
+MAX_COMPUTING_HOURS = 5
 MAX_RAM = 6
 BASIC_PATH = './'
 
@@ -228,7 +228,7 @@ def c17(model: cp_model.CpModel, i: Instance, s: Solution):
                 if i.finite_capacity[r]:
                     terms = []
                     for p2 in i.loop_projects():
-                        for o2 in i.loop_operations(p1):
+                        for o2 in i.loop_operations(p2):
                             if not i.is_same(p1,p2,o1,o2) and i.require(p2,o2,r):
                                 terms.append(s.precedes[p1][p2][o1][o2][r])
                     if len(terms)>0:
@@ -377,11 +377,19 @@ def c27(model: cp_model.CpModel, i: Instance, s: Solution):
                         model.Add(s.O_executed[p][o][r1] + s.O_executed[p][o][r2] <= 1)
     return model, s
 
-def solve_one(instance: Instance, solution_path: str):
+def solve_one(instance: Instance, cpus: int, memory: int, solution_path: str):
     start_time = systime.time()
     model = cp_model.CpModel()
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = MAX_COMPUTING_HOURS * 60.0 
+    solver.parameters.max_time_in_seconds = MAX_COMPUTING_HOURS * 60.0 * 60.0
+    solver.parameters.relative_gap_limit = 0.01
+    solver.parameters.num_search_workers = cpus
+    solver.parameters.max_memory_in_mb = memory
+    solver.parameters.absolute_gap_limit = 5.0 
+    solver.parameters.use_implied_bounds = True
+    solver.parameters.use_probing_search = True
+    solver.parameters.cp_model_presolve = True
+    solver.parameters.log_search_progress = False 
     model, solution = init_vars(model, instance)
     model, solution = init_objective_function(model, instance, solution)
     for constraint in [c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16,c17,c18,c19,c20,c21,c22,c23,c24,c25,c26,c27]:
@@ -389,9 +397,12 @@ def solve_one(instance: Instance, solution_path: str):
     status = solver.Solve(model)
     computing_time = systime.time()-start_time
     if status == cp_model.OPTIMAL:
-        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [solver.ObjectiveValue()/100], 'status': ['optimal'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [solver.ObjectiveValue()/100], 'gap': [0], 'status': ['optimal'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
     elif status == cp_model.FEASIBLE:
-        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [solver.ObjectiveValue()/100], 'status': ['feasible'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
+        best_objective = solver.ObjectiveValue()
+        lower_bound = solver.BestObjectiveBound()
+        gap = abs(best_objective - lower_bound) / abs(best_objective) if best_objective != 0 else -1
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [best_objective/100], 'gap': [gap], 'status': ['feasible'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
     else:
         solutions_df = pd.DataFrame({'index': [instance.id], 'value': [-1], 'status': ['failure'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
     print(solutions_df)
@@ -399,19 +410,23 @@ def solve_one(instance: Instance, solution_path: str):
 
 '''
     TEST WITH
-    python exact_solver.py --size=s --id=151 --path=./
+    python exact_solver.py --size=s --id=151 --mode=test --path=./
 '''
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 exact solver")
     parser.add_argument("--size", help="Size of the solved instance", required=True)
     parser.add_argument("--id", help="Id of the solved instance", required=True)
+    parser.add_argument("--mode", help="Execution mode", required=True)
     parser.add_argument("--path", help="Saving path on the server", required=True)
     args = parser.parse_args()
     BASIC_PATH = args.path
+    cpus = 1 if args.mode == 'test' else 16
+    memory = 30 if args.mode == 'test' else 190 if 'xx' in args.size else 110
+    print(f'CPU USED: {cpus}')
     INSTANCE_PATH = BASIC_PATH+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl'
     SOLUTION_PATH = BASIC_PATH+directory.instances+'/test/'+args.size+'/solution_exact_'+args.id+'.csv'
     print(f"Loading {INSTANCE_PATH}...")
     instance = load_instance(INSTANCE_PATH)
     print("===* START SOLVING *===")
-    solve_one(instance, SOLUTION_PATH)
+    solve_one(instance, cpus, memory, SOLUTION_PATH)
     print("===* END OF FILE *===")

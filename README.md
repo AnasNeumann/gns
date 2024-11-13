@@ -32,7 +32,7 @@ python instance_generator.py --train=150 --test=50
 ## Test the exact (Google OR-Tool) solver
 ```python
 bash _env.sh
-python exact_solver.py --size=s --id=151 --path=./
+python exact_solver.py --size=s --id=151 --path=./ --mode=test
 ```
 
 ## Test the GNS solver in solving mode

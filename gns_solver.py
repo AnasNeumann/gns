@@ -454,7 +454,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                     id=idx,
                     value=state_value.detach())
             else:
-                with torch.no_grad:
+                with torch.no_grad():
                     probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
                 idx = policy(probs, greedy=True)
             if actions_type == OUTSOURCING:
@@ -570,18 +570,18 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
 # =*= IV. MAIN CODE =*=
 # =====================================================
 
-def load_trained_models(model_path:str, run_number:int):
+def load_trained_models(model_path:str, run_number:int, device:str):
     index = str(run_number)
     shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
-    shared_GNN.load_state_dict(torch.load(model_path+'/gnn_weights_'+index+'.pth'))
+    shared_GNN.load_state_dict(torch.load(model_path+'/gnn_weights_'+index+'.pth', map_location=torch.device(device)))
     shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    shared_critic.load_state_dict(torch.load(model_path+'/critic_weights_'+index+'.pth'))
+    shared_critic.load_state_dict(torch.load(model_path+'/critic_weights_'+index+'.pth', map_location=torch.device(device)))
     outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    outsourcing_actor.load_state_dict(torch.load(model_path+'/outsourcing_weights_'+index+'.pth'))
-    scheduling_actor.load_state_dict(torch.load(model_path+'/scheduling_weights_'+index+'.pth'))
-    material_actor.load_state_dict(torch.load(model_path+'/material_use_weights_'+index+'.pth'))
+    outsourcing_actor.load_state_dict(torch.load(model_path+'/outsourcing_weights_'+index+'.pth', map_location=torch.device(device)))
+    scheduling_actor.load_state_dict(torch.load(model_path+'/scheduling_weights_'+index+'.pth', map_location=torch.device(device)))
+    material_actor.load_state_dict(torch.load(model_path+'/material_use_weights_'+index+'.pth', map_location=torch.device(device)))
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 def init_new_models():
@@ -604,15 +604,15 @@ if __name__ == '__main__':
     print(f"Execution mode: {args.mode}...")
     debug_mode = (args.mode == 'test')
     run_number = int(args.number)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    first = (run_number<=1)
     if to_bool(args.train):
         '''
             Test training mode with: bash _env.sh
             python gns_solver.py --train=true --mode=test --number=1 --path=./
         '''
         previous_run = run_number - 1
-        first = (run_number<=1)
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=args.path+directory.models, run_number=previous_run)
+        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=args.path+directory.models, run_number=previous_run, device=device)
         shared_embbeding_stack = shared_embbeding_stack.to(device)
         shared_critic = shared_critic.to(device)
         for agent,_ in agents:
@@ -633,8 +633,7 @@ if __name__ == '__main__':
         print(f"SOLVE TARGET INSTANCE {args.size}_{args.id}...")
         target_instance: Instance = load_instance(args.path+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl')
         start_time = systime.time()
-        agents, shared_embbeding_stack, shared_critic = init_new_models() if args.mode == 'test' else load_trained_models(model_path=args.path+directory.models, run_number=run_number) 
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=args.path+directory.models, run_number=run_number, device=device)
         for agent,_ in agents:
             agent = agent.to(device)
         shared_embbeding_stack = shared_embbeding_stack.to(device)
