@@ -46,6 +46,6 @@ if __name__ == '__main__':
             f.write(f"pip install {BASIC_PATH}wheels/protobuf-5.28.3-*.whl\n")
             f.write(f"pip install {BASIC_PATH}wheels/immutabledict-4.2.0-*.whl\n")
             f.write("pip install --no-index -r "+BASIC_PATH+"requirements_or.txt\n")
-            f.write(f"python {BASIC_PATH}exact_solver.py --mode=prod --size={size} --number={instance} --path="+BASIC_PATH+" \n")
+            f.write(f"python {BASIC_PATH}exact_solver.py --mode=prod --size={size} --id={instance} --path="+BASIC_PATH+" \n")
             f.write("desactivate\n")
             f.close()
