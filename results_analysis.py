@@ -7,7 +7,6 @@ import pickle
 from model.agent import MAPPO_Losses
 from torch import Tensor
 import matplotlib.pyplot as plt
-import numpy as np
 
 # =====================================================
 # =*= EXPERIMENTS: RESULTS ANALYSIS =*=

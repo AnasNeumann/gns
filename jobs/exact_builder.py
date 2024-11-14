@@ -1,4 +1,3 @@
-import sys
 import argparse
 import os
 
@@ -44,7 +43,7 @@ if __name__ == '__main__':
             f.write("virtualenv --no-download $SLURM_TMPDIR/env\n")
             f.write("source $SLURM_TMPDIR/env/bin/activate\n")
             f.write("pip install --upgrade pip --no-index\n")
-            f.write("pip install --no-index -r "+BASIC_PATH+"requirements.txt\n")
+            f.write("pip install --no-index -r "+BASIC_PATH+"requirements_or.txt\n")
             f.write(f"python {BASIC_PATH}exact_solver.py --mode=prod --size={size} --number={instance} --path="+BASIC_PATH+" \n")
             f.write("desactivate\n")
             f.close()

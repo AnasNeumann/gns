@@ -2,7 +2,6 @@ import torch
 from torch_geometric.data.storage import EdgeStorage
 from torch.nn import Sequential, Linear, ELU, Tanh, Parameter, LeakyReLU, Module, ModuleList
 import torch.nn.functional as F
-from torch_geometric.nn import global_mean_pool
 from torch import Tensor
 from .graph import FeatureConfiguration, State
 from torch_geometric.utils import scatter

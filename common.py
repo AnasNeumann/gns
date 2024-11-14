@@ -1,10 +1,7 @@
 import pickle
 import os
 import resource
-import torch
 from typing import Union, Any, Dict
-from model.instance import Instance
-from torch import Tensor
 
 # =====================================================================
 # =*= COMMON TOOLS (objects and functions) USED ACCROSS THE PROJECT =*=
@@ -27,13 +24,6 @@ num_feature = Union[int, float]
 all_types_feature = Union[int, float, bool, list]
 generic_object = Union[object, Dict[Any, Any]]
 
-def add_into_tensor(tensor_list: Tensor | None, tensor_val: Tensor):
-    if tensor_list is None:
-        tensor_list = tensor_val
-    else:
-        tensor_list = torch.cat((tensor_list, tensor_val), dim=0)
-    return tensor_list
-
 def load_instance(path: str):
     with open(path, 'rb') as file:
         return pickle.load(file)
@@ -48,9 +38,6 @@ def load_instances(path: str):
                 instances.append(pickle.load(file))
     print("end of loading!")
     return instances
-
-def to_binary(booleanVal: bool):
-    return 1 if booleanVal else 0
 
 def set_memory_limit(max_ram_bytes: num_feature):
     _, hard = resource.getrlimit(resource.RLIMIT_AS)
@@ -76,15 +63,6 @@ def init_several_3D(a: int, b: int, c: int, default_value: all_types_feature, nb
 
 def to_bool(s: str):
     return s.lower() in ['true', '1', 't', 'y', 'yes']
-
-def features2tensor(features: list, device: str):
-    for f in features:
-        if isinstance(f, bool):
-            f = to_binary(f)
-    return torch.tensor([[f for f in features]], dtype=torch.float, device=device)
-
-def id2tensor(id1: int, id2: int, device: str):
-    return torch.tensor([[id1], [id2]], dtype=torch.long, device=device)
 
 def search_object_by_id(objects: list[generic_object], id: int):
     for obj in objects:

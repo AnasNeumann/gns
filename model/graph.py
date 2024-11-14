@@ -1,10 +1,10 @@
-import copy
 import torch
 from torch_geometric.data import HeteroData
 from torch_geometric.data.storage import EdgeStorage
 from torch_geometric.utils import to_dense_adj
 from torch import Tensor
-from common import features2tensor, id2tensor, num_feature
+from common import num_feature
+from tensors import features2tensor, id2tensor
 from .instance import Instance
 
 # =============================================================
