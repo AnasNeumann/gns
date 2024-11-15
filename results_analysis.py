@@ -62,7 +62,7 @@ def display_losses(model_path: str, result_path: str, last: int):
     outsourcing_losses: list[float] = []
     scheduling_losses: list[float] = []
     material_losses: list[float] = []
-    for model_id in range(1, last):
+    for model_id in range(1, last + 1):
         with open(model_path+'/validation_'+str(model_id)+'.pkl', 'rb') as file:
             l: MAPPO_Losses = pickle.load(file)
             value_losses.extend(l.value_loss)
