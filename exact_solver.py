@@ -385,7 +385,9 @@ def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_pa
     solver.parameters.use_implied_bounds = True
     solver.parameters.use_probing_search = True
     solver.parameters.cp_model_presolve = True
-    solver.parameters.log_search_progress = False 
+    solver.parameters.optimize_with_core = True
+    solver.parameters.log_search_progress = True
+    solver.parameters.enumerate_all_solutions = False
     model, solution = init_vars(model, instance)
     model, solution = init_objective_function(model, instance, solution)
     for constraint in [c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16,c17,c18,c19,c20,c21,c22,c23,c24,c25,c26,c27]:
@@ -417,7 +419,7 @@ if __name__ == '__main__':
     parser.add_argument("--path", help="Saving path on the server", required=True)
     args = parser.parse_args()
     BASIC_PATH = args.path
-    cpus = 1 if args.mode == 'test' else 16
+    cpus = 8 if args.mode == 'test' else 16
     time = int(args.time)
     memory = 30 if args.mode == 'test' else 190 if 'xx' in args.size else 110
     print(f'CPU USED: {cpus}')
