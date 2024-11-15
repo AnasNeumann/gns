@@ -47,5 +47,5 @@ if __name__ == '__main__':
             f.write(f"pip install {BASIC_PATH}wheels/immutabledict-4.2.0-*.whl\n")
             f.write("pip install --no-index -r "+BASIC_PATH+"requirements_or.txt\n")
             f.write(f"python {BASIC_PATH}exact_solver.py --mode=prod --size={size} --id={instance} --time={HOURS[size_id]} --path="+BASIC_PATH+" \n")
-            f.write("desactivate\n")
+            f.write("deactivate\n")
             f.close()
