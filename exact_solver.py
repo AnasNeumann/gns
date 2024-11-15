@@ -13,8 +13,6 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-MAX_COMPUTING_HOURS = 5
-MAX_RAM = 6
 BASIC_PATH = './'
 
 def init_vars(model: cp_model.CpModel, i: Instance):
@@ -375,11 +373,11 @@ def c27(model: cp_model.CpModel, i: Instance, s: Solution):
                         model.Add(s.O_executed[p][o][r1] + s.O_executed[p][o][r2] <= 1)
     return model, s
 
-def solve_one(instance: Instance, cpus: int, memory: int, solution_path: str):
+def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_path: str):
     start_time = systime.time()
     model = cp_model.CpModel()
     solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = MAX_COMPUTING_HOURS * 60.0 * 60.0
+    solver.parameters.max_time_in_seconds = time * 60.0 * 60.0
     solver.parameters.relative_gap_limit = 0.01
     solver.parameters.num_search_workers = cpus
     solver.parameters.max_memory_in_mb = memory
@@ -395,30 +393,32 @@ def solve_one(instance: Instance, cpus: int, memory: int, solution_path: str):
     status = solver.Solve(model)
     computing_time = systime.time()-start_time
     if status == cp_model.OPTIMAL:
-        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [solver.ObjectiveValue()/100], 'gap': [0], 'status': ['optimal'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [solver.ObjectiveValue()/100], 'gap': [0], 'status': ['optimal'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
     elif status == cp_model.FEASIBLE:
         best_objective = solver.ObjectiveValue()
         lower_bound = solver.BestObjectiveBound()
         gap = abs(best_objective - lower_bound) / abs(best_objective) if best_objective != 0 else -1
-        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [best_objective/100], 'gap': [gap], 'status': ['feasible'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [best_objective/100], 'gap': [gap], 'status': ['feasible'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
     else:
-        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [-1], 'status': ['failure'], 'computing_time': [computing_time], 'max_time': [MAX_COMPUTING_HOURS], 'max_memory': [MAX_RAM]})
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [-1], 'status': ['failure'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
     print(solutions_df)
     solutions_df.to_csv(solution_path, index=False)
 
 '''
     TEST WITH
-    python exact_solver.py --size=s --id=151 --mode=test --path=./
+    python exact_solver.py --size=s --id=151 --mode=test --path=./ --time=1
 '''
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 exact solver")
     parser.add_argument("--size", help="Size of the solved instance", required=True)
     parser.add_argument("--id", help="Id of the solved instance", required=True)
     parser.add_argument("--mode", help="Execution mode", required=True)
+    parser.add_argument("--time", help="Max computing time", required=True)
     parser.add_argument("--path", help="Saving path on the server", required=True)
     args = parser.parse_args()
     BASIC_PATH = args.path
     cpus = 1 if args.mode == 'test' else 16
+    time = int(args.time)
     memory = 30 if args.mode == 'test' else 190 if 'xx' in args.size else 110
     print(f'CPU USED: {cpus}')
     INSTANCE_PATH = BASIC_PATH+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl'
@@ -426,5 +426,5 @@ if __name__ == '__main__':
     print(f"Loading {INSTANCE_PATH}...")
     instance = load_instance(INSTANCE_PATH)
     print("===* START SOLVING *===")
-    solve_one(instance, cpus, memory, SOLUTION_PATH)
+    solve_one(instance, cpus, memory, time, SOLUTION_PATH)
     print("===* END OF FILE *===")

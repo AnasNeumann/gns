@@ -11,8 +11,8 @@ __license__ = "Apache 2.0 License"
 START_IDX: int = 151
 END_IDX: int = 200
 SIZES: list[str] = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
-MINUTES: list[int] = [10, 20, 45, 30, 30, 30]
-HOURS: list[int] = [0, 0, 0, 5, 5, 5]
+MINUTES: list[int] = [30, 30, 30, 30, 30, 30]
+HOURS: list[int] = [1, 2, 3, 5, 7, 10]
 MEMORY: list[int] = [12, 12, 120, 120, 200, 200]
 
 '''
@@ -46,6 +46,6 @@ if __name__ == '__main__':
             f.write(f"pip install {BASIC_PATH}wheels/protobuf-5.28.3-*.whl\n")
             f.write(f"pip install {BASIC_PATH}wheels/immutabledict-4.2.0-*.whl\n")
             f.write("pip install --no-index -r "+BASIC_PATH+"requirements_or.txt\n")
-            f.write(f"python {BASIC_PATH}exact_solver.py --mode=prod --size={size} --id={instance} --path="+BASIC_PATH+" \n")
+            f.write(f"python {BASIC_PATH}exact_solver.py --mode=prod --size={size} --id={instance} --time={HOURS[size_id]} --path="+BASIC_PATH+" \n")
             f.write("desactivate\n")
             f.close()
