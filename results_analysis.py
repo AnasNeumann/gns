@@ -47,12 +47,15 @@ def combine_all_results(basic_path: str):
 
 def display_one(losses: list[Tensor], loss_name: str, path: str):
     plt.figure(figsize=(10, 5))
-    plt.plot(losses, label=loss_name)
+    x_values = range(1, len(losses) + 1)
+    plt.plot(x_values, losses, label=loss_name)
     plt.xlabel('MAPPO Iteration')
     plt.ylabel('Loss')
     plt.title('Training Convergence: '+loss_name)
     plt.legend()
     plt.grid(True)
+    for x in range(8, len(losses) + 1, 8):
+        plt.axvline(x=x, color='black', linestyle='--', linewidth=1)
     plt.savefig(path+"/"+loss_name+".png")
     plt.show()
 
