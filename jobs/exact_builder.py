@@ -13,7 +13,7 @@ END_IDX: int = 200
 SIZES: list[str] = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 MINUTES: list[int] = [30, 30, 30, 30, 30, 30]
 HOURS: list[int] = [1, 2, 3, 5, 7, 10]
-MEMORY: list[int] = [12, 12, 120, 120, 200, 200]
+MEMORY: list[int] = [120, 120, 120, 120, 200, 200]
 
 '''
     TEST WITH
