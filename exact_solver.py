@@ -419,7 +419,7 @@ if __name__ == '__main__':
     parser.add_argument("--path", help="Saving path on the server", required=True)
     args = parser.parse_args()
     BASIC_PATH = args.path
-    cpus = 8 if args.mode == 'test' else 16
+    cpus = 8 if args.mode == 'test' else 32
     time = int(args.time)
     memory = int(args.memory)
     print(f'CPU USED: {cpus}')
