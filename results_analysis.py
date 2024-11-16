@@ -45,34 +45,53 @@ def combine_all_results(basic_path: str):
                 print(combined_solutions[size][type])
     print(combined_solutions)
 
-def display_one(losses: list[Tensor], loss_name: str):
+def display_one(losses: list[Tensor], loss_name: str, path: str):
     plt.figure(figsize=(10, 5))
-    plt.plot(losses, label=loss_name)
+    x_values = range(1, len(losses) + 1)
+    plt.plot(x_values, losses, label=loss_name)
     plt.xlabel('MAPPO Iteration')
     plt.ylabel('Loss')
     plt.title('Training Convergence: '+loss_name)
     plt.legend()
     plt.grid(True)
+    for x in range(8, len(losses) + 1, 8):
+        plt.axvline(x=x, color='black', linestyle='--', linewidth=1)
+    plt.savefig(path+"/"+loss_name+".png")
     plt.show()
 
 # Display losses
-def display_losses(path: str):
-    with open(path, 'rb') as file:
-        losses: MAPPO_Losses = pickle.load(file)
-        display_one(losses.value_loss, 'Shared value loss')
-        for agent in losses.agents:
-            display_one(agent.policy_loss, 'Agent: '+agent.name+' - Policy loss')
-            display_one(agent.entropy_bonus, 'Agent: '+agent.name+' - Entropy bonus')
-
+def display_losses(model_path: str, result_path: str, last: int):
+    value_losses: list[float] = []
+    outsourcing_losses: list[float] = []
+    scheduling_losses: list[float] = []
+    material_losses: list[float] = []
+    for model_id in range(1, last + 1):
+        with open(model_path+'/validation_'+str(model_id)+'.pkl', 'rb') as file:
+            l: MAPPO_Losses = pickle.load(file)
+            value_losses.extend(l.value_loss)
+            for agent in l.agents:
+                if agent.name == "outsourcing":
+                    outsourcing_losses.extend(agent.policy_loss)
+                elif agent.name == "scheduling":
+                    scheduling_losses.extend(agent.policy_loss)
+                else:
+                    material_losses.extend(agent.policy_loss)
+    display_one(value_losses, 'Shared value loss', result_path)
+    display_one(outsourcing_losses, 'Outsoucing policy loss', result_path)
+    display_one(scheduling_losses, 'Scheduling policy loss', result_path)
+    display_one(material_losses, 'Material use policy loss', result_path)
+    
 '''
     TEST WITH
-    python results_analysis.py --path=./
+    python results_analysis.py --path=./ --last=7
 '''
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 results analysis")
     parser.add_argument("--path", help="Path of the test instances", required=True)
+    parser.add_argument("--last", help="Last trained version of GNN model", required=True)
     args = parser.parse_args()
     instances_path = args.path+directory.instances+'/test/'
-    losses_path = args.path+directory.models+'/validation.pkl'
-    combine_all_results(basic_path=instances_path)
-    display_losses(losses_path)
+    model_path = args.path+directory.models
+    result_path = args.path+directory.results
+    #combine_all_results(basic_path=instances_path)
+    display_losses(model_path=model_path, result_path=result_path, last=int(args.last))
