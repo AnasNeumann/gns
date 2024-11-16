@@ -11,8 +11,8 @@ __license__ = "Apache 2.0 License"
 START_IDX: int = 151
 END_IDX: int = 200
 SIZES: list[str] = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
-MINUTES: list[int] = [30, 30, 30, 30, 30, 30]
-HOURS: list[int] = [1, 2, 3, 5, 7, 10]
+MINUTES: list[int] = [10, 10, 10, 10, 10, 10]
+HOURS: list[int] = [1, 4, 6, 8, 12, 16]
 MEMORY: list[int] = [120, 120, 120, 120, 200, 200]
 
 '''
@@ -28,13 +28,14 @@ if __name__ == '__main__':
     BASIC_PATH = "/home/"+args.account+"/projects/def-"+args.parent+"/"+args.account+"/gns/"
     for size_id, size in enumerate(SIZES):
         os.makedirs(f"./scripts/exact/{size}/", exist_ok=True) 
+        memory = MEMORY[size_id] - 2
         for instance in range(START_IDX, END_IDX+1):
             f = open(f"./scripts/exact/{size}/{instance}.sh", "w+")
             f.write("#!/bin/bash\n")
             f.write("#SBATCH --nodes 1\n")
             f.write(f"#SBATCH --time={HOURS[size_id]}:{MINUTES[size_id]}:00\n")
             f.write(f"#SBATCH --mem={MEMORY[size_id]}G\n")
-            f.write(f"#SBATCH --cpus-per-task=16\n")
+            f.write(f"#SBATCH --cpus-per-task=32\n")
             f.write(f"#SBATCH --account=def-{args.parent}\n")
             f.write(f"#SBATCH --mail-user={args.mail}\n")
             f.write("#SBATCH --mail-type=FAIL\n")
@@ -46,6 +47,6 @@ if __name__ == '__main__':
             f.write(f"pip install {BASIC_PATH}wheels/protobuf-5.28.3-*.whl\n")
             f.write(f"pip install {BASIC_PATH}wheels/immutabledict-4.2.0-*.whl\n")
             f.write("pip install --no-index -r "+BASIC_PATH+"requirements_or.txt\n")
-            f.write(f"python {BASIC_PATH}exact_solver.py --mode=prod --size={size} --id={instance} --time={HOURS[size_id]} --path="+BASIC_PATH+" \n")
+            f.write(f"python {BASIC_PATH}exact_solver.py --mode=prod --size={size} --id={instance} --time={HOURS[size_id]} --memory={memory} --path="+BASIC_PATH+" \n")
             f.write("deactivate\n")
             f.close()

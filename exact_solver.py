@@ -408,7 +408,7 @@ def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_pa
 
 '''
     TEST WITH
-    python exact_solver.py --size=s --id=151 --mode=test --path=./ --time=1
+    python exact_solver.py --size=s --id=151 --mode=test --path=./ --time=1 --memory=8
 '''
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 exact solver")
@@ -421,7 +421,7 @@ if __name__ == '__main__':
     BASIC_PATH = args.path
     cpus = 8 if args.mode == 'test' else 16
     time = int(args.time)
-    memory = 30 if args.mode == 'test' else 190 if 'xx' in args.size else 110
+    memory = int(args.memory)
     print(f'CPU USED: {cpus}')
     INSTANCE_PATH = BASIC_PATH+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl'
     SOLUTION_PATH = BASIC_PATH+directory.instances+'/test/'+args.size+'/solution_exact_'+args.id+'.csv'
