@@ -415,6 +415,7 @@ if __name__ == '__main__':
     parser.add_argument("--size", help="Size of the solved instance", required=True)
     parser.add_argument("--id", help="Id of the solved instance", required=True)
     parser.add_argument("--mode", help="Execution mode", required=True)
+    parser.add_argument("--memory", help="Execution max memory", required=True)
     parser.add_argument("--time", help="Max computing time", required=True)
     parser.add_argument("--path", help="Saving path on the server", required=True)
     args = parser.parse_args()
