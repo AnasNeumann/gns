@@ -182,8 +182,9 @@ class Agent_Batch:
         self.weight_entropy_bonus: float = 0.01
         self.instances: list[Agent_OneInstance] = []
 
-    # Loss(max version) = w1*SUM_i[policy_loss] - w2*SUM_i[value_loss] + w3*SUM_i[entropy_bonus]
-    # Loss(min version) = -w1*SUM_i[policy_loss] + w2*SUM_i[value_loss] - w3*SUM_i[entropy_bonus]
+    # Loss for one agent over batch (max version) = w1*SUM_i[policy_loss] - w2*SUM_i[value_loss] + w3*SUM_i[entropy_bonus]
+    # Loss for one agent over batch (min version) = -w1*SUM_i[policy_loss] + w2*SUM_i[value_loss] - w3*SUM_i[entropy_bonus]
+    # -> SUM instead of MEAN means instance with more states have more impact on loss!
     def compute_PPO_loss_over_batch(self, policy_losses: Tensor, value_losses: Tensor, entropy_bonuses: Tensor):
         total_policy_loss: Tensor = torch.sum(policy_losses)
         total_value_loss: Tensor = torch.sum(value_losses)
@@ -215,6 +216,7 @@ class MultiAgents_Batch:
                     agent.instances.append(agent_of_instance)
             self.agents_results.append(agent)
 
+    # Formula for multi agents L = scheduling_losses_over_batch (w1*policy + w2*value + w3*entropy) + outsourcing_losses_over_batch + material_losses_over_batch
     def compute_losses(self, agents: list[(Module, str)], return_details: bool) -> Tensor:
         losses: Tensor = None
         if return_details:

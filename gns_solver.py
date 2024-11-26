@@ -31,10 +31,10 @@ AGENT = 0
 GNN_CONF = {
     'embedding_size': 16,
     'nb_layers': 2,
-    'hidden_channels': 128
+    'hidden_channels': 256
 }
 AC_CONF = {
-    'hidden_channels': 64
+    'hidden_channels': 128
 }
 
 # =====================================================
