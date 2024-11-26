@@ -65,7 +65,8 @@ class Value_OneInstance:
 
     def add_step(self, value: Tensor, agent_name: str):
         agent_step = len(self.agent_steps[agent_name])
-        self.agent_steps[agent_name].append(len(self.values))
+        global_step = 0 if self.values is None else len(self.values)
+        self.agent_steps[agent_name].append(global_step)
         self.reverse_agent_steps.append((agent_name, agent_step))
         self.values = add_into_tensor(self.values, value)
 
@@ -111,7 +112,7 @@ class Agent_OneInstance:
     
     def add_reward(self, reward: float):
         r = torch.tensor([reward], device=self.device)
-        self.rewards = add_into_tensor(self.values, r)
+        self.rewards = add_into_tensor(self.rewards, r)
     
     # delta_t = reward_t + gamma*value_(t+1) - value_t
     # In this formula, t is step of the agent and global_t is the global step considering all 3 agents!
@@ -201,7 +202,7 @@ class Value_Batch:
         total_value_loss: Tensor = torch.sum(value_losses)
         print(f"\t\t value loss (over batch): {total_value_loss}")
         print("\t\t -----------------")
-        return self.weight_entropy_bonus*total_value_loss
+        return self.weight_value_loss*total_value_loss
 
 class Agent_Batch:
     def __init__(self, name: str):
