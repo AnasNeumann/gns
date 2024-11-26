@@ -52,6 +52,40 @@ class MAPPO_Losses:
 # END: VALIDATION ONLY ---------------------------------------------------------------------------
 
 # START: TRANING ONLY ----------------------------------------------------------------------------
+class Value_OneInstance:
+    def __init__(self, agent_names: list[str], device: str):
+        self.device = device
+        self.gamma = 1
+        self.cumulative_returns: Tensor = None
+        self.values: Tensor = None
+        self.agent_steps = {}
+        self.reverse_agent_steps = []
+        for name in agent_names:
+            self.agent_steps[name] = []
+
+    def add_step(self, value: Tensor, agent_name: str):
+        agent_step = len(self.agent_steps[agent_name])
+        self.agent_steps[agent_name].append(len(self.values))
+        self.reverse_agent_steps.append((agent_name, agent_step))
+        self.values = add_into_tensor(self.values, value)
+
+    # R_t [sum version] = reward_t + gamma^1 * reward_(t+1) + ... + gamma^(T-t) * reward_T
+    # R_t [recusive] = reward_t + gamma(R_(t+1))
+    def compute_cumulative_returns(self, agents: dict):
+        R = 0
+        T = len(self.values)
+        self.cumulative_returns = torch.zeros(T, dtype=torch.float32, device=self.device)
+        for t in reversed(range(T)):
+            agent_name, agent_step = self.reverse_agent_steps[t]
+            agent: Agent_OneInstance = agents[agent_name]
+            R = agent.rewards[agent_step] + self.gamma * R
+            self.cumulative_returns[t] = R
+
+    # Value Loss = E_t[(values_t - cumulative_returns_t)^2]
+    # Mean over all steps so value has a similar importance than agents (regardless of their use rate)
+    def compute_value_loss(self) -> Tensor:
+        return torch.mean((self.values - self.cumulative_returns) ** 2)
+
 class Agent_OneInstance:
     def __init__(self, name: str, related_items: Tensor, parent_items: Tensor, w_makespan: Tensor, device: str):
         self.name = name
@@ -66,13 +100,10 @@ class Agent_OneInstance:
         self.probabilities: list[Tensor]= []
         self.possibles_actions: list[(int, int)] = []
         self.actions_idx: list[int] = []
-        self.values: Tensor = None
         self.rewards: Tensor = None
-        self.cumulative_returns: Tensor = None
         self.advantages: Tensor = None
 
-    def add_step(self, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, value: Tensor):
-        self.values = add_into_tensor(self.values, value)
+    def add_step(self, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int):
         self.probabilities.append(probabilities)
         self.actions_idx.append(id)
         self.states.append(state)
@@ -81,44 +112,37 @@ class Agent_OneInstance:
     def add_reward(self, reward: float):
         r = torch.tensor([reward], device=self.device)
         self.rewards = add_into_tensor(self.values, r)
-
-    # R_t [sum version] = reward_t + gamma^1 * reward_(t+1) + ... + gamma^(T-t) * reward_T
-    # R_t [recusive] = reward_t + gamma(R_(t+1))
-    def compute_cumulative_returns(self):
-        R = 0
-        T = len(self.states)
-        self.cumulative_returns = torch.zeros(T, dtype=torch.float32, device=self.device)
-        for t in reversed(range(T)):
-            R = self.rewards[t] + self.gamma * R
-            self.cumulative_returns[t] = R
-
-    # Value Loss = E_t[(values_t - cumulative_returns_t)^2]
-    def compute_value_loss(self) -> Tensor:
-        return torch.mean((self.values - self.cumulative_returns) ** 2)
     
     # delta_t = reward_t + gamma*value_(t+1) - value_t
-    def temporal_difference_residual(self, t) -> Tensor:
-        delta: Tensor = self.rewards[t] - self.values[t]
+    # In this formula, t is step of the agent and global_t is the global step considering all 3 agents!
+    def temporal_difference_residual(self, t: int, all_values: Value_OneInstance) -> Tensor:
+        global_t = all_values.agent_steps[self.name][t]
+        delta: Tensor = self.rewards[t] - all_values.values[global_t]
         if t >= len(self.states) - 1:
             return delta
-        return delta + (self.gamma * self.values[t+1])
+        return delta + (self.gamma * all_values.values[global_t + 1])
 
     # GAE_t [sum version] = delta_t + (lam*gamma)^1 * delta_(t+1) + ... + (lam*gamma)^T-t+1 * delta_T
     # GAE_t [recursive] = delta_t + (lam*gamma) * GAE_(t+1)
-    def compute_generalized_advantage_estimates(self):
+    # --> Settings with values independant from agent!
+    def compute_generalized_advantage_estimates(self, all_values: Value_OneInstance):
         GAE = 0
         T = len(self.states)
         self.advantages = torch.zeros(T, dtype=torch.float32, device=self.device)
         for t in reversed(range(T)):
-            delta = self.temporal_difference_residual(t)
+            delta = self.temporal_difference_residual(t, all_values)
             GAE = delta + self.gamma * self.lam * GAE
             self.advantages[t] = GAE
 
+    # Returns only policy loss and entropy bonus
+    # ---------------------------------------------------------------------------------
     # Entropy bonus = E_t[-1 * SUM_a[probabilities(a|s_t) * LOG(probabilities(a|s_t))]] --> all probabilities!
     # ---------------------------------------------------------------------------------
     # probability_ratio_t [basic version] = new_probabilities(a_t|s_t) / old_probabilities(a_t|s_t)  --> only for selected actions!
     # probability_ratio_t [exp & log version] = e^[log_new_probabilities(a_t|s_t) - log_old_probabilities(a_t|s_t)]
     # Policy Loss = E_t[min(probability_ratio_t, CLIP[1-e, probability_ratio_t, 1+e]) * GAE_t]
+    # ---------------------------------------------------------------------------------
+    # MEAN over steps so agents have similar loss regarless of their use rate by instance
     def compute_PPO_losses(self, agent: Module):
         e = self.clipping_ratio
         log_new_probs: Tensor = None
@@ -145,101 +169,119 @@ class Agent_OneInstance:
         ratio: Tensor = torch.exp(log_new_probs-log_old_probs)
         policy_loss: Tensor = torch.min(ratio * self.advantages, torch.clamp(ratio, 1-e, 1+e) * self.advantages).mean()
         entropy_bonus: Tensor = torch.mean(entropies)
-        value_loss: Tensor = self.compute_value_loss()
         policy_loss = policy_loss.to(self.device)
         entropy_bonus = entropy_bonus.to(self.device)
-        value_loss = value_loss.to(self.device)
-        return policy_loss, value_loss, entropy_bonus
+        return policy_loss, entropy_bonus
 
 class MultiAgent_OneInstance:
     def __init__(self, agent_names: list[str], instance_id: int, related_items: Tensor, parent_items: Tensor, w_makespan: Tensor, device: str):
         self.instance_id = instance_id
-        self.agents: list[Agent_OneInstance] = []
+        self.agents = {}
+        self.value = Value_OneInstance(agent_names, device)
         for name in agent_names:
-            self.agents.append(Agent_OneInstance(name, related_items, parent_items, w_makespan, device))
-
-    def get(self, name: str) -> Agent_OneInstance:
-        for agent in self.agents:
-            if agent.name == name:
-                return agent
-        return None
+            self.agents[name] = Agent_OneInstance(name, related_items, parent_items, w_makespan, device)
     
     def add_step(self, agent_name: str, state: State, probabilities: Tensor, actions: Tuple[int, int], id: int, value: Tensor):
-        agent = self.get(name=agent_name)
-        if agent is not None:
-            agent.add_step(state, probabilities, actions, id, value)
+        agent: Agent_OneInstance = self.agents[agent_name]
+        agent.add_step(state, probabilities, actions, id)
+        self.value.add_step(value, agent_name)
     
     def add_reward(self, agent_name: str, reward: any):
-        agent = self.get(name=agent_name)
-        if agent is not None:
-            agent.add_reward(reward=reward)
+        agent: Agent_OneInstance = self.agents[agent_name]
+        agent.add_reward(reward)
+
+class Value_Batch:
+    def __init__(self, weight_value_loss: float):
+        self.weight_value_loss: float = weight_value_loss
+        self.instances: list[Value_OneInstance] = []
+
+    # Value loss over batch (max version) = - w2*SUM_i[value_loss]
+    # Value loss over batch (min version) = w2*SUM_i[value_loss]
+    def compute_value_loss_over_batch(self, value_losses: Tensor):
+        total_value_loss: Tensor = torch.sum(value_losses)
+        print(f"\t\t value loss (over batch): {total_value_loss}")
+        print("\t\t -----------------")
+        return self.weight_entropy_bonus*total_value_loss
 
 class Agent_Batch:
     def __init__(self, name: str):
         self.name = name
         self.weight_policy_loss: float = 0.01
-        self.weight_value_loss: float = 0.01
         self.weight_entropy_bonus: float = 0.01
         self.instances: list[Agent_OneInstance] = []
 
-    # Loss(max version) = w1*SUM_i[policy_loss] - w2*SUM_i[value_loss] + w3*SUM_i[entropy_bonus]
-    # Loss(min version) = -w1*SUM_i[policy_loss] + w2*SUM_i[value_loss] - w3*SUM_i[entropy_bonus]
-    def compute_PPO_loss_over_batch(self, policy_losses: Tensor, value_losses: Tensor, entropy_bonuses: Tensor):
+    # Loss for one agent over batch (max version) = w1*SUM_i[policy_loss] + w3*SUM_i[entropy_bonus]
+    # Loss for one agent over batch (min version) = -w1*SUM_i[policy_loss] - w3*SUM_i[entropy_bonus]
+    def compute_PPO_loss_over_batch(self, policy_losses: Tensor, entropy_bonuses: Tensor):
         total_policy_loss: Tensor = torch.sum(policy_losses)
-        total_value_loss: Tensor = torch.sum(value_losses)
         total_entropy_bonus: Tensor = torch.sum(entropy_bonuses)
-        print(f"\t\t Computing losses for agent: {self.name}") 
+        print(f"\t\t Computing losses for agent (over batch): {self.name}") 
         print(f"\t\t policy loss: {total_policy_loss}") 
-        print(f"\t\t value loss: {total_value_loss}")
         print(f"\t\t entropy bonus: {total_entropy_bonus}")
         print("\t\t -----------------")
-        total_loss = -self.weight_policy_loss*total_policy_loss + self.weight_entropy_bonus*total_value_loss - self.weight_entropy_bonus*total_entropy_bonus
-        return total_loss, total_policy_loss, total_value_loss, total_entropy_bonus
+        total_loss = -self.weight_policy_loss*total_policy_loss - self.weight_entropy_bonus*total_entropy_bonus
+        return total_loss, total_policy_loss, total_entropy_bonus
         
 class MultiAgents_Batch:
+    # Init alreay compile interdiate metrics: "cumulative returns" by instance (for value losses) and "generalized advantage estimates" of each agent by instance (for policy loss)
     def __init__(self, batch: list[MultiAgent_OneInstance], agent_names: list[str], gamma: float, lam: float, weight_policy_loss: float, weight_value_loss: float, weight_entropy_bonus: float, clipping_ratio: float):
         self.agents_results: list[Agent_Batch] = []
+        self.value_results: Value_Batch = Value_Batch(weight_value_loss)
+        for instance in batch:
+            instance.value.gamma = gamma
+            instance.value.compute_cumulative_returns(agents=instance.agents)
+            self.value_results.instances.append(instance.value)
         for agent_name in agent_names:
             agent = Agent_Batch(name=agent_name)
             agent.weight_policy_loss = weight_policy_loss
-            agent.weight_value_loss = weight_value_loss
             agent.weight_entropy_bonus = weight_entropy_bonus
             for instance in batch:
-                agent_of_instance: Agent_OneInstance = instance.get(name=agent_name)
-                if agent_of_instance is not None:
-                    agent_of_instance.gamma = gamma
-                    agent_of_instance.lam = lam
-                    agent_of_instance.clipping_ratio = clipping_ratio
-                    agent_of_instance.compute_cumulative_returns()
-                    agent_of_instance.compute_generalized_advantage_estimates()
-                    agent.instances.append(agent_of_instance)
+                agent_one_instance: Agent_OneInstance = instance.agents[agent_name]
+                agent_one_instance.gamma = gamma
+                agent_one_instance.lam = lam
+                agent_one_instance.clipping_ratio = clipping_ratio
+                agent_one_instance.compute_generalized_advantage_estimates(all_values=instance.value)
+                agent.instances.append(agent_one_instance)
             self.agents_results.append(agent)
 
+    # Formula for multi agents L = scheduling_losses_over_batch (w1*policy + w2*value + w3*entropy) + outsourcing_losses_over_batch + material_losses_over_batch
+    # SUM also means more importance for agents called more often (larger loss)!
     def compute_losses(self, agents: list[(Module, str)], return_details: bool) -> Tensor:
         losses: Tensor = None
         if return_details:
             details: MAPPO_Loss = MAPPO_Loss([name for _,name in agents])
+        
+        # 1/3 Compute value loss over complete batch
+        value_losses: Tensor = None
+        for value_instance in self.value_results.instances:
+            value_loss_i = value_instance.compute_value_loss()
+            value_losses = add_into_tensor(value_losses, value_loss_i.unsqueeze(0))
+        v = self.value_results.compute_value_loss_over_batch(value_losses)
+        losses = add_into_tensor(losses, v.unsqueeze(0))
+        if return_details:
+            details.value_loss = v.item()
+
+        # 2/3 Compute policy loss over complete batch and combining all agents
         for agent, agent_name in agents:
             for results_of_one_agent in self.agents_results:
                 if results_of_one_agent.name == agent_name:
                     policy_losses: Tensor = None
-                    value_losses: Tensor = None
                     entropy_bonuses: Tensor = None
-                    has_states = False
+                    has_states_in_batch = False
                     for agent_instance in results_of_one_agent.instances:
                         if agent_instance.states:
-                            has_states = True
-                            pi, vi, ei, = agent_instance.compute_PPO_losses(agent)
-                            policy_losses = add_into_tensor(policy_losses, pi.unsqueeze(0))
-                            value_losses = add_into_tensor(value_losses, vi.unsqueeze(0))
-                            entropy_bonuses = add_into_tensor(entropy_bonuses, ei.unsqueeze(0))
-                    if has_states:
-                        total_loss, p, v, e = results_of_one_agent.compute_PPO_loss_over_batch(policy_losses, value_losses, entropy_bonuses)
+                            has_states_in_batch = True
+                            policy_loss_i, entropy_i, = agent_instance.compute_PPO_losses(agent)
+                            policy_losses = add_into_tensor(policy_losses, policy_loss_i.unsqueeze(0))
+                            entropy_bonuses = add_into_tensor(entropy_bonuses, entropy_i.unsqueeze(0))
+                    if has_states_in_batch:
+                        total_loss, p, e = results_of_one_agent.compute_PPO_loss_over_batch(policy_losses, entropy_bonuses)
                         losses = add_into_tensor(losses, total_loss.unsqueeze(0))
                         if return_details:
                             details.get(agent_name).policy_loss = p.item()
                             details.get(agent_name).entropy_bonus = e.item()
-                            details.value_loss += v.item()
+        
+        # 3/3 Compute complete loss over batch
         if return_details:
             return torch.sum(losses), details
         else:
