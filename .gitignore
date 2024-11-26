@@ -166,5 +166,6 @@ jobs/scripts/gns/
 jobs/scripts/gns/**
 log.sh
 gns_env/
+data/out/
 gns_env/**
 __pycache__/
