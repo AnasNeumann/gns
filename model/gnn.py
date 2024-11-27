@@ -264,10 +264,12 @@ class L1_OutousrcingActor(Module):
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
         self.actor_input_size = (embedding_size * 5) + 2
+        first_dimension = actor_hidden_channels
+        second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
-            Linear(self.actor_input_size, actor_hidden_channels), Tanh(),
-            Linear(actor_hidden_channels, actor_hidden_channels), Tanh(),
-            Linear(actor_hidden_channels, 1)
+            Linear(self.actor_input_size, first_dimension), Tanh(),
+            Linear(first_dimension, second_dimenstion), Tanh(),
+            Linear(second_dimenstion, 1)
         )
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
@@ -287,10 +289,12 @@ class L1_SchedulingActor(Module):
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
         self.actor_input_size = (embedding_size * 6) + 1
+        first_dimension = actor_hidden_channels
+        second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
-            Linear(self.actor_input_size, actor_hidden_channels), Tanh(),
-            Linear(actor_hidden_channels, actor_hidden_channels), Tanh(),
-            Linear(actor_hidden_channels, 1)
+            Linear(self.actor_input_size, first_dimension), Tanh(),
+            Linear(first_dimension, second_dimenstion), Tanh(),
+            Linear(second_dimenstion, 1)
         )
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
@@ -309,10 +313,12 @@ class L1_MaterialActor(Module):
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
         self.actor_input_size = (embedding_size * 6) + 1
+        first_dimension = actor_hidden_channels
+        second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
-            Linear(self.actor_input_size, actor_hidden_channels), Tanh(),
-            Linear(actor_hidden_channels, actor_hidden_channels), Tanh(),
-            Linear(actor_hidden_channels, 1)
+            Linear(self.actor_input_size, first_dimension), Tanh(),
+            Linear(first_dimension, second_dimenstion), Tanh(),
+            Linear(second_dimenstion, 1)
         )
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):

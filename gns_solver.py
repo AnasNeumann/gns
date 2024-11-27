@@ -34,7 +34,7 @@ GNN_CONF = {
     'hidden_channels': 256
 }
 AC_CONF = {
-    'hidden_channels': 128
+    'hidden_channels': 256
 }
 
 # =====================================================
