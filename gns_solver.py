@@ -29,12 +29,12 @@ MATERIAL_USE = 2
 ACTIONS_NAMES = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
 GNN_CONF = {
-    'embedding_size': 16,
+    'resource_and_material_embedding_size': 16,
+    'operation_and_item_embedding_size': 24,
     'nb_layers': 2,
-    'hidden_channels': 256
-}
-AC_CONF = {
-    'hidden_channels': 256
+    'embedding_hidden_channels': 128,
+    'value_hidden_channels': 256,
+    'actor_hidden_channels': 256
 }
 
 # =====================================================
@@ -572,24 +572,24 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
 
 def load_trained_models(model_path:str, run_number:int, device:str):
     index = str(run_number)
-    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
+    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['embedding_hidden_channels'], GNN_CONF['nb_layers'])
     shared_GNN.load_state_dict(torch.load(model_path+'/gnn_weights_'+index+'.pth', map_location=torch.device(device)))
-    shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['value_hidden_channels'])
     shared_critic.load_state_dict(torch.load(model_path+'/critic_weights_'+index+'.pth', map_location=torch.device(device)))
-    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
+    scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
+    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
     outsourcing_actor.load_state_dict(torch.load(model_path+'/outsourcing_weights_'+index+'.pth', map_location=torch.device(device)))
     scheduling_actor.load_state_dict(torch.load(model_path+'/scheduling_weights_'+index+'.pth', map_location=torch.device(device)))
     material_actor.load_state_dict(torch.load(model_path+'/material_use_weights_'+index+'.pth', map_location=torch.device(device)))
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 def init_new_models():
-    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['embedding_size'], GNN_CONF['hidden_channels'], GNN_CONF['nb_layers'])
-    shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
-    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['embedding_size'], AC_CONF['hidden_channels'])
+    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['embedding_hidden_channels'], GNN_CONF['nb_layers'])
+    shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['value_hidden_channels'])
+    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
+    scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
+    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 if __name__ == '__main__':

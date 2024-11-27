@@ -102,30 +102,32 @@ class ItemEmbeddingLayer(Module):
     def __init__(self, operation_dimension: int, item_dimension: int, hidden_channels: int, out_channels: int):
         super(ItemEmbeddingLayer, self).__init__()
         self.embedding_size = out_channels
+        first_dimension = hidden_channels
+        second_dimension = int(hidden_channels/2)
         self.mlp_combined = Sequential(
-            Linear(4 * out_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(4 * out_channels, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, out_channels)
         )
         self.mlp_operations = Sequential(
-            Linear(operation_dimension, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(operation_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, out_channels)
         )
         self.mlp_parent = Sequential(
-            Linear(item_dimension, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(item_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, out_channels)
         )
         self.mlp_children = Sequential(
-            Linear(item_dimension, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(item_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, out_channels)
         )
         self.mlp_self = Sequential(
-            Linear(item_dimension, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(item_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, out_channels)
         )
 
     def forward(self, items: Tensor, parents: Tensor, operations: Tensor, item_assembly: EdgeStorage, operation_assembly: EdgeStorage):
@@ -150,40 +152,42 @@ class OperationEmbeddingLayer(Module):
     def __init__(self, operation_dimension: int, item_dimension: int, resources_dimension: int, material_dimension: int, hidden_channels: int, out_channels: int):
         super(OperationEmbeddingLayer, self).__init__()
         self.embedding_size = out_channels
+        first_dimension = hidden_channels
+        second_dimension = int(hidden_channels/2)
         self.mlp_combined = Sequential(
-            Linear(6 * out_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(4 * out_channels + resources_dimension + material_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, out_channels)
         )
         self.mlp_items = Sequential(
-            Linear(item_dimension, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(item_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, out_channels)
         )
         self.mlp_predecessors = Sequential(
-            Linear(operation_dimension, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(operation_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, out_channels)
         )
         self.mlp_successors = Sequential(
-            Linear(operation_dimension, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(operation_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, out_channels)
         )
         self.mlp_resources = Sequential(
-            Linear(resources_dimension, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(resources_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, resources_dimension)
         )
         self.mlp_materials = Sequential(
-            Linear(material_dimension, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(material_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, material_dimension)
         )
         self.mlp_self = Sequential(
-            Linear(operation_dimension, hidden_channels), ELU(),
-            Linear(hidden_channels, hidden_channels), ELU(),
-            Linear(hidden_channels, out_channels)
+            Linear(operation_dimension, first_dimension), ELU(),
+            Linear(first_dimension, second_dimension), ELU(),
+            Linear(second_dimension, out_channels)
         )
 
     def forward(self, operations: Tensor, items: Tensor, related_items: Tensor, materials: Tensor, resources: Tensor, need_for_resources: EdgeStorage, need_for_materials: EdgeStorage, precedences: EdgeStorage):
@@ -214,28 +218,29 @@ class OperationEmbeddingLayer(Module):
         return embedding
 
 class L1_EmbbedingGNN(Module):
-    def __init__(self, embedding_size: int, embedding_hidden_channels: int, nb_embedding_layers: int):
+    def __init__(self, resource_and_material_embedding_size: int, operation_and_item_embedding_size: int, embedding_hidden_channels: int, nb_embedding_layers: int):
         super(L1_EmbbedingGNN, self).__init__()
         conf = FeatureConfiguration()
-        self.embedding_size = embedding_size
+        self.resource_and_material_embedding_size = resource_and_material_embedding_size
+        self.operation_and_item_embedding_size = operation_and_item_embedding_size
         self.nb_embedding_layers = nb_embedding_layers
         self.material_layers = ModuleList()
         self.resource_layers = ModuleList()
         self.item_layers = ModuleList()
         self.operation_layers = ModuleList()
-        self.material_layers.append(MaterialEmbeddingLayer(len(conf.material), len(conf.operation)+len(conf.need_for_materials), embedding_size))
-        self.resource_layers.append(ResourceEmbeddingLayer(len(conf.resource), len(conf.operation)+len(conf.need_for_resources), embedding_size))
-        self.item_layers.append(ItemEmbeddingLayer(len(conf.operation), len(conf.item), embedding_hidden_channels, embedding_size))
-        self.operation_layers.append(OperationEmbeddingLayer(len(conf.operation), embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
+        self.material_layers.append(MaterialEmbeddingLayer(len(conf.material), len(conf.operation)+len(conf.need_for_materials), resource_and_material_embedding_size))
+        self.resource_layers.append(ResourceEmbeddingLayer(len(conf.resource), len(conf.operation)+len(conf.need_for_resources), resource_and_material_embedding_size))
+        self.item_layers.append(ItemEmbeddingLayer(len(conf.operation), len(conf.item), embedding_hidden_channels, operation_and_item_embedding_size))
+        self.operation_layers.append(OperationEmbeddingLayer(len(conf.operation), operation_and_item_embedding_size, resource_and_material_embedding_size, resource_and_material_embedding_size, embedding_hidden_channels, operation_and_item_embedding_size))
         for _ in range(self.nb_embedding_layers-1):
-            self.material_layers.append(MaterialEmbeddingLayer(embedding_size, embedding_size+len(conf.need_for_materials), embedding_size))
-            self.resource_layers.append(ResourceEmbeddingLayer(embedding_size, embedding_size+len(conf.need_for_resources), embedding_size))
-            self.item_layers.append(ItemEmbeddingLayer(embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
-            self.operation_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
-        self.material_attention = Linear(embedding_size, 1)
-        self.resource_attention = Linear(embedding_size, 1)
-        self.item_attention = Linear(embedding_size, 1)
-        self.operation_attention = Linear(embedding_size, 1)
+            self.material_layers.append(MaterialEmbeddingLayer(resource_and_material_embedding_size, operation_and_item_embedding_size+len(conf.need_for_materials), resource_and_material_embedding_size))
+            self.resource_layers.append(ResourceEmbeddingLayer(resource_and_material_embedding_size, operation_and_item_embedding_size+len(conf.need_for_resources), resource_and_material_embedding_size))
+            self.item_layers.append(ItemEmbeddingLayer(operation_and_item_embedding_size, operation_and_item_embedding_size, embedding_hidden_channels, operation_and_item_embedding_size))
+            self.operation_layers.append(OperationEmbeddingLayer(operation_and_item_embedding_size, operation_and_item_embedding_size, resource_and_material_embedding_size, resource_and_material_embedding_size, embedding_hidden_channels, operation_and_item_embedding_size))
+        self.material_attention = Linear(resource_and_material_embedding_size, 1)
+        self.resource_attention = Linear(resource_and_material_embedding_size, 1)
+        self.item_attention = Linear(operation_and_item_embedding_size, 1)
+        self.operation_attention = Linear(operation_and_item_embedding_size, 1)
 
     def forward(self, state: State, related_items: Tensor, parents: Tensor, alpha: Tensor):
         for l in range(self.nb_embedding_layers):
@@ -255,23 +260,25 @@ class L1_EmbbedingGNN(Module):
         return state, torch.cat([state_embedding, alpha], dim=0)
 
 class L1_CommonCritic(Module):
-    def __init__(self, embedding_size: int, critic_hidden_channels: int):
+    def __init__(self, resource_and_material_embedding_size: int, operation_and_item_embedding_size: int, critic_hidden_channels: int):
         super(L1_CommonCritic, self).__init__()
+        first_dimension = critic_hidden_channels
+        second_dimenstion = int(critic_hidden_channels / 2)
         self.critic_mlp = Sequential(
-            Linear((embedding_size * 4) + 1, critic_hidden_channels), Tanh(),
-            Linear(critic_hidden_channels, critic_hidden_channels), Tanh(), 
-            Linear(critic_hidden_channels, 1)
+            Linear(2*resource_and_material_embedding_size + 2*operation_and_item_embedding_size + 1, first_dimension), Tanh(),
+            Linear(first_dimension, second_dimenstion), Tanh(), 
+            Linear(second_dimenstion, 1)
         )
 
     def forward(self, state_embedding: Tensor):
         return self.critic_mlp(state_embedding)
 
 class L1_OutousrcingActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, shared_critic_mlp: L1_CommonCritic, embedding_size: int, actor_hidden_channels: int):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, shared_critic_mlp: L1_CommonCritic, resource_and_material_embedding_size: int, operation_and_item_embedding_size: int, actor_hidden_channels: int):
         super(L1_OutousrcingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
-        self.actor_input_size = (embedding_size * 5) + 2
+        self.actor_input_size = 2*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 2
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
@@ -292,11 +299,11 @@ class L1_OutousrcingActor(Module):
         return action_probs, state_value
     
 class L1_SchedulingActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN,  shared_critic_mlp: L1_CommonCritic, embedding_size: int, actor_hidden_channels: int):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN,  shared_critic_mlp: L1_CommonCritic, resource_and_material_embedding_size: int, operation_and_item_embedding_size: int, actor_hidden_channels: int):
         super(L1_SchedulingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
-        self.actor_input_size = (embedding_size * 6) + 1
+        self.actor_input_size = 3*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 1
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
@@ -316,11 +323,11 @@ class L1_SchedulingActor(Module):
         return action_probs, state_value
 
 class L1_MaterialActor(Module):
-    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, shared_critic_mlp: L1_CommonCritic, embedding_size: int, actor_hidden_channels: int):
+    def __init__(self, shared_embedding_layers: L1_EmbbedingGNN, shared_critic_mlp: L1_CommonCritic, resource_and_material_embedding_size: int, operation_and_item_embedding_size: int, actor_hidden_channels: int):
         super(L1_MaterialActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
-        self.actor_input_size = (embedding_size * 6) + 1
+        self.actor_input_size = 3*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 1
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
