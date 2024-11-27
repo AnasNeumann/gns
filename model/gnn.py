@@ -232,6 +232,10 @@ class L1_EmbbedingGNN(Module):
             self.resource_layers.append(ResourceEmbeddingLayer(embedding_size, embedding_size+len(conf.need_for_resources), embedding_size))
             self.item_layers.append(ItemEmbeddingLayer(embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
             self.operation_layers.append(OperationEmbeddingLayer(embedding_size, embedding_size, embedding_size, embedding_size, embedding_hidden_channels, embedding_size))
+        self.material_attention = Linear(embedding_size, 1)
+        self.resource_attention = Linear(embedding_size, 1)
+        self.item_attention = Linear(embedding_size, 1)
+        self.operation_attention = Linear(embedding_size, 1)
 
     def forward(self, state: State, related_items: Tensor, parents: Tensor, alpha: Tensor):
         for l in range(self.nb_embedding_layers):
@@ -239,10 +243,14 @@ class L1_EmbbedingGNN(Module):
             state.resources = self.resource_layers[l](state.resources, state.operations, state.need_for_resources, state.same_types)
             state.items = self.item_layers[l](state.items, parents, state.operations, state.item_assembly, state.operation_assembly)
             state.operations = self.operation_layers[l](state.operations, state.items, related_items, state.materials, state.resources, state.need_for_resources, state.need_for_materials, state.precedences)     
-        pooled_materials = torch.mean(state.materials, dim=0, keepdim=True)
-        pooled_resources = torch.mean(state.resources, dim=0, keepdim=True)
-        pooled_items = torch.mean(state.items, dim=0, keepdim=True)
-        pooled_operations = torch.mean(state.operations, dim=0, keepdim=True)
+        material_scores = F.softmax(self.material_attention(state.materials), dim=0)
+        resource_scores = F.softmax(self.resource_attention(state.resources), dim=0)
+        item_scores = F.softmax(self.item_attention(state.items), dim=0)
+        operation_scores = F.softmax(self.operation_attention(state.operations), dim=0)
+        pooled_materials = torch.sum(material_scores * state.materials, dim=0, keepdim=True)
+        pooled_resources = torch.sum(resource_scores * state.resources, dim=0, keepdim=True)
+        pooled_items = torch.sum(item_scores * state.items, dim=0, keepdim=True)
+        pooled_operations = torch.sum(operation_scores * state.operations, dim=0, keepdim=True)
         state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources], dim=-1)[0]
         return state, torch.cat([state_embedding, alpha], dim=0)
 
