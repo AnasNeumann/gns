@@ -235,6 +235,8 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id: int, t: in
         ('children_time', 0),
         ('start_time', outsourcing_start_time),
         ('end_time', end_date)])
+    graph.executed_items += 1
+    graph.oustourced_items += 1
     for o in instance.loop_item_operations(p,e):
         op_id = graph.operations_i2g[p][o]
         available_time = next_possible_time(instance, outsourcing_start_time, p, o)
@@ -245,16 +247,18 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id: int, t: in
             ('end_time', end_date),
             ('available_time', available_time),
             ('is_possible', YES)]) 
-        for r in instance.required_resources(p, o):
-            if instance.finite_capacity[r]:
-                res_id = graph.resources_i2g[r]
-                graph.del_need_for_resource(op_id, res_id)
-                graph.inc_resource(res_id, [('remaining_operations', -1)])
-            else:
-                mat_id = graph.materials_i2g[r]
-                quantity_needed = graph.need_for_material(op_id, mat_id, 'quantity_needed')
-                graph.del_need_for_material(op_id, mat_id)
-                graph.inc_material(mat_id, [('remaining_demand', -1 * quantity_needed)])
+        for rt in instance.required_rt(p, o):
+            graph.executed_operations += 1
+            for r in instance.resources_by_type(rt):
+                if instance.finite_capacity[r]:
+                    res_id = graph.resources_i2g[r]
+                    graph.del_need_for_resource(op_id, res_id)
+                    graph.inc_resource(res_id, [('remaining_operations', -1)])
+                else:
+                    mat_id = graph.materials_i2g[r]
+                    quantity_needed = graph.need_for_material(op_id, mat_id, 'quantity_needed')
+                    graph.del_need_for_material(op_id, mat_id)
+                    graph.inc_material(mat_id, [('remaining_demand', -1 * quantity_needed)])
     for child in instance.get_children(p, e, direct=True):
         graph, child_time, child_cost = outsource_item(graph, instance, graph.items_i2g[p][child], outsourcing_start_time, enforce_time=True)
         cost += child_cost
@@ -275,6 +279,7 @@ def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: i
         ('remaining_init_quantity', max(0, current_quantity - quantity_needed)),
         ('remaining_demand', waiting_demand - quantity_needed)
     ])
+    graph.executed_operations += 1
     old_end = graph.operation(operation_id, 'end_time')
     new_end = max(current_time, old_end)
     shift = max(0, new_end-old_end)
@@ -318,6 +323,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
         ('end_time', operation_end)
     ])
     utilization[resource_id] += current_processing_time
+    graph.executed_operations += 1
     graph.current_operation_type[resource_id] = instance.get_operation_type(p, o)
     for d in range(instance.nb_settings):
         graph.current_design_value[resource_id][d] == instance.design_value[p][o][d]
@@ -340,6 +346,8 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     ])
     if not instance.is_design[p][o]:
         graph.inc_item(item_id, [('remaining_physical_time', -estimated_processing_time)])
+        if graph.item(item_id, 'remaining_design_time')<= 0:
+            graph.executed_items += 1
         for child in instance.get_children(p, e, direct=False):
             graph.inc_item(graph.items_i2g[p][child], [('parents_physical_time', -estimated_processing_time)])
     else:

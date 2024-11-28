@@ -19,20 +19,28 @@ YES = 1
 NO = 0
 
 class State:
-    def __init__(self, items: Tensor, operations: Tensor, resources: Tensor, materials: Tensor, need_for_materials: EdgeStorage, need_for_resources: EdgeStorage, operation_assembly: EdgeStorage, item_assembly: EdgeStorage, precedences: EdgeStorage, same_types: EdgeStorage, device: str):
-        self.items = items.clone().to(device)
-        self.operations = operations.clone().to(device)
-        self.resources = resources.clone().to(device)
-        self.materials = materials.clone().to(device)
-        self.need_for_resources = need_for_resources.clone().to(device)
-        self.need_for_materials = need_for_materials.clone().to(device)
-        self.operation_assembly = operation_assembly
-        self.item_assembly = item_assembly
-        self.precedences = precedences
-        self.same_types = same_types
+    def __init__(self, items: Tensor, operations: Tensor, resources: Tensor, materials: Tensor, need_for_materials: EdgeStorage, need_for_resources: EdgeStorage, operation_assembly: EdgeStorage, item_assembly: EdgeStorage, precedences: EdgeStorage, same_types: EdgeStorage, percentage_outsourced: float=0, percentage_executed_ops: float=0, percentage_executed_items: float=0, nb_projects: int=0, mean_levels: float=0, graph_level_features:Tensor=None, device: str=""):
+        self.items: Tensor = items.clone().to(device)
+        self.operations: Tensor = operations.clone().to(device)
+        self.resources: Tensor = resources.clone().to(device)
+        self.materials: Tensor = materials.clone().to(device)
+        self.need_for_resources: EdgeStorage = need_for_resources.clone().to(device)
+        self.need_for_materials: EdgeStorage = need_for_materials.clone().to(device)
+        self.operation_assembly: EdgeStorage = operation_assembly
+        self.item_assembly: EdgeStorage = item_assembly
+        self.precedences: EdgeStorage = precedences
+        self.same_types: EdgeStorage = same_types
+        if graph_level_features is None:
+            self.graph_level_features: Tensor = State.to_tensor_graph_level_features(len(same_types), len(items), len(operations), len(resources), len(materials), percentage_outsourced, percentage_executed_ops, percentage_executed_items, nb_projects, mean_levels, device)
+        else: 
+            self.graph_level_features: Tensor = graph_level_features
+
+    @staticmethod
+    def to_tensor_graph_level_features(nb_same_types: int, nb_items: int, nb_operations: int, nb_resources: int, nb_materials: int, percentage_outsourced: float, percentage_executed_ops: float, percentage_executed_items: float, nb_projects: int, mean_levels: float, device: str):
+        return torch.tensor([nb_same_types, nb_items, nb_operations, nb_resources, nb_materials, percentage_outsourced, percentage_executed_ops, percentage_executed_items, nb_projects, mean_levels], dtype=torch.float, device=device)
     
     def clone(self, device: str):
-        return State(self.items, self.operations, self.resources, self.materials, self.need_for_materials, self.need_for_resources, self.operation_assembly, self.item_assembly, self.precedences, self.same_types, device)
+        return State(self.items, self.operations, self.resources, self.materials, self.need_for_materials, self.need_for_resources, self.operation_assembly, self.item_assembly, self.precedences, self.same_types, graph_level_features=self.graph_level_features, device=device)
 
 class OperationFeatures:
     def __init__(self, design: num_feature, sync: num_feature, timescale_hours: num_feature, timescale_days: num_feature, direct_successors: num_feature, total_successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, is_possible: num_feature):
@@ -184,9 +192,16 @@ class GraphInstance():
         self.current_operation_type = []
         self.current_design_value = []
         self.project_heads = []
+        self.oustourcable_items: int = 0
+        self.oustourced_items: int = 0
+        self.nb_operations: int = 0
+        self.executed_operations: int = 0
+        self.executed_items: int = 0
+        self.mean_levels: float = 0.0
+
         self.features = FeatureConfiguration()
         self.graph = HeteroData()
-        self.device = device
+        self.device: str = device
         self.graph.to(device)
 
     def add_node(self, type: str, features: Tensor):
@@ -450,14 +465,19 @@ class GraphInstance():
         return self.graph['operation', 'needs_res', 'resource'].edge_index, range(self.graph['operation', 'needs_res', 'resource'].edge_index.size(1))
     
     def to_state(self, device: str) -> State:
-        return State(self.items(), 
-                      self.operations(), 
-                      self.resources(), 
-                      self.materials(), 
-                      self.need_for_materials(), 
-                      self.need_for_resources(), 
-                      self.operation_assembly(), 
-                      self.item_assembly(), 
-                      self.precedences(), 
-                      self.same_types(),
-                      device)
+        return State(items = self.items(), 
+                     operations = self.operations(), 
+                     resources = self.resources(), 
+                     materials = self.materials(), 
+                     need_for_materials = self.need_for_materials(),
+                     need_for_resources = self.need_for_resources(),
+                     operation_assembly = self.operation_assembly(),
+                     item_assembly = self.item_assembly(),
+                     precedences = self.precedences(),
+                     same_types = self.same_types(),
+                     percentage_outsourced= self.oustourced_items / self.oustourcable_items,
+                     percentage_executed_ops = self.executed_operations / self.nb_operations,
+                     percentage_executed_items = self.executed_items / len(self.items()),
+                     nb_projects = len(self.project_heads),
+                     mean_levels = self.mean_levels,
+                     device = device)
