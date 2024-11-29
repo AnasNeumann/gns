@@ -24,7 +24,7 @@ A Graph Attention Network (GAT) to schedule jobs in an ETO manufacturing environ
 5. `desactivate`
 
 ## Training process: MAPPO
-<img src="/documentation/MAPPOLoss.png" alt="training-algorithm" width="500" height="auto">
+<img src="/documentation/MAPPOLoss.png" alt="training-algorithm" width="650" height="auto">
 
 ## Test the instance generator
 ```python
