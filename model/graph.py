@@ -33,7 +33,7 @@ class State:
         if graph_level_features is None:
             self.graph_level_features: Tensor = State.to_tensor_graph_level_features(len(same_types), len(items), len(operations), len(resources), len(materials), percentage_outsourced, percentage_executed_ops, percentage_executed_items, nb_projects, mean_levels, device)
         else: 
-            self.graph_level_features: Tensor = graph_level_features
+            self.graph_level_features: Tensor = graph_level_features.clone().to(device)
 
     @staticmethod
     def to_tensor_graph_level_features(nb_same_types: int, nb_items: int, nb_operations: int, nb_resources: int, nb_materials: int, percentage_outsourced: float, percentage_executed_ops: float, percentage_executed_items: float, nb_projects: int, mean_levels: float, device: str):
