@@ -612,7 +612,8 @@ if __name__ == '__main__':
     print(f"Execution mode: {args.mode}...")
     debug_mode = (args.mode == 'test')
     run_number = int(args.number)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"TPU Device: {device}...")
     first = (run_number<=1)
     if to_bool(args.train):
         '''
