@@ -1,7 +1,7 @@
 import pickle
 import os
 from model.instance import Instance
-from common import directory
+from tools.common import directory
 import torch
 torch.autograd.set_detect_anomaly(True)
 import random

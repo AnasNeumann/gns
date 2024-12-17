@@ -4,7 +4,7 @@ from torch import Tensor
 from typing import Tuple
 import numpy as np
 from torch.nn import Module
-from tensors import add_into_tensor
+from tools.tensors import add_into_tensor
 
 # ===========================================================
 # =*= DATA MODEL FOR PPO AGENT CONFIGURATION AND RESULTS =*=

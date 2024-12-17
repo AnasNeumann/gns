@@ -1,5 +1,5 @@
 import argparse
-from common import init_several_1D, init_2D, init_several_2D, init_3D, load_instance, directory
+from tools.common import init_several_1D, init_2D, init_several_2D, init_3D, load_instance, directory
 from model.instance import Instance
 from model.solution import Solution
 import pandas as pd

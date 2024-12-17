@@ -2,7 +2,7 @@ import argparse
 import random
 import pickle
 from model.instance import Instance
-from common import init_several_1D, init_several_2D, init_2D, init_1D, init_several_3D, directory
+from tools.common import init_several_1D, init_several_2D, init_2D, init_1D, init_several_3D, directory
 
 # ==============================================================
 # =*= RANDOM INSTANCE GENERATOR =*=

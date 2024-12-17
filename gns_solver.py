@@ -2,7 +2,7 @@ import argparse
 from model.instance import Instance
 from model.graph import GraphInstance, NO, NOT_YET, YES
 from model.gnn import L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, L1_CommonCritic
-from common import load_instance, to_bool, directory
+from tools.common import load_instance, to_bool, directory
 import torch
 torch.autograd.set_detect_anomaly(True)
 import pandas as pd
@@ -10,7 +10,7 @@ import time as systime
 from typing import Callable
 from torch import Tensor
 from torch.nn import Module
-from instance2graph_translator import translate
+from translators.instance2graph_translator import translate
 from debug.debug_gns import check_completeness, debug_printer
 from gns_ppo_trainer import reward, PPO_train
 from model.agent import MultiAgent_OneInstance
