@@ -42,6 +42,63 @@ class State:
     def clone(self, device: str):
         return State(self.items, self.operations, self.resources, self.materials, self.need_for_materials, self.need_for_resources, self.operation_assembly, self.item_assembly, self.precedences, self.same_types, graph_level_features=self.graph_level_features, device=device)
 
+class FeatureConfiguration:
+    def __init__(self):
+        self.operation = {
+            'design': 0,
+            'sync': 1,
+            'timescale_hours': 2,
+            'timescale_days': 3,
+            'direct_successors': 4,
+            'total_successors': 5,
+            'remaining_time': 6,
+            'remaining_resources': 7,
+            'remaining_materials': 8,
+            'available_time': 9,
+            'end_time': 10,
+            'is_possible': 11
+        }
+        self.resource = {
+            'utilization_ratio': 0,
+            'available_time': 1,
+            'executed_operations': 2,
+            'remaining_operations': 3,
+            'similar_resources': 4
+        }
+        self.material = {
+            'remaining_init_quantity': 0,
+            'arrival_time': 1,
+            'remaining_demand': 2
+        }
+        self.item = {
+            'head': 0,
+            'external': 1,
+            'outsourced': 2,
+            'outsourcing_cost': 3,
+            'outsourcing_time': 4,
+            'remaining_physical_time': 5,
+            'remaining_design_time': 6,
+            'parents': 7,
+            'children': 8,
+            'parents_physical_time': 9,
+            'children_time': 10,
+            'start_time': 11,
+            'end_time': 12,
+            'is_possible': 13
+        }
+        self.need_for_resources = {
+            'status': 0,
+            'basic_processing_time': 1,
+            'current_processing_time': 2,
+            'start_time': 3,
+            'end_time': 4
+        }
+        self.need_for_materials = {
+            'status': 0,
+            'execution_time': 1,
+            'quantity_needed': 2
+        }
+
 class OperationFeatures:
     def __init__(self, design: num_feature, sync: num_feature, timescale_hours: num_feature, timescale_days: num_feature, direct_successors: num_feature, total_successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, is_possible: num_feature):
         self.design = design
@@ -100,6 +157,26 @@ class ItemFeatures:
     def to_tensor_features(self, device: str):
         return features2tensor([self.head, self.external, self.outsourced, self.outsourcing_cost, self.outsourcing_time, self.remaining_physical_time, self.remaining_design_time, self.parents, self.children, self.parents_physical_time, self.children_time, self.start_time, self.end_time, self.is_possible], device)
 
+    @staticmethod
+    def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
+        f = conf.item
+        return ItemFeatures(
+            head=tensor[f['head']], 
+            external=tensor[f['external']],
+            outsourced=tensor[f['outsourced']],
+            outsourcing_cost=tensor[f['outsourcing_cost']],
+            outsourcing_time=tensor[f['outsourcing_time']],
+            remaining_physical_time=tensor[f['remaining_physical_time']],
+            remaining_design_time=tensor[f['remaining_design_time']],
+            parents=tensor[f['parents']],
+            children=tensor[f['children']],
+            start_time=tensor[f['start_time']],
+            parents_physical_time=tensor[f['parents_physical_time']],
+            children_time=tensor[f['children_time']],
+            start_time=tensor[f['start_time']],
+            end_time=tensor[f['end_time']],
+            is_possible=tensor[f['is_possible']])
+
 class NeedForResourceFeatures:
     def __init__(self, status: num_feature, basic_processing_time: num_feature, current_processing_time: num_feature, start_time: num_feature, end_time: num_feature):
         self.status = status
@@ -111,6 +188,16 @@ class NeedForResourceFeatures:
     def to_tensor_features(self, device: str):
         return features2tensor([self.status, self.basic_processing_time, self.current_processing_time, self.start_time, self.end_time], device)
 
+    @staticmethod
+    def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
+        f = conf.need_for_resources
+        return NeedForResourceFeatures(
+            status=tensor[f['status']], 
+            basic_processing_time=tensor[f['basic_processing_time']],
+            current_processing_time=tensor[f['current_processing_time']],
+            start_time=tensor[f['start_time']],
+            end_time=tensor[f['end_time']])
+
 class NeedForMaterialFeatures:
     def __init__(self, status: num_feature, execution_time: num_feature, quantity_needed: num_feature):
         self.status = status
@@ -119,63 +206,15 @@ class NeedForMaterialFeatures:
 
     def to_tensor_features(self, device: str):
         return features2tensor([self.status, self.execution_time, self.quantity_needed], device)
+    
+    @staticmethod
+    def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
+        f = conf.need_for_materials
+        return NeedForMaterialFeatures(
+            status=tensor[f['status']], 
+            execution_time=tensor[f['execution_time']],
+            quantity_needed=tensor[f['quantity_needed']])
 
-class FeatureConfiguration:
-    def __init__(self):
-        self.operation = {
-            'design': 0,
-            'sync': 1,
-            'timescale_hours': 2,
-            'timescale_days': 3,
-            'direct_successors': 4,
-            'total_successors': 5,
-            'remaining_time': 6,
-            'remaining_resources': 7,
-            'remaining_materials': 8,
-            'available_time': 9,
-            'end_time': 10,
-            'is_possible': 11
-        }
-        self.resource = {
-            'utilization_ratio': 0,
-            'available_time': 1,
-            'executed_operations': 2,
-            'remaining_operations': 3,
-            'similar_resources': 4
-        }
-        self.material = {
-            'remaining_init_quantity': 0,
-            'arrival_time': 1,
-            'remaining_demand': 2
-        }
-        self.item = {
-            'head': 0,
-            'external': 1,
-            'outsourced': 2,
-            'outsourcing_cost': 3,
-            'outsourcing_time': 4,
-            'remaining_physical_time': 5,
-            'remaining_design_time': 6,
-            'parents': 7,
-            'children': 8,
-            'parents_physical_time': 9,
-            'children_time': 10,
-            'start_time': 11,
-            'end_time': 12,
-            'is_possible': 13
-        }
-        self.need_for_resources = {
-            'status': 0,
-            'basic_processing_time': 1,
-            'current_processing_time': 2,
-            'start_time': 3,
-            'end_time': 4
-        }
-        self.need_for_materials = {
-            'status': 0,
-            'execution_time': 1,
-            'quantity_needed': 2
-        }
 
 class GraphInstance():
     def __init__(self, device: str):
@@ -459,10 +498,12 @@ class GraphInstance():
         return range(self.graph['material'].x.size(0))
     
     def loop_need_for_material(self):
-        return self.graph['operation', 'needs_mat', 'material'].edge_index, range(self.graph['operation', 'needs_mat', 'material'].edge_index.size(1))
+        key = ('operation', 'needs_mat', 'material')
+        return self.graph[key].edge_index, self.graph[key].edge_attr, range(self.graph['operation', 'needs_mat', 'material'].edge_index.size(1))
     
     def loop_need_for_resource(self):
-        return self.graph['operation', 'needs_res', 'resource'].edge_index, range(self.graph['operation', 'needs_res', 'resource'].edge_index.size(1))
+        key = ('operation', 'needs_res', 'resource')
+        return self.graph[key].edge_index, self.graph[key].edge_attr, range(self.graph['operation', 'needs_res', 'resource'].edge_index.size(1))
     
     def to_state(self, device: str) -> State:
         return State(items = self.items(), 
