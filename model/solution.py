@@ -18,35 +18,312 @@ class Solution:
         self.Cmax = -1 # Cmax and objective
         self.obj = []
 
-class HeuristicSolution():
+# ====================================================================
+# =*= HEURISTIC SOLUTION DATA STRUCTURE =*=
+# ====================================================================
+__author__ = "Anas Neumann - anas.neumann@polymtl.ca"
+__version__ = "1.0.0"
+__license__ = "Apache 2.0 License"
+
+YES = 1
+NO = 0 
+NOT_YET = -1
+
+class Operation():
     def __init__(self):
-        self.sequences = [] # Sequences of each resource rt = (p,o)
-        self.selection = [] # Selection of resourses for each operations and feasible resource type p, o, rt = r
-        self.E_start, self.outsourced, self.E_prod_start, self.E_validated, self.E_end = [] # Elements (p, e)
-        self.O_start, self.O_end = [], [] # Execution of operations (p, o, rt)
+        self.id: int = 0
+        self.operation_family: int = 0
+        self.simultaneous: bool = False
+        self.machine_usage: list[Execution] = []
+        self.material_use: list[MaterialUse] = []
+        self.in_hours: bool = False
+        self.in_days: bool = False
+        self.is_design: bool = False
+        self.design_value: list[int] = []
+        self.item: Item = None
+    
+    def json_display(self):
+        return {
+            "id": self.id,
+            "operation_family": self.operation_family,
+            "simultaneous": self.simultaneous,
+            "in_hours": self.in_hours,
+            "in_days": self.in_days,
+            "is_design": self.is_design,
+            "item_id": self.item.id,
+            "design_value": self.design_value,
+            "machine_usage": [r.json_display() for r in self.machine_usage],
+            "material_use": [m.json_display() for m in self.material_use]
+        }
+
+class Item():
+    def __init__(self):
+        self.id: int = 0
+        self.external: bool = False
+        self.outsourcing_time: bool = False
+        self.external_cos: int = 0
+        self.children: list[Item] = []
+        self.parent: Item = None
+        self.project: Project = None
+        self.design_ops: list[Operation] = []
+        self.production_ops: list[Operation] = []
+    
+    def json_display(self):
+        return {
+            "id": self.id,
+            "external": self.external,
+            "outsourcing_time": self.outsourcing_time,
+            "external_cost": self.external_cost,
+            "project_id": self.project.id,
+            "parent_id": self.parent.id,
+            "children": [c.json_display() for c in self.children],
+            "design_ops": [d.json_display() for d in self.design_ops],
+            "production_ops": [p.json_display() for p in self.production_ops]
+        }
+
+class Project():
+    def __init__(self):
+        self.id: int = 0
+        self.heads: list[Item] = []
+        self.flat_items: list[Item] = []
+        self.flat_operations: list[Item] = []
+    
+    def json_display(self):
+        return {
+            "id": self.id,
+            "heads": [h.json_display() for h in self.heads]
+        }
+    
+class RT():
+    def __init__(self):
+        self.id: int = 0,
+        self.machines: list[Machine] = [],
+        self.sequence: list[Execution] = []
+
+    def json_display(self):
+        return {
+            "id": self.id,
+            "machines": [r.json_display() for r in self.machines]
+        }
+
+class Use():
+    def __init__(self):
+        self.position: int = 0
+        self.operation: Operation = None
+
+class Execution(Use):
+    def __init__(self):
+        Use.__init__(self)
+        self.start: int = 0
+        self.end: int = 0,
+        self.selected_machine: Machine = 0
+        self.machine_type: RT = None
+
+    def json_display(self):
+        return {
+            "operation_id": self.operation.id,
+            "machine_type_id": self.machine_type.id,
+            "selected_machine_id": self.selected_machine.id,
+            "start": self.start,
+            "end": self.end
+        }
+
+class MaterialUse(Use):
+    def __init__(self):
+        Use.__init__(self)
+        self.quantity_needed = 0
+        self.use_init_quantity = False
+        self.material: Material = None
+        self.execution_time: int = 0
+
+    def json_display(self):
+        return {
+            "operation_id": self.operation.id,
+            "material_id": self.material.id,
+            "quantity_needed": self.quantity_needed,
+            "use_init_quantity": self.use_init_quantity,
+            "execution_time": self.execution_time
+        }
+
+class Resource():
+    def __init__(self):
+        self.id = 0
+        self.resource_type = 0
+
+class Machine(Resource):
+    def __init__(self):
+        Resource.__init__(self)
+        self.type: RT = None
+        self.design_setup: list[int] = []
+        self.operation_setup: int = 0
+
+    def json_display(self):
+        return {
+            "id": self.id,
+            "operation_setup": self.operation_setup,
+            "design_setup": self.design_setup,
+            "sequence": [(e.operation.item.project.id, e.operation.item.id, e.operation.id, e.execution_start, e.execution_end) for e in self.type.sequence if e.selected_machine.id == self.id]
+        }
+
+class Material(Resource):
+    def __init__(self):
+        Resource.__init__(self)
+        self.sequence: list[MaterialUse] = []
+        self.init_quantity = 0
+        self.purchase_time = 0
+        self.quantity_purchased = 0
+
+    def json_display(self):
+        return {
+            "id": self.id,
+            "init_quantity": self.init_quantity,
+            "purchase_time": self.purchase_time,
+            "quantity_purchased": self.quantity_purchased,
+            "sequence": [(e.operation.item.project.id, e.operation.item.id, e.operation.id, e.execution_time) for e in self.sequence]
+        }
+
+class HeuristicSolution():
+    def __init__(self, instance: Instance):
+        self.H = instance.H
+        self.M = instance.M
+        self.id = instance.id
+        self.w_makespan = instance.w_makespan 
+        self.nb_settings = instance.nb_settings
+        self.projects: list[Project] = []
+        self.machine_types: list[RT] = []
+        self.materials: list[Material] = []
+        self.flat_resources: list[Resource] = []
         self.total_cost = 0
         self.Cmax = -1
+        self.feasible = False
 
-    def random_start_from_instance(self, i: Instance):
-        nb_projects = i.get_nb_projects()
-        elts_per_project = range(i.E_size[0])
-        self.sequences = [[(p,o) for p, o in i.operations_by_resource_type(rt)] for rt in i.loop_rts()]
+    @classmethod
+    def geneget(obj_list, obj_id):
+        for obj in obj_list:
+            if obj.id == obj_id:
+                return obj
+        return None
+
+    def json_display(self):
+        return {
+            "id": self.id,
+            "H": self.H,
+            "M": self.M,
+            "w_makespan": self.w_makespan,
+            "nb_settings": self.nb_settings,
+            "total_cost": self.total_cost,
+            "Cmax": self.Cmax,
+            "feasible": self.feasible,
+            "projects": [p.json_display() for p in self.projects],
+            "machine_types": [r.json_display() for r in self.machine_types],
+            "materials": [m.json_display() for m in self.materials]
+        }
+    
+    def start_operation(self, i: Instance, project: Project, item: Item, o: int):
+        p = project.id
+        operation: Operation = Operation()
+        operation.id = o
+        operation.operation_family = i.operation_family[p][o]
+        operation.simultaneous = i.simultaneous[p][o]
+        operation.in_hours = i.in_hours[p][o]
+        operation.in_days = i.in_days[p][o]
+        operation.is_design = i.is_design[p][o]
+        operation.design_value = i.design_value[p][o]
+        operation.item = item
+        for rt in i.required_rt(p, o):
+            if i.finite_capacity[r]:
+                type: RT = HeuristicSolution.geneget(self.machine_types, rt)
+                execution: Execution = Execution()
+                execution.selected_machine = type.machines[0]
+                execution.machine_type = type
+                execution.operation = operation
+                operation.machine_usage.append(execution)
+        for r in i.required_resources(p, o):
+            if not i.finite_capacity[r]:
+                use: MaterialUse = MaterialUse()
+                use.quantity_needed = i.quantity_needed[r][p][o]
+                use.material = self.flat_resources[r]
+                use.operation = operation
+                operation.material_use.append(use)
+        operation.material_use.sort(key=lambda obj: obj.execution_time)
+        operation.machine_usage.sort(key=lambda obj: obj.start)
+        if operation.is_design:
+            item.design_ops.append(operation)
+        else:
+            item.production_ops.append(operation)
+        project.flat_operations.append(operation)
+    
+    def reccursive_start_item(self, i: Instance, project: Project, e: int, parent: Item = None, head: bool = False):
+        p = project.id
+        item: Item = Item()
+        item.id = e
+        item.external = i.external[p][e]
+        item.outsourcing_time = i.outsourcing_time[p][e]
+        item.external_cos = i.external_cost[p][e]
+        item.parent = parent
+        item.project = project
+        for o in i.get_operations_idx(p, e):
+            self.start_operation(i, project, item, o)
+        for c in i.get_children(p, e, direct=True):
+            child = self.reccursive_start_item(i, project, c, item, head=False)
+        item.children.append(child)
+        project.flat_items.append(item)
+        if head:
+            project.heads.append(item)
+        item.children.sort(key=lambda obj: obj.id)
+        item.design_ops.sort(key=lambda obj: obj.id)
+        item.production_ops.sort(key=lambda obj: obj.id)
+        return item
+    
+    def start_resources(self, i: Instance):
         for rt in i.loop_rts():
-            random.shuffle(self.sequences[rt])
-        self.selection = [[[random.choice(i.resources_by_type(rt)) for rt in i.required_rt(p,o)] for o in i.loop_operations(p)] for p in i.loop_projects()]
-        self.E_start = [[-1 for _ in elts_per_project] for p in i.loop_projects()]
-        self.outsourced = [[False for _ in elts_per_project] for _ in i.loop_projects()]
-        self.E_prod_start = [[-1 for _ in elts_per_project] for _ in i.loop_projects()]
-        self.E_end = [[-1 for _ in elts_per_project] for _ in i.loop_projects()]
-        self.E_validated = [[-1 for _ in elts_per_project] for _ in i.loop_projects()]
-        self.O_start, self.O_end = init_several_1D(nb_projects, None, 2)
+            type: RT = RT()
+            type.id = rt
+            self.machine_types.append(rt)
+        self.machine_types.sort(key=lambda obj: obj.id)
+        for r in i.loop_resources():
+            if i.finite_capacity[r]:
+                machine: Machine = Machine()
+                machine.id = r
+                rt = i.resource_family[r]
+                machine.resource_type = rt
+                type: RT = HeuristicSolution.geneget(self.machine_types, rt)
+                machine.type = type
+                machine.design_setup = i.design_setup[r]
+                machine.operation_setup = i.operation_setup[r]
+                self.flat_resources.append(machine)
+                type.machines.append(machine)
+            else:
+                material: Material = Material()
+                material.id = r
+                material.resource_type = i.resource_family[r]
+                material.init_quantity = i.init_quantity[r]
+                material.purchase_time = i.purchase_time[r]
+                material.quantity_purchased = i.quantity_needed[r]
+                self.flat_resources.append(material)
+                self.materials.append(material)
+        for rt in self.machine_types:
+            rt.machines.sort(key=lambda obj: obj.id)
+        self.flat_resources.sort(key=lambda obj: obj.id)
+        self.materials.sort(key=lambda obj: obj.id)
+    
+    def start_from_instance(self, i: Instance):
+        self.H = i.H
+        self.M = i.M
+        self.id = i.id
+        self.w_makespan
+        self.nb_settings = i.nb_settings
+        self.start_resources(i)
         for p in i.loop_projects():
-            nb_ops = i.O_size[p]
-            self.O_start[p], self.O_end[p] = init_several_2D(nb_ops, i.nb_resource_types, -1, 2)
-
-    def display(self, i:Instance):
-        # TODO
-        pass
+            project: Project = Project()
+            project.id = p
+            for e in i.project_head(p):
+                self.reccursive_start_item(i, project, e, head=True)
+            project.heads.sort(key=lambda obj: obj.id)
+            project.flat_items.sort(key=lambda obj: obj.id)
+            project.flat_operations.sort(key=lambda obj: obj.id)
+            self.projects.append(project)
+        self.projects.sort(key=lambda obj: obj.id)
 
     def simulate(self, i: Instance):
         # TODO
