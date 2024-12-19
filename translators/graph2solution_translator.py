@@ -1,5 +1,5 @@
 from model.instance import Instance
-from model.solution import HeuristicSolution
+from model.solution import HeuristicSolution, Item, Operation, Execution, MaterialUse, Machine, Material
 from model.graph import YES, NO, GraphInstance, NeedForResourceFeatures, NeedForMaterialFeatures, ItemFeatures
 
 # =============================================================================
@@ -15,64 +15,61 @@ def min_if_exist(value, old):
 
 def translate_solution(graph: GraphInstance, instance: Instance):
     solution: HeuristicSolution = HeuristicSolution()
-    solution.random_start_from_instance(instance)
-
-    # Execution on finite-capacity resources
+    solution.start_from_instance(instance)
+    
+    # 1/4 Outsourcing decisions
+    for project in solution.projects:
+        for item in project.flat_items:
+            item_features: ItemFeatures = ItemFeatures.from_tensor(graph.items()[graph.items_i2g[item.project.id][item.id]], graph.features)
+            if item_features.outsourced == YES:
+                item.outsourced = True
+                item.start = item_features.start_time
+                item.end = item_features.end_time
+                solution.Cmax = max(solution.Cmax, item_features.end_time)
+                solution.total_cost = solution.total_cost + item_features.outsourcing_cost
+    
+    # 2/4 Execution on finite-capacity resources
     execution_index, execution_features, execution_loop = graph.loop_need_for_resource()
     for i in execution_loop:
+        ex_features: NeedForResourceFeatures = NeedForResourceFeatures.from_tensor(execution_features[i], graph.features)
         p, o = graph.operations_g2i[execution_index[0, i].item()]
         r = graph.resources_g2i[execution_index[1, i].item()]
         e = instance.get_item_of_operation(p, o)
         rt = instance.get_resource_type(r)
-        solution.selection[p][o][rt] = r
-        ex_features: NeedForResourceFeatures = NeedForResourceFeatures.from_tensor(execution_features[i], graph.features)
-        solution.O_start[p][o][rt] = ex_features.start_time
-        solution.O_end[p][o][rt] = ex_features.end_time
-        solution.E_end[p][e] = max(solution.E_end[p][e], ex_features.end_time)
-        solution.E_start[p][e] = min_if_exist(ex_features.start_time, solution.E_start[p][e])
-        solution.Cmax = max(solution.Cmax, mat_features.end_time)
-        if instance.is_design[p][o]:
-            solution.E_validated[p][e] = max(solution.E_validated[p][e], ex_features.end_time)
-        else:
-            solution.E_prod_start[p][e] = min_if_exist(ex_features.start_time, solution.E_prod_start[p][e])
+        operation: Operation = solution.projects[p].flat_operations[o]
+        item: Item = operation.item
+        execution: Execution = operation.get_machine_usage(rt)
+        execution.start = ex_features.start_time
+        execution.end = ex_features.end_time
+        execution.selected_machine = solution.flat_resources[r]
+        item.end = max(item.end, ex_features.end_time) 
+        item.start = min_if_exist(ex_features.start_time, item.start)
+        solution.Cmax = max(solution.Cmax, ex_features.end_time)
 
-    # Execution on consumable materials
+    # 3/4 Execution on consumable materials
     mat_use_index, mat_use_features, mat_use_loop = graph.loop_need_for_material()
     for i in mat_use_loop:
+        mat_features: NeedForMaterialFeatures = NeedForMaterialFeatures.from_tensor(mat_use_features[i], graph.features)
         p, o = graph.operations_g2i[mat_use_index[0, i].item()]
         m = graph.materials_g2i[mat_use_index[1, i].item()]
         e = instance.get_item_of_operation(p, o)
-        rt = instance.get_resource_type(m)
-        solution.selection[p][o][rt] = r
-        mat_features: NeedForMaterialFeatures = NeedForMaterialFeatures.from_tensor(mat_use_features[i], graph.features)
-        solution.O_start[p][o][rt] = mat_features.execution_time
-        solution.O_end[p][o][rt] = mat_features.execution_time
-        solution.E_end[p][e] = max(solution.E_end[p][e], mat_features.execution_time)
-        solution.E_start[p][e] = min_if_exist(mat_features.execution_time, solution.E_start[p][e])
+        operation: Operation = solution.projects[p].flat_operations[o]
+        item: Item = operation.item
+        use: MaterialUse = operation.get_material_use(m)
+        use.execution_time = mat_features.execution_time
+        item.end = max(solution.E_end[p][e], mat_features.execution_time)
+        item.start = min_if_exist(mat_features.execution_time, solution.E_start[p][e])
         solution.Cmax = max(solution.Cmax, mat_features.execution_time)
-        if instance.is_design[p][o]:
-            solution.E_validated[p][e] = max(solution.E_validated[p][e], mat_features.execution_time)
+
+    # 4/4 Build positions
+    for res in solution.flat_resources:
+        if res.finite_capacity:
+            machine: Machine = res
+            machine.type.sequence.sort(key=lambda obj: obj.start)
         else:
-            solution.E_prod_start[p][e] = min_if_exist(mat_features.execution_time, solution.E_prod_start[p][e])
-
-    # Outsourced items
-    for item_id, item in enumerate(graph.items()):
-        p, e = graph.items_g2i[item_id]
-        item_features: ItemFeatures = ItemFeatures.from_tensor(item, graph.features)
-        if item_features.outsourced == YES:
-            solution.outsourced[p][e] = True
-            solution.E_start[p][e] = item_features.start_time
-            solution.E_end[p][e] = solution.E_prod_start[p][e] = solution.E_validated[p][e] = item_features.end_time
-            solution.Cmax = max(solution.Cmax, item_features.end_time)
-            solution.total_cost = solution.total_cost + item_features.outsourcing_cost 
-
-    '''
-        self.sequences = [] # Sequences of each resource rt = (p,o)
-        
-        self.total_cost = 0
-        self.Cmax = 0
-        self.E_start, self.outsourced, self.E_prod_start, self.E_validated, self.E_end = [] # Elements (p, e)
-        self.O_start, self.O_end = [], [] # Execution of operations (p, o, rt)
-        self.selection = [] # Selection of resourses for each operations and feasible resource type p, o, rt = r
-    '''
+            material: Material = res
+            material.sequence.sort(key=lambda obj: obj.execution_time)
+    for rt in solution.machine_types:
+        for i, execution in enumerate(rt.sequence):
+            execution.position = i
     return solution

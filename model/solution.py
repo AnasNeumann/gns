@@ -41,6 +41,18 @@ class Operation():
         self.is_design: bool = False
         self.design_value: list[int] = []
         self.item: Item = None
+
+    def get_machine_usage(self, rt: int):
+        for execution in self.machine_usage:
+            if execution.machine_type.id == rt:
+                return execution
+        return None
+    
+    def get_material_use(self, m: int):
+        for use in self.material_use:
+            if use.material.id == m:
+                return use
+        return None
     
     def json_display(self):
         return {
@@ -60,6 +72,9 @@ class Item():
     def __init__(self):
         self.id: int = 0
         self.external: bool = False
+        self.start: int = 0
+        self.end: int = 0 
+        self.outsourced: bool = False
         self.outsourcing_time: bool = False
         self.external_cos: int = 0
         self.children: list[Item] = []
@@ -72,6 +87,9 @@ class Item():
         return {
             "id": self.id,
             "external": self.external,
+            "outsourced": self.outsourced,
+            "start": self.start,
+            "end": self.end,
             "outsourcing_time": self.outsourcing_time,
             "external_cost": self.external_cost,
             "project_id": self.project.id,
@@ -132,7 +150,6 @@ class MaterialUse(Use):
     def __init__(self):
         Use.__init__(self)
         self.quantity_needed = 0
-        self.use_init_quantity = False
         self.material: Material = None
         self.execution_time: int = 0
 
@@ -141,7 +158,6 @@ class MaterialUse(Use):
             "operation_id": self.operation.id,
             "material_id": self.material.id,
             "quantity_needed": self.quantity_needed,
-            "use_init_quantity": self.use_init_quantity,
             "execution_time": self.execution_time
         }
 
@@ -149,6 +165,7 @@ class Resource():
     def __init__(self):
         self.id = 0
         self.resource_type = 0
+        self.finite_capacity: bool = False
 
 class Machine(Resource):
     def __init__(self):
@@ -156,13 +173,14 @@ class Machine(Resource):
         self.type: RT = None
         self.design_setup: list[int] = []
         self.operation_setup: int = 0
+        self.finite_capacity = True
 
     def json_display(self):
         return {
             "id": self.id,
             "operation_setup": self.operation_setup,
             "design_setup": self.design_setup,
-            "sequence": [(e.operation.item.project.id, e.operation.item.id, e.operation.id, e.execution_start, e.execution_end) for e in self.type.sequence if e.selected_machine.id == self.id]
+            "sequence": [(e.operation.item.project.id, e.operation.item.id, e.operation.id, e.start, e.end) for e in self.type.sequence if e.selected_machine.id == self.id]
         }
 
 class Material(Resource):
@@ -171,14 +189,13 @@ class Material(Resource):
         self.sequence: list[MaterialUse] = []
         self.init_quantity = 0
         self.purchase_time = 0
-        self.quantity_purchased = 0
+        self.finite_capacity = False
 
     def json_display(self):
         return {
             "id": self.id,
             "init_quantity": self.init_quantity,
             "purchase_time": self.purchase_time,
-            "quantity_purchased": self.quantity_purchased,
             "sequence": [(e.operation.item.project.id, e.operation.item.id, e.operation.id, e.execution_time) for e in self.sequence]
         }
 
