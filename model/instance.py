@@ -289,6 +289,12 @@ class Instance:
 
     def loop_items(self, p: int):
         return range(self.E_size[p])
+    
+    def loop_resources(self):
+        return range(self.nb_resources)
+    
+    def loop_rts(self):
+        return range(self.nb_resource_types)
 
     def loop_operations(self, p: int):
         return range(self.O_size[p])
