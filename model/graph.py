@@ -161,21 +161,20 @@ class ItemFeatures:
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
         f = conf.item
         return ItemFeatures(
-            head=tensor[f['head']], 
-            external=tensor[f['external']],
-            outsourced=tensor[f['outsourced']],
-            outsourcing_cost=tensor[f['outsourcing_cost']],
-            outsourcing_time=tensor[f['outsourcing_time']],
-            remaining_physical_time=tensor[f['remaining_physical_time']],
-            remaining_design_time=tensor[f['remaining_design_time']],
-            parents=tensor[f['parents']],
-            children=tensor[f['children']],
-            start_time=tensor[f['start_time']],
-            parents_physical_time=tensor[f['parents_physical_time']],
-            children_time=tensor[f['children_time']],
-            start_time=tensor[f['start_time']],
-            end_time=tensor[f['end_time']],
-            is_possible=tensor[f['is_possible']])
+            head=tensor[f['head']].item(), 
+            external=tensor[f['external']].item(),
+            outsourced=tensor[f['outsourced']].item(),
+            outsourcing_cost=tensor[f['outsourcing_cost']].item(),
+            outsourcing_time=tensor[f['outsourcing_time']].item(),
+            remaining_physical_time=tensor[f['remaining_physical_time']].item(),
+            remaining_design_time=tensor[f['remaining_design_time']].item(),
+            parents=tensor[f['parents']].item(),
+            children=tensor[f['children']].item(),
+            start_time=tensor[f['start_time']].item(),
+            parents_physical_time=tensor[f['parents_physical_time']].item(),
+            children_time=tensor[f['children_time']].item(),
+            end_time=tensor[f['end_time']].item(),
+            is_possible=tensor[f['is_possible']].item())
 
 class NeedForResourceFeatures:
     def __init__(self, status: num_feature, basic_processing_time: num_feature, current_processing_time: num_feature, start_time: num_feature, end_time: num_feature):
@@ -192,11 +191,11 @@ class NeedForResourceFeatures:
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
         f = conf.need_for_resources
         return NeedForResourceFeatures(
-            status=tensor[f['status']], 
-            basic_processing_time=tensor[f['basic_processing_time']],
-            current_processing_time=tensor[f['current_processing_time']],
-            start_time=tensor[f['start_time']],
-            end_time=tensor[f['end_time']])
+            status=tensor[f['status']].item(), 
+            basic_processing_time=tensor[f['basic_processing_time']].item(),
+            current_processing_time=tensor[f['current_processing_time']].item(),
+            start_time=tensor[f['start_time']].item(),
+            end_time=tensor[f['end_time']].item())
 
 class NeedForMaterialFeatures:
     def __init__(self, status: num_feature, execution_time: num_feature, quantity_needed: num_feature):
@@ -211,10 +210,9 @@ class NeedForMaterialFeatures:
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
         f = conf.need_for_materials
         return NeedForMaterialFeatures(
-            status=tensor[f['status']], 
-            execution_time=tensor[f['execution_time']],
-            quantity_needed=tensor[f['quantity_needed']])
-
+            status=tensor[f['status']].item(), 
+            execution_time=tensor[f['execution_time']].item(),
+            quantity_needed=tensor[f['quantity_needed']].item())
 
 class GraphInstance():
     def __init__(self, device: str):

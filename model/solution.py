@@ -76,7 +76,7 @@ class Item():
         self.end: int = 0 
         self.outsourced: bool = False
         self.outsourcing_time: bool = False
-        self.external_cos: int = 0
+        self.external_cost: int = 0
         self.children: list[Item] = []
         self.parent: Item = None
         self.project: Project = None
@@ -93,7 +93,6 @@ class Item():
             "outsourcing_time": self.outsourcing_time,
             "external_cost": self.external_cost,
             "project_id": self.project.id,
-            "parent_id": self.parent.id,
             "children": [c.json_display() for c in self.children],
             "design_ops": [d.json_display() for d in self.design_ops],
             "production_ops": [p.json_display() for p in self.production_ops]
@@ -102,25 +101,27 @@ class Item():
 class Project():
     def __init__(self):
         self.id: int = 0
-        self.heads: list[Item] = []
+        self.head: Item = None
         self.flat_items: list[Item] = []
         self.flat_operations: list[Item] = []
     
     def json_display(self):
         return {
             "id": self.id,
-            "heads": [h.json_display() for h in self.heads]
+            "head": self.head.json_display()
         }
     
 class RT():
     def __init__(self):
         self.id: int = 0,
-        self.machines: list[Machine] = [],
+        self.finite_capacity: bool = False
+        self.machines: list[Machine] = []
         self.sequence: list[Execution] = []
 
     def json_display(self):
         return {
             "id": self.id,
+            "finite_capacity": self.finite_capacity,
             "machines": [r.json_display() for r in self.machines]
         }
 
@@ -200,12 +201,12 @@ class Material(Resource):
         }
 
 class HeuristicSolution():
-    def __init__(self, instance: Instance):
-        self.H = instance.H
-        self.M = instance.M
-        self.id = instance.id
-        self.w_makespan = instance.w_makespan 
-        self.nb_settings = instance.nb_settings
+    def __init__(self):
+        self.H = 0
+        self.M = 0
+        self.id = 0
+        self.w_makespan = 0
+        self.nb_settings = 0
         self.projects: list[Project] = []
         self.machine_types: list[RT] = []
         self.materials: list[Material] = []
@@ -214,7 +215,7 @@ class HeuristicSolution():
         self.Cmax = -1
         self.feasible = False
 
-    @classmethod
+    @staticmethod
     def geneget(obj_list, obj_id):
         for obj in obj_list:
             if obj.id == obj_id:
@@ -240,7 +241,7 @@ class HeuristicSolution():
         p = project.id
         operation: Operation = Operation()
         operation.id = o
-        operation.operation_family = i.operation_family[p][o]
+        operation.operation_family = i.get_operation_type(p,o)
         operation.simultaneous = i.simultaneous[p][o]
         operation.in_hours = i.in_hours[p][o]
         operation.in_days = i.in_days[p][o]
@@ -248,8 +249,9 @@ class HeuristicSolution():
         operation.design_value = i.design_value[p][o]
         operation.item = item
         for rt in i.required_rt(p, o):
-            if i.finite_capacity[r]:
-                type: RT = HeuristicSolution.geneget(self.machine_types, rt)
+            resx = i.resources_by_type(rt)
+            if resx and i.finite_capacity[i.resources_by_type(rt)[0]]:
+                type: RT = self.machine_types[rt]
                 execution: Execution = Execution()
                 execution.selected_machine = type.machines[0]
                 execution.machine_type = type
@@ -276,17 +278,18 @@ class HeuristicSolution():
         item.id = e
         item.external = i.external[p][e]
         item.outsourcing_time = i.outsourcing_time[p][e]
-        item.external_cos = i.external_cost[p][e]
+        item.external_cost = i.external_cost[p][e]
         item.parent = parent
         item.project = project
-        for o in i.get_operations_idx(p, e):
+        o_start, o_end = i.get_operations_idx(p, e)
+        for o in range(o_start, o_end):
             self.start_operation(i, project, item, o)
         for c in i.get_children(p, e, direct=True):
             child = self.reccursive_start_item(i, project, c, item, head=False)
-        item.children.append(child)
+            item.children.append(child)
         project.flat_items.append(item)
         if head:
-            project.heads.append(item)
+            project.head = item
         item.children.sort(key=lambda obj: obj.id)
         item.design_ops.sort(key=lambda obj: obj.id)
         item.production_ops.sort(key=lambda obj: obj.id)
@@ -296,15 +299,18 @@ class HeuristicSolution():
         for rt in i.loop_rts():
             type: RT = RT()
             type.id = rt
-            self.machine_types.append(rt)
+            resx = i.resources_by_type(rt)
+            if (not resx or i.finite_capacity[resx[0]]):
+                type.finite_capacity = True
+            self.machine_types.append(type)
         self.machine_types.sort(key=lambda obj: obj.id)
         for r in i.loop_resources():
             if i.finite_capacity[r]:
                 machine: Machine = Machine()
                 machine.id = r
-                rt = i.resource_family[r]
+                rt = i.get_resource_type(r)
                 machine.resource_type = rt
-                type: RT = HeuristicSolution.geneget(self.machine_types, rt)
+                type = self.machine_types[rt]
                 machine.type = type
                 machine.design_setup = i.design_setup[r]
                 machine.operation_setup = i.operation_setup[r]
@@ -313,7 +319,7 @@ class HeuristicSolution():
             else:
                 material: Material = Material()
                 material.id = r
-                material.resource_type = i.resource_family[r]
+                material.resource_type = i.get_resource_type(r)
                 material.init_quantity = i.init_quantity[r]
                 material.purchase_time = i.purchase_time[r]
                 material.quantity_purchased = i.quantity_needed[r]
@@ -334,9 +340,7 @@ class HeuristicSolution():
         for p in i.loop_projects():
             project: Project = Project()
             project.id = p
-            for e in i.project_head(p):
-                self.reccursive_start_item(i, project, e, head=True)
-            project.heads.sort(key=lambda obj: obj.id)
+            self.reccursive_start_item(i, project, i.project_head(p), head=True)
             project.flat_items.sort(key=lambda obj: obj.id)
             project.flat_operations.sort(key=lambda obj: obj.id)
             self.projects.append(project)

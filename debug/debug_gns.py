@@ -1,5 +1,5 @@
 from typing import Callable
-
+from model.graph import GraphInstance
 # =====================================================
 # =*= DEBUG THE GNS SOLVER =*=
 # =====================================================
@@ -7,7 +7,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-def check_completeness(graph, debug_print: Callable):
+def check_completeness(graph: GraphInstance, debug_print: Callable):
     NOT_YET = -1
     for item_id in graph.loop_items():
         outsourced = graph.item(item_id, 'outsourced')
@@ -28,7 +28,7 @@ def check_completeness(graph, debug_print: Callable):
         r = graph.resources_g2i[resource_id]
         if graph.resource(resource_id, 'remaining_operations')>0:
             debug_print(f"PROBLEM RESOURCE {r} STILL HAS {graph.resource(resource_id, 'remaining_operations')} OF REMAINING OPERATION!")
-    need_for_mat_idx, loop_mat = graph.loop_need_for_material()
+    need_for_mat_idx, _, loop_mat = graph.loop_need_for_material()
     for i in loop_mat:
         operation_id = need_for_mat_idx[0, i]
         material_id = need_for_mat_idx[1, i]
@@ -36,7 +36,7 @@ def check_completeness(graph, debug_print: Callable):
         m = graph.materials_g2i[material_id]
         if graph.need_for_material(operation_id, material_id, 'status') == NOT_YET:
             debug_print(f"PROBLEM NEED OF MATERIAL op=({p},{o}), mat={m} STATUS STILL NO YET!")
-    need_for_res_idx, loop_res = graph.loop_need_for_resource()
+    need_for_res_idx, _, loop_res = graph.loop_need_for_resource()
     for i in loop_res:
         operation_id = need_for_res_idx[0, i]
         resource_id = need_for_res_idx[1, i]

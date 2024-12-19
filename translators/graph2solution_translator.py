@@ -1,5 +1,5 @@
 from model.instance import Instance
-from model.solution import HeuristicSolution, Item, Operation, Execution, MaterialUse, Machine, Material
+from model.solution import HeuristicSolution, Item, Operation, Execution, MaterialUse, Machine, Material, RT
 from model.graph import YES, NO, GraphInstance, NeedForResourceFeatures, NeedForMaterialFeatures, ItemFeatures
 
 # =============================================================================
@@ -34,8 +34,8 @@ def translate_solution(graph: GraphInstance, instance: Instance):
         ex_features: NeedForResourceFeatures = NeedForResourceFeatures.from_tensor(execution_features[i], graph.features)
         p, o = graph.operations_g2i[execution_index[0, i].item()]
         r = graph.resources_g2i[execution_index[1, i].item()]
-        e = instance.get_item_of_operation(p, o)
         rt = instance.get_resource_type(r)
+        type: RT = solution.machine_types[rt]
         operation: Operation = solution.projects[p].flat_operations[o]
         item: Item = operation.item
         execution: Execution = operation.get_machine_usage(rt)
@@ -45,6 +45,7 @@ def translate_solution(graph: GraphInstance, instance: Instance):
         item.end = max(item.end, ex_features.end_time) 
         item.start = min_if_exist(ex_features.start_time, item.start)
         solution.Cmax = max(solution.Cmax, ex_features.end_time)
+        type.sequence.append(execution)
 
     # 3/4 Execution on consumable materials
     mat_use_index, mat_use_features, mat_use_loop = graph.loop_need_for_material()
@@ -52,14 +53,15 @@ def translate_solution(graph: GraphInstance, instance: Instance):
         mat_features: NeedForMaterialFeatures = NeedForMaterialFeatures.from_tensor(mat_use_features[i], graph.features)
         p, o = graph.operations_g2i[mat_use_index[0, i].item()]
         m = graph.materials_g2i[mat_use_index[1, i].item()]
-        e = instance.get_item_of_operation(p, o)
         operation: Operation = solution.projects[p].flat_operations[o]
         item: Item = operation.item
+        material: Material = HeuristicSolution.geneget(solution.materials, m)
         use: MaterialUse = operation.get_material_use(m)
         use.execution_time = mat_features.execution_time
-        item.end = max(solution.E_end[p][e], mat_features.execution_time)
-        item.start = min_if_exist(mat_features.execution_time, solution.E_start[p][e])
+        item.end = max(item.end, mat_features.execution_time)
+        item.start = min_if_exist(mat_features.execution_time, item.start)
         solution.Cmax = max(solution.Cmax, mat_features.execution_time)
+        material.sequence.append(use)
 
     # 4/4 Build positions
     for res in solution.flat_resources:

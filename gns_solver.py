@@ -2,6 +2,7 @@ import argparse
 from model.instance import Instance
 from model.graph import GraphInstance, NO, NOT_YET, YES
 from model.gnn import L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, L1_CommonCritic
+from model.solution import HeuristicSolution
 from tools.common import load_instance, to_bool, directory
 import torch
 torch.autograd.set_detect_anomaly(True)
@@ -11,6 +12,7 @@ from typing import Callable
 from torch import Tensor
 from torch.nn import Module
 from translators.instance2graph_translator import translate
+from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import check_completeness, debug_printer
 from gns_ppo_trainer import reward, PPO_train
 from model.agent import MultiAgent_OneInstance
@@ -572,7 +574,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
     if train:
         return training_results
     else:
-        return current_cmax, current_cost
+        return graph, current_cmax, current_cost
 
 # =====================================================
 # =*= IV. MAIN CODE =*=
@@ -647,7 +649,9 @@ if __name__ == '__main__':
             agent = agent.to(device)
         shared_embbeding_stack = shared_embbeding_stack.to(device)
         shared_critic = shared_critic.to(device)
-        current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, debug_mode=debug_mode)
+        graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, debug_mode=debug_mode)
+        solution: HeuristicSolution = translate_solution(graph, target_instance)
+        print(solution.json_display())
         solutions_df = pd.DataFrame({
             'index': [target_instance.id],
             'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
