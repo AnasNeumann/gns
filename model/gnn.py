@@ -1,6 +1,6 @@
 import torch
 from torch_geometric.data.storage import EdgeStorage
-from torch.nn import Sequential, Linear, ELU, Tanh, Parameter, LeakyReLU, Module, ModuleList, MultiheadAttention
+from torch.nn import Sequential, Linear, ELU, Tanh, Parameter, LeakyReLU, Module, ModuleList
 import torch.nn.functional as F
 from torch import Tensor
 from .graph import FeatureConfiguration, State
@@ -354,39 +354,3 @@ class L1_MaterialActor(Module):
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
         return action_probs, state_value
-
-# =====================================================
-# Decoder for the pre-training stage only
-# =====================================================
-
-class GNNDecoder(Module):
-    def __init__(self, embedding_dim: int, hidden_dim: int, initial_dim: int):
-        super(GNNDecoder, self).__init__()
-        self.attention = MultiheadAttention(embed_dim=embedding_dim, num_heads=4, batch_first=True)
-        self.mlp = Sequential(
-            Linear(embedding_dim, hidden_dim),
-            ELU(),
-            Linear(hidden_dim, hidden_dim // 2),
-            ELU(),
-            Linear(hidden_dim // 2, initial_dim)
-        )
-
-    def forward(self, embbeding: Tensor, state_embedding: Tensor):
-        return self.mlp(self.attention(embbeding, state_embedding, state_embedding))
-
-class L1_AutoEncoder(Module):
-    def __init__(self, encoder: L1_EmbbedingGNN, material_dim: int, resource_dim: int, item_dim: int, operation_dim: int, resource_and_material_embedding_size: int, operation_and_item_embedding_size:int, hidden_dim: int):
-        super(L1_AutoEncoder, self).__init__()
-        self.encoder = encoder
-        self.material_decoder = GNNDecoder(resource_and_material_embedding_size, material_dim, hidden_dim)
-        self.resource_decoder = GNNDecoder(resource_and_material_embedding_size, resource_dim, hidden_dim)
-        self.item_decoder = GNNDecoder(operation_and_item_embedding_size, item_dim, hidden_dim)
-        self.operation_decoder = GNNDecoder(operation_and_item_embedding_size, operation_dim, hidden_dim)
-
-    def forward(self, state: State, related_items: Tensor, parents: Tensor, alpha: Tensor):
-        embedded_state, state_embedding = self.encoder(state, related_items, parents, alpha)
-        state.materials = self.material_decoder(embedded_state.materials, state_embedding)
-        state.resources = self.resource_decoder(embedded_state.resources, state_embedding)
-        state.items = self.item_decoder(embedded_state.items, state_embedding)
-        state.operations = self.operation_decoder(embedded_state.operations, state_embedding)
-        return state

@@ -42,13 +42,6 @@ class State:
     def clone(self, device: str):
         return State(self.items, self.operations, self.resources, self.materials, self.need_for_materials, self.need_for_resources, self.operation_assembly, self.item_assembly, self.precedences, self.same_types, graph_level_features=self.graph_level_features, device=device)
 
-class FullState:
-    def __init__(self, state: State, related_items: Tensor, parents: Tensor, alpha: Tensor):
-        self.state: State = state
-        self.related_items: Tensor = related_items
-        self.parents: Tensor = parents
-        self.alpha: Tensor = alpha
-         
 class FeatureConfiguration:
     def __init__(self):
         self.operation = {

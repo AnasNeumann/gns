@@ -168,5 +168,4 @@ log.sh
 gns_env/
 data/out/
 gns_env/**
-dataset_builder.sh
 __pycache__/

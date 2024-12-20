@@ -1,6 +1,6 @@
 import argparse
 from model.instance import Instance
-from model.graph import GraphInstance, State, FullState, NO, NOT_YET, YES
+from model.graph import GraphInstance, NO, NOT_YET, YES
 from model.gnn import L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, L1_CommonCritic
 from model.solution import HeuristicSolution
 from tools.common import load_instance, to_bool, directory
@@ -14,7 +14,7 @@ from torch.nn import Module
 from translators.instance2graph_translator import translate
 from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import check_completeness, debug_printer
-from train.gns_ppo_trainer import reward, PPO_train
+from gns_ppo_trainer import reward, PPO_train
 from model.agent import MultiAgent_OneInstance
 import pickle
 
@@ -25,7 +25,6 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-SAVE_FULL_STATES: bool = False
 LEARNING_RATE = 2e-4
 OUTSOURCING = 0
 SCHEDULING = 1
@@ -449,7 +448,6 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
     old_cost = 0
     terminate = False
     operations_to_test = []
-    ittr = 0
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t, debug_print)
         debug_print(f"Current possible actions: {poss_actions}")
@@ -472,13 +470,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 else:
                     need_reward = False
             else:
-                current_state: State = graph.to_state(device=device)
-                if SAVE_FULL_STATES:
-                    with open(directory.states+'/state_'+args.size+'_'+args.id+'_'+str(ittr)+'.pkl', 'wb') as f:
-                        pickle.dump(FullState(current_state, related_items, parent_items, alpha), f)
-                    ittr = ittr+1
                 with torch.no_grad():
-                    probs, state_value = agents[actions_type][AGENT](current_state, poss_actions, related_items, parent_items, alpha)
+                    probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
                 idx = policy(probs, greedy=True)
             if actions_type == OUTSOURCING:
                 item_id, outsourcing_choice = poss_actions[idx]
@@ -599,16 +592,6 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
 # =*= IV. MAIN CODE =*=
 # =====================================================
 
-def load_pre_trained_models(model_path:str, run_number:int, device:str):
-    index = str(run_number)
-    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['embedding_hidden_channels'], GNN_CONF['nb_layers'])
-    shared_GNN.load_state_dict(torch.load(model_path+'/gnn_weights_'+index+'.pth', map_location=torch.device(device)))
-    shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['value_hidden_channels'])
-    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
-    scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
-    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
-    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
-
 def load_trained_models(model_path:str, run_number:int, device:str):
     index = str(run_number)
     shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['embedding_hidden_channels'], GNN_CONF['nb_layers'])
@@ -636,7 +619,6 @@ if __name__ == '__main__':
     parser.add_argument("--size", help="Size of the solved instance", required=False)
     parser.add_argument("--id", help="Id of the solved instance", required=False)
     parser.add_argument("--train", help="Do you want to load a pre-trained model", required=True)
-    parser.add_argument("--savestates", help="Do you want save all states", required=False)
     parser.add_argument("--mode", help="Execution mode (either prod or test)", required=True)
     parser.add_argument("--path", help="Saving path on the server", required=True)
     parser.add_argument("--number", help="The number of the current run", required=True)
@@ -646,17 +628,14 @@ if __name__ == '__main__':
     run_number = int(args.number)
     device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
     print(f"TPU Device: {device}...")
-    first = (run_number<=0)
-    second = (run_number==1)
-    if args.savestates and to_bool(args.savestates):
-        SAVE_FULL_STATES = True
+    first = (run_number<=1)
     if to_bool(args.train):
         '''
             Test training mode with: bash _env.sh
             python gns_solver.py --train=true --mode=test --number=1 --path=./
         '''
         previous_run = run_number - 1
-        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_pre_trained_models(model_path=args.path+directory.models, run_number=previous_run, device=device) if second else load_trained_models(model_path=args.path+directory.models, run_number=previous_run, device=device)
+        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=args.path+directory.models, run_number=previous_run, device=device)
         shared_embbeding_stack = shared_embbeding_stack.to(device)
         shared_critic = shared_critic.to(device)
         for agent,_ in agents:
@@ -675,29 +654,25 @@ if __name__ == '__main__':
             python gns_solver.py --size=s --id=151 --train=false --mode=test --path=./ --number=1
         '''
         print(f"SOLVE TARGET INSTANCE {args.size}_{args.id}...")
-        folder = '/test/' if not SAVE_FULL_STATES else '/train/'
-        target_instance: Instance = load_instance(args.path+directory.instances+folder+args.size+'/instance_'+args.id+'.pkl')
+        target_instance: Instance = load_instance(args.path+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl')
         start_time = systime.time()
-        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_pre_trained_models(model_path=args.path+directory.models, run_number=run_number, device=device) if second else load_trained_models(model_path=args.path+directory.models, run_number=run_number, device=device)
+        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=args.path+directory.models, run_number=run_number, device=device)
         for agent,_ in agents:
             agent = agent.to(device)
         shared_embbeding_stack = shared_embbeding_stack.to(device)
         shared_critic = shared_critic.to(device)
         graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, debug_mode=debug_mode)
-        
-        # If we want to save the final solution and not all temporary states
-        if not SAVE_FULL_STATES:
-            solution: HeuristicSolution = translate_solution(graph, target_instance)
-            solutions_df = pd.DataFrame({
-                'index': [target_instance.id],
-                'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
-                'computing_time': [systime.time()-start_time],
-                'device_used': [device]
-            })
-            print(solutions_df)
-            solutions_df.to_csv(args.path+directory.instances+'/test/'+args.size+'/solution_gns_'+args.id+'.csv', index=False)
-            with open(directory.solutions+'/'+args.size+'/gns_'+args.number+'_graph_'+args.id+'.pkl', 'wb') as f:
-                    pickle.dump(graph, f)
-            with open(directory.solutions+'/'+args.size+'/gns_'+args.number+'_solution_'+args.id+'.pkl', 'wb') as f:
-                    pickle.dump(solution, f)
+        solution: HeuristicSolution = translate_solution(graph, target_instance)
+        solutions_df = pd.DataFrame({
+            'index': [target_instance.id],
+            'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
+            'computing_time': [systime.time()-start_time],
+            'device_used': [device]
+        })
+        print(solutions_df)
+        solutions_df.to_csv(args.path+directory.instances+'/test/'+args.size+'/solution_gns_'+args.id+'.csv', index=False)
+        with open(directory.solutions+'/'+args.size+'/gns_'+args.number+'_graph_'+args.id+'.pkl', 'wb') as f:
+                pickle.dump(graph, f)
+        with open(directory.solutions+'/'+args.size+'/gns_'+args.number+'_solution_'+args.id+'.pkl', 'wb') as f:
+                pickle.dump(solution, f)
     print("===* END OF FILE *===")

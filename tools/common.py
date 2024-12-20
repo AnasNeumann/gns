@@ -11,17 +11,16 @@ __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
 class ProjectDirectory:
-    def __init__(self, data: str, instances: str, models: str, results: str, out: str, scripts: str, solutions: str, states: str):
+    def __init__(self, data: str, instances: str, models: str, results: str, out: str, scripts: str, solutions: str):
         self.data: str = data
         self.instances: str = self.data+'/'+instances
         self.models: str = self.data+'/'+models
         self.out: str = self.data+'/'+out
         self.results: str = self.data+'/'+results
         self.solutions: str = self.data+'/'+solutions
-        self.states: str = self.data+'/'+states
         self.scripts: str = scripts
 
-directory = ProjectDirectory('data', 'instances', 'models', 'results', 'out', 'jobs/scripts', 'solutions', 'partial_states')
+directory = ProjectDirectory('data', 'instances', 'models', 'results', 'out', 'jobs/scripts', 'solutions')
 
 num_feature = Union[int, float]
 all_types_feature = Union[int, float, bool, list]
