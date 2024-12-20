@@ -16,6 +16,7 @@ from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import check_completeness, debug_printer
 from gns_ppo_trainer import reward, PPO_train
 from model.agent import MultiAgent_OneInstance
+import pickle
 
 # =====================================================
 # =*= 1st MAIN FILE OF THE PROJECT: GNS SOLVER =*=
@@ -659,4 +660,8 @@ if __name__ == '__main__':
         })
         print(solutions_df)
         solutions_df.to_csv(args.path+directory.instances+'/test/'+args.size+'/solution_gns_'+args.id+'.csv', index=False)
+        with open(directory.solutions+'/'+args.size+'/gns_'+args.number+'_graph_'+args.id+'.pkl', 'wb') as f:
+                pickle.dump(graph, f)
+        with open(directory.solutions+'/'+args.size+'/gns_'+args.number+'_solution_'+args.id+'.pkl', 'wb') as f:
+                pickle.dump(solution, f)
     print("===* END OF FILE *===")
