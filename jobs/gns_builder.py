@@ -7,16 +7,12 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-START_IDX = 151
-END_IDX = 200
-SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
-
 '''
     TEST WITH
-    python gns_builder.py --account=x --parent=y --mail=x@mail.com --time=20 --memory=187 --cpu=16 --number=1
+    python gns_builder.py --account=x --parent=y --mail=x@mail.com --time=31 --memory=16 --cpu=1 --number=1
 '''
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description="EPSIII job builder")
+    parser = argparse.ArgumentParser(description="GNS MAPPO job builder")
     parser.add_argument("--account", help="Compute Canada Account", required=True)
     parser.add_argument("--parent", help="Compute Canada Parent Account", required=True)
     parser.add_argument("--mail", help="Compute Canada Email Adress", required=True)
