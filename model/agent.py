@@ -114,6 +114,9 @@ class Agent_OneInstance:
         r = torch.tensor([reward], device=self.device)
         self.rewards = add_into_tensor(self.rewards, r)
     
+    def update_last_reward(self, init_cmax: float):
+        self.rewards[-1] += init_cmax
+    
     # delta_t = reward_t + gamma*value_(t+1) - value_t
     # In this formula, t is step of the agent and global_t is the global step considering all 3 agents!
     def temporal_difference_residual(self, t: int, all_values: Value_OneInstance) -> Tensor:
@@ -190,6 +193,10 @@ class MultiAgent_OneInstance:
     def add_reward(self, agent_name: str, reward: any):
         agent: Agent_OneInstance = self.agents[agent_name]
         agent.add_reward(reward)
+    
+    def update_last_reward(self, agent_name: str, init_cmax: int):
+        agent: Agent_OneInstance = self.agents[agent_name]
+        agent.update_last_reward(init_cmax)
 
 class Value_Batch:
     def __init__(self, weight_value_loss: float):
