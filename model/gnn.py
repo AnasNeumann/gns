@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from torch import Tensor
 from .graph import FeatureConfiguration, State
 from torch_geometric.utils import scatter
+from torch_geometric.nn import GraphConv
 
 # =====================================================
 # =*= GRAPH ATTENTION NEURAL NETWORK (GaNN) =*=
@@ -360,19 +361,46 @@ class L1_MaterialActor(Module):
 # =====================================================
 
 class GNNDecoder(Module):
-    def __init__(self, embedding_dim: int, hidden_dim: int, initial_dim: int):
+    def __init__(self, embedding_dim, initial_dim, hidden_dim, num_heads=4):
         super(GNNDecoder, self).__init__()
-        self.attention = MultiheadAttention(embed_dim=embedding_dim, num_heads=4, batch_first=True)
-        self.mlp = Sequential(
-            Linear(embedding_dim, hidden_dim),
+        self.self_attention = MultiheadAttention(embed_dim=embedding_dim, num_heads=num_heads, batch_first=True)
+        self.cross_attention_1 = MultiheadAttention(embed_dim=embedding_dim, num_heads=num_heads, batch_first=True)
+        self.cross_attention_2 = MultiheadAttention(embed_dim=embedding_dim, num_heads=num_heads, batch_first=True)
+        self.cross_attention_3 = MultiheadAttention(embed_dim=embedding_dim, num_heads=num_heads, batch_first=True)
+        self.mlp_self = Sequential(
+            Linear(embedding_dim, hidden_dim // 2),
+            ELU(),
+            Linear(hidden_dim // 2, embedding_dim)
+        )
+        self.mlp_cross_1 = Sequential(
+            Linear(embedding_dim, hidden_dim // 2),
+            ELU(),
+            Linear(hidden_dim // 2, embedding_dim)
+        )
+        self.mlp_cross_2 = Sequential(
+            Linear(embedding_dim, hidden_dim // 2),
+            ELU(),
+            Linear(hidden_dim // 2, embedding_dim)
+        )
+        self.mlp_cross_3 = Sequential(
+            Linear(embedding_dim, hidden_dim // 2),
+            ELU(),
+            Linear(hidden_dim // 2, embedding_dim)
+        )
+        self.mlp_final = Sequential(
+            Linear(embedding_dim * 4, hidden_dim),
             ELU(),
             Linear(hidden_dim, hidden_dim // 2),
             ELU(),
             Linear(hidden_dim // 2, initial_dim)
         )
 
-    def forward(self, embbeding: Tensor, state_embedding: Tensor):
-        return self.mlp(self.attention(embbeding, state_embedding, state_embedding))
+    def forward(self, node_embeddings: Tensor, other_nodes_1: Tensor, other_nodes_2: Tensor, other_nodes_3: Tensor):
+        self_decoded = self.mlp_self(self.self_attention(node_embeddings, node_embeddings, node_embeddings)[0])
+        cross_decoded_1 = self.mlp_cross_1(self.cross_attention_1(node_embeddings, other_nodes_1, node_embeddings)[0])
+        cross_decoded_2 = self.mlp_cross_2(self.cross_attention_2(node_embeddings, other_nodes_2, node_embeddings)[0])
+        cross_decoded_3 = self.mlp_cross_3(self.cross_attention_3(node_embeddings, other_nodes_3, node_embeddings)[0])
+        return self.mlp_final(torch.cat([self_decoded, cross_decoded_1, cross_decoded_2, cross_decoded_3], dim=0)[0])
 
 class L1_AutoEncoder(Module):
     def __init__(self, encoder: L1_EmbbedingGNN, material_dim: int, resource_dim: int, item_dim: int, operation_dim: int, resource_and_material_embedding_size: int, operation_and_item_embedding_size:int, hidden_dim: int):
@@ -384,9 +412,9 @@ class L1_AutoEncoder(Module):
         self.operation_decoder = GNNDecoder(operation_and_item_embedding_size, operation_dim, hidden_dim)
 
     def forward(self, state: State, related_items: Tensor, parents: Tensor, alpha: Tensor):
-        embedded_state, state_embedding = self.encoder(state, related_items, parents, alpha)
-        state.materials = self.material_decoder(embedded_state.materials, state_embedding)
-        state.resources = self.resource_decoder(embedded_state.resources, state_embedding)
-        state.items = self.item_decoder(embedded_state.items, state_embedding)
-        state.operations = self.operation_decoder(embedded_state.operations, state_embedding)
+        embedded_state, _ = self.encoder(state, related_items, parents, alpha)
+        state.operations = self.operation_decoder(embedded_state.operations, embedded_state.resources, embedded_state.materials, embedded_state.items)
+        state.items = self.item_decoder(embedded_state.items, embedded_state.resources, embedded_state.materials, embedded_state.operations)
+        state.resources = self.resource_decoder(embedded_state.resources, embedded_state.materials, embedded_state.items, embedded_state.operations)
+        state.materials = self.material_decoder(embedded_state.materials, embedded_state.resources, embedded_state.items, embedded_state.operations)
         return state

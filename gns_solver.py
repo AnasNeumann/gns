@@ -14,7 +14,7 @@ from torch.nn import Module
 from translators.instance2graph_translator import translate
 from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import check_completeness, debug_printer
-from train.gns_ppo_trainer import reward, PPO_train
+from gns_ppo_trainer import reward, PPO_train
 from model.agent import MultiAgent_OneInstance
 import pickle
 
