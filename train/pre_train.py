@@ -40,11 +40,7 @@ def reconstruction_loss_with_context(reconstructed: State, original: State):
 def load_dataset(folder_path) -> list[FullState]:
     print("1 - Loading dataset.....")
     dataset: list[FullState] = []
-    i: int = 0
     for filename in os.listdir(folder_path):
-        if i > 10:
-            break
-        i += 1
         if filename.endswith(".pkl"):
             file_path = os.path.join(folder_path, filename)
             with open(file_path, "rb") as file:
@@ -59,7 +55,7 @@ def init_new_models(device: str):
     print("2 - Building models.....")
     conf = FeatureConfiguration()
     encoder: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['embedding_hidden_channels'], GNN_CONF['nb_layers'])
-    decoder: L1_AutoEncoder = L1_AutoEncoder(encoder, len(conf.material), len(conf.resource), len(conf.item), len(conf.operation), GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['decoder_hidden_layers'])
+    decoder: L1_AutoEncoder = L1_AutoEncoder(encoder, len(conf.material), len(conf.resource), len(conf.item), len(conf.operation), GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['decoder_hidden_layers'])
     encoder.to(device)
     decoder.to(device)
     print("Models ready!")
