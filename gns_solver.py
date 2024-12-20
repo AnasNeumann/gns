@@ -651,7 +651,6 @@ if __name__ == '__main__':
         shared_critic = shared_critic.to(device)
         graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, debug_mode=debug_mode)
         solution: HeuristicSolution = translate_solution(graph, target_instance)
-        print(solution.json_display())
         solutions_df = pd.DataFrame({
             'index': [target_instance.id],
             'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
