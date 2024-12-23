@@ -44,7 +44,7 @@ def reward(makespan_old: int, makespan_new: int, cost_old: int=-1, cost_new: int
     if use_cost:
         return a * (cost_old - cost_new) + (1-a) * (makespan_old - makespan_new)
     else:
-        return makespan_old - makespan_new
+        return a * (makespan_old - makespan_new)
 
 def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Optimizer, run_number:int, complete_path: str):
     index = str(run_number)

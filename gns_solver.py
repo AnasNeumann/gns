@@ -16,6 +16,7 @@ from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import check_completeness, debug_printer
 from gns_ppo_trainer import reward, PPO_train
 from model.agent import MultiAgent_OneInstance
+import pickle
 
 # =====================================================
 # =*= 1st MAIN FILE OF THE PROJECT: GNS SOLVER =*=
@@ -161,7 +162,7 @@ def shift_next_operations(graph: GraphInstance, instance: Instance, p: int, e: i
         return graph, 0
     _, end = instance.get_operations_idx(p, e)
     max_end = 0
-    for next in range(o, end):
+    for next in range(o+1, end):
         graph, end_next = shift_one_operation(graph, instance, p, next, shift)
         max_end = max(end_next, max_end)
     return graph, max_end
@@ -303,7 +304,7 @@ def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: i
         graph,_ = shift_children_and_operations(graph, instance, p, e, shift)
     graph, max_ancestors_end = shift_ancestors_physical_operations(graph, instance, p, e, max_next_operation_end)
     required_types_of_materials[p][o].remove(rt)
-    return graph, required_types_of_materials, max(max_ancestors_end, new_end)
+    return graph, required_types_of_materials, max(max_ancestors_end, new_end, max_next_operation_end)
 
 def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: int, resource_id: int, required_types_of_resources: list[list[list[int]]], utilization: list[float], current_time: int):
     current_processing_time = graph.need_for_resource(operation_id, resource_id, 'current_processing_time')
@@ -356,7 +357,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
         graph.inc_item(item_id, [('remaining_design_time', -estimated_processing_time)])
         graph,_ = shift_children_and_operations(graph, instance, p, e, shift)
     graph, max_ancestors_end = shift_ancestors_physical_operations(graph, instance, p, e, max_next_operation_end)
-    return graph, utilization, required_types_of_resources, operation_end, max(operation_end, max_ancestors_end)
+    return graph, utilization, required_types_of_resources, operation_end, max(operation_end, max_next_operation_end, max_ancestors_end)
 
 # =====================================================
 # =*= III. EXECUTE ONE INSTANCE =*=
@@ -442,8 +443,9 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
             parent_items=parent_items,
             w_makespan=alpha,
             device=device)
+    first_cmax = -1 * current_cmax * instance.w_makespan
     old_cmax = current_cmax
-    old_cost = current_cost
+    old_cost = 0
     terminate = False
     operations_to_test = []
     while not terminate:
@@ -456,13 +458,17 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
             if train:
                 probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
                 idx = policy(probs, greedy=False)
-                training_results.add_step(
-                    agent_name=ACTIONS_NAMES[actions_type], 
-                    state=graph.to_state(device=device),
-                    probabilities=probs.detach(),
-                    actions=poss_actions,
-                    id=idx,
-                    value=state_value.detach())
+                if actions_type != MATERIAL_USE or graph.material(poss_actions[idx][1], 'remaining_init_quantity')>0:
+                    need_reward = True
+                    training_results.add_step(
+                        agent_name=ACTIONS_NAMES[actions_type], 
+                        state=graph.to_state(device=device),
+                        probabilities=probs.detach(),
+                        actions=poss_actions,
+                        id=idx,
+                        value=state_value.detach())
+                else:
+                    need_reward = False
             else:
                 with torch.no_grad():
                     probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
@@ -502,26 +508,31 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 p, o = graph.operations_g2i[operation_id]
                 debug_print(f"Scheduling: operation {operation_id} -> ({p},{o}) on resource {graph.resources_g2i[resource_id]} at time {t}...")     
                 graph, utilization, required_types_of_resources, operation_end, max_ancestors_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, utilization, t)
-                debug_print(f"End of scheduling at time {operation_end}...")
                 if instance.simultaneous[p][o]:
+                    not_RT = instance.get_resource_familly(graph.resources_g2i[resource_id])
                     for rt in instance.required_rt(p, o):
-                        if rt != instance.get_resource_familly(graph.resources_g2i[resource_id]):
+                        if rt != not_RT:
+                            found = False
                             for r in instance.resources_by_type(rt):
-                                if instance.finite_capacity[r]:
-                                    other_resource_id = graph.resources_i2g[r]
-                                    if graph.resource(other_resource_id, 'available_time') <= t:
-                                        graph, utilization, required_types_of_resources, op_end, other_max_ancestors_end = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, utilization, t)
-                                        operation_end = max(operation_end, op_end)
+                                if not found:
+                                    if instance.finite_capacity[r]:
+                                        other_resource_id = graph.resources_i2g[r]
+                                        if graph.resource(other_resource_id, 'available_time') <= t:
+                                            graph, utilization, required_types_of_resources, op_end, other_max_ancestors_end = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, utilization, t)
+                                            operation_end = max(operation_end, op_end)
+                                            max_ancestors_end = max(max_ancestors_end, other_max_ancestors_end)
+                                            found = True
+                                            break
+                                    else:
+                                        graph, required_types_of_materials, other_max_ancestors_end = apply_use_material(graph, instance, operation_id, graph.materials_i2g[r], required_types_of_materials, t)
                                         max_ancestors_end = max(max_ancestors_end, other_max_ancestors_end)
+                                        found = True
                                         break
-                                else:
-                                    graph, required_types_of_materials, other_max_ancestors_end = apply_use_material(graph, instance, operation_id, graph.materials_i2g[r], required_types_of_materials, t)
-                                    max_ancestors_end = max(max_ancestors_end, other_max_ancestors_end)
-                                    break
+                debug_print(f"End of scheduling at time {operation_end}...")
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, operation_end, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
                 if train:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(old_cmax, current_cmax))
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(old_cmax, current_cmax, a=instance.w_makespan))
             else:
                 operation_id, material_id = poss_actions[idx]
                 p, o = graph.operations_g2i[operation_id]
@@ -529,8 +540,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 graph, required_types_of_materials, max_ancestors_end = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
-                if train:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=reward(old_cmax, current_cmax))
+                if train and need_reward:
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=reward(old_cmax, current_cmax, a=instance.w_makespan))
             old_cost = current_cost
             old_cmax = current_cmax
         else: # NO OPERATIONS LEFT AT TIME T SEARCH FOR NEXT TIME
@@ -572,6 +583,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                     check_completeness(graph, debug_print)
                 terminate = True
     if train:
+        training_results.update_last_reward(agent_name=ACTIONS_NAMES[SCHEDULING], init_cmax=first_cmax)
         return training_results
     else:
         return graph, current_cmax, current_cost
@@ -659,4 +671,8 @@ if __name__ == '__main__':
         })
         print(solutions_df)
         solutions_df.to_csv(args.path+directory.instances+'/test/'+args.size+'/solution_gns_'+args.id+'.csv', index=False)
+        with open(directory.solutions+'/'+args.size+'/gns_'+args.number+'_graph_'+args.id+'.pkl', 'wb') as f:
+                pickle.dump(graph, f)
+        with open(directory.solutions+'/'+args.size+'/gns_'+args.number+'_solution_'+args.id+'.pkl', 'wb') as f:
+                pickle.dump(solution, f)
     print("===* END OF FILE *===")
