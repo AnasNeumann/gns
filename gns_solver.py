@@ -37,8 +37,7 @@ GNN_CONF = {
     'nb_layers': 2,
     'embedding_hidden_channels': 128,
     'value_hidden_channels': 256,
-    'actor_hidden_channels': 256
-}
+    'actor_hidden_channels': 256}
 
 # =====================================================
 # =*= I. SEARCH FOR FEASIBLE ACTIONS =*=
@@ -175,8 +174,7 @@ def shift_children_and_operations(graph: GraphInstance, instance: Instance, p: i
         child_id = graph.items_i2g[p][child]
         graph.inc_item(child_id, [
             ('start_time', shift),
-            ('end_time', shift)
-        ])
+            ('end_time', shift)])
         max_child_end = max(max_child_end, graph.item(child_id, 'end_time'))
         for o in instance.loop_item_operations(p, child):
             graph,_ = shift_one_operation(graph, instance, p, o, shift)
@@ -276,27 +274,23 @@ def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: i
     waiting_demand = graph.material(material_id, 'remaining_demand') 
     graph.update_need_for_material(operation_id, material_id, [
         ('status', YES), 
-        ('execution_time', current_time)
-    ])
+        ('execution_time', current_time)])
     graph.update_material(material_id, [
         ('remaining_init_quantity', max(0, current_quantity - quantity_needed)),
-        ('remaining_demand', waiting_demand - quantity_needed)
-    ])
+        ('remaining_demand', waiting_demand - quantity_needed)])
     graph.executed_operations += 1
     old_end = graph.operation(operation_id, 'end_time')
     new_end = max(current_time, old_end)
     shift = max(0, new_end-old_end)
     graph.update_operation(operation_id, [
         ('remaining_materials', graph.operation(operation_id, 'remaining_materials') - 1),
-        ('end_time', new_end)
-    ])
+        ('end_time', new_end)])
     e = instance.get_item_of_operation(p,o)
     item_id = graph.items_i2g[p][e]
     graph, max_next_operation_end = shift_next_operations(graph, instance, p, e, o, shift)
     graph.update_item(item_id, [
         ('end_time', max(current_time, max_next_operation_end, graph.item(item_id, 'end_time'))),
-        ('start_time', min(current_time, graph.item(item_id, 'start_time')))
-    ])
+        ('start_time', min(current_time, graph.item(item_id, 'start_time')))])
     for ancestor in instance.get_ancestors(p, e):
         ancestor_id = graph.items_i2g[p][ancestor]
         graph.update_item(ancestor_id, [('end_time', max(current_time, graph.item(ancestor_id, 'end_time')))])
@@ -323,8 +317,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     graph.update_need_for_resource(operation_id, resource_id, [
         ('status', YES),
         ('start_time', current_time),
-        ('end_time', operation_end)
-    ])
+        ('end_time', operation_end)])
     utilization[resource_id] += current_processing_time
     graph.executed_operations += 1
     graph.current_operation_type[resource_id] = instance.get_operation_type(p, o)
@@ -345,8 +338,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     graph, max_next_operation_end = shift_next_operations(graph, instance, p, e, o, shift)
     graph.update_item(item_id, [
         ('start_time', min(current_time, graph.item(item_id, 'start_time'))),
-        ('end_time', max(operation_end, max_next_operation_end, graph.item(item_id, 'end_time')))
-    ])
+        ('end_time', max(operation_end, max_next_operation_end, graph.item(item_id, 'end_time')))])
     if not instance.is_design[p][o]:
         graph.inc_item(item_id, [('remaining_physical_time', -estimated_processing_time)])
         if graph.item(item_id, 'remaining_design_time')<= 0:
@@ -483,8 +475,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                     for ancestor in instance.get_ancestors(p, e):
                         ancestor_id = graph.items_i2g[p][ancestor]
                         graph.update_item(ancestor_id, [
-                            ('children_time', graph.item(ancestor_id, 'children_time')-(approximate_design_load+approximate_physical_load)),
-                        ])
+                            ('children_time', graph.item(ancestor_id, 'children_time')-(approximate_design_load+approximate_physical_load))])
                     graph, max_ancestors_end = shift_ancestors_physical_operations(graph, instance, p, e, end_date)
                     for o in instance.first_physical_operations(p, instance.get_direct_parent(p, e)):
                         next_good_to_go = True
