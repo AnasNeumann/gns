@@ -633,13 +633,13 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mo
     print("Training models with MAPPO...")
     PPO_train(agents, shared_embbeding_stack, shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
 
-def fine_tune_on_target(id: int, size: int, run_number: int, path: str, debug_mode: bool, device: str):
+def fine_tune_on_target(id: str, size: str, run_number: int, path: str, debug_mode: bool, device: str):
     """
         Fine-tune on target instance (size, id)
     """
     pass
 
-def solve_only_target(id: int, size: int, run_number: int, device: str, debug_mode: bool, path: str):
+def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mode: bool, path: str):
     """
         Solve the target instance (size, id) only using inference
     """
@@ -670,9 +670,10 @@ def solve_all_instances(run_number: int, device: str, debug_mode: bool, path: st
     """
         Solve all instances only in inference mode
     """
-    instances: list[Instance] = load_training_dataset(path=path, train=True, debug_mode=debug_mode)
+    instances: list[Instance] = load_training_dataset(path=path, train=False, debug_mode=debug_mode)
     for i in instances:
-        solve_only_target(id=i.id, size=i.size, run_number=run_number, device=device, debug_mode=debug_mode, path=path)
+        if (i.size, i.id) not in [('s', 172)]:
+            solve_only_target(id=str(i.id), size=str(i.size), run_number=run_number, device=device, debug_mode=debug_mode, path=path)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 GNS solver")
@@ -692,16 +693,16 @@ if __name__ == '__main__':
     first = (_run_number<=1)
     if to_bool(args.train):
         if to_bool(args.target):
-            # python gns_solver.py --train=true -target=true --size=s --id=151 --mode=test --number=1 --path=./
+            # python gns_solver.py --train=true --target=true --size=s --id=151 --mode=test --number=1 --path=./
             fine_tune_on_target(id=args.id, size=args.size, run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device)
         else:
-            # python gns_solver.py --train=true -target=false --mode=test --number=1 --path=./
+            # python gns_solver.py --train=true --target=false --mode=test --number=1 --path=./
             pre_train_on_all_instances(run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device)
     else:
         if to_bool(args.target):
-            # python gns_solver.py --train=false -target=false --mode=test --path=./ --number=1
-            solve_all_instances(run_number=args.number, device=_device, debug_mode=_debug_mode, path=args.path)
-        else:
-            # python gns_solver.py -target=true --size=s --id=151 --train=false --mode=test --path=./ --number=1
+            # python gns_solver.py --target=true --size=s --id=151 --train=false --mode=test --path=./ --number=1
             solve_only_target(id=args.id, size=args.size, run_number=args.number, device=_device, debug_mode=_debug_mode, path=args.path)
+        else:
+            # python gns_solver.py --train=false --target=false --mode=test --path=./ --number=1
+            solve_all_instances(run_number=args.number, device=_device, debug_mode=_debug_mode, path=args.path)
     print("===* END OF FILE *===")

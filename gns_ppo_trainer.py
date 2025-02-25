@@ -62,7 +62,7 @@ def search_instance(instances: list[Instance], id: int) -> Instance:
 
 def load_training_dataset(debug_mode: bool, path: str, train: bool = True):
     type: str = '/train/' if train else '/test/'
-    instances = [] 
+    instances = []
     for size in PROBLEM_SIZES[0 if debug_mode else 1]:
         complete_path = path+directory.instances+type+size+'/'
         for i in os.listdir(complete_path):
