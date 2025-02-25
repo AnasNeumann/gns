@@ -14,7 +14,7 @@ from torch.nn import Module
 from translators.instance2graph_translator import translate
 from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import check_completeness, debug_printer
-from gns_ppo_trainer import reward, PPO_train, load_training_dataset
+from gns_ppo_trainer import reward, PPO_pre_train, load_training_dataset, PPO_fine_tuning
 from model.agent import MultiAgent_OneInstance
 import pickle
 
@@ -575,7 +575,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 terminate = True
     if train:
         training_results.update_last_reward(agent_name=ACTIONS_NAMES[SCHEDULING], init_cmax=first_cmax)
-        return training_results
+        return training_results, graph, current_cmax, current_cost
     else:
         return graph, current_cmax, current_cost
 
@@ -583,18 +583,19 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
 # =*= IV. MAIN CODE =*=
 # =====================================================
 
-def load_trained_models(model_path:str, run_number:int, device:str):
+def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: bool = False, size: str = "", id: str = ""):
     index = str(run_number)
+    base_name = f"{size}_{id}_" if fine_tuned else ""
     shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['embedding_hidden_channels'], GNN_CONF['nb_layers'])
-    shared_GNN.load_state_dict(torch.load(model_path+'/gnn_weights_'+index+'.pth', map_location=torch.device(device)))
+    shared_GNN.load_state_dict(torch.load(model_path+'/'+base_name+'gnn_weights_'+index+'.pth', map_location=torch.device(device)))
     shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['value_hidden_channels'])
-    shared_critic.load_state_dict(torch.load(model_path+'/critic_weights_'+index+'.pth', map_location=torch.device(device)))
+    shared_critic.load_state_dict(torch.load(model_path+'/'+base_name+'critic_weights_'+index+'.pth', map_location=torch.device(device)))
     outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
     scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
-    outsourcing_actor.load_state_dict(torch.load(model_path+'/outsourcing_weights_'+index+'.pth', map_location=torch.device(device)))
-    scheduling_actor.load_state_dict(torch.load(model_path+'/scheduling_weights_'+index+'.pth', map_location=torch.device(device)))
-    material_actor.load_state_dict(torch.load(model_path+'/material_use_weights_'+index+'.pth', map_location=torch.device(device)))
+    outsourcing_actor.load_state_dict(torch.load(model_path+'/'+base_name+'outsourcing_weights_'+index+'.pth', map_location=torch.device(device)))
+    scheduling_actor.load_state_dict(torch.load(model_path+'/'+base_name+'scheduling_weights_'+index+'.pth', map_location=torch.device(device)))
+    material_actor.load_state_dict(torch.load(model_path+'/'+base_name+'material_use_weights_'+index+'.pth', map_location=torch.device(device)))
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 def init_new_models():
@@ -609,6 +610,7 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mo
     """
         Pre-train networks on all instances
     """
+    first = (_run_number<=1)
     previous_run = run_number - 1
     agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
     shared_embbeding_stack = shared_embbeding_stack.to(device)
@@ -617,18 +619,26 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mo
         agent = agent.to(device)
     optimizer = torch.optim.Adam(
         list(shared_critic.parameters()) + list(shared_embbeding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
-        lr=LEARNING_RATE
-    )
+        lr=LEARNING_RATE)
     if not first:
         optimizer.load_state_dict(torch.load(path+directory.models+"/adam_"+str(previous_run)+".pth"))
-    print("Training models with MAPPO...")
-    PPO_train(agents, shared_embbeding_stack, shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
+    print("Pre-training models with MAPPO (on several instances)...")
+    PPO_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
 
-def fine_tune_on_target(id: str, size: str, run_number: int, path: str, debug_mode: bool, device: str):
+def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, debug_mode: bool, device: str, use_pre_train: bool = False):
     """
         Fine-tune on target instance (size, id)
     """
-    pass
+    agents, shared_embbeding_stack, shared_critic = init_new_models() if not use_pre_train else load_trained_models(model_path=path+directory.models, run_number=pre_trained_number, device=device)
+    shared_embbeding_stack = shared_embbeding_stack.to(device)
+    shared_critic = shared_critic.to(device)
+    for agent,_ in agents:
+        agent = agent.to(device)
+    optimizer = torch.optim.Adam(
+        list(shared_critic.parameters()) + list(shared_embbeding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
+        lr=LEARNING_RATE)
+    print("Fine-tuning models with MAPPO (on target instance)...")
+    PPO_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, id=id, size=size, debug_mode=debug_mode)
 
 def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mode: bool, path: str):
     """
@@ -637,6 +647,7 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mo
     print(f"SOLVE TARGET INSTANCE {size}_{id}...")
     target_instance: Instance = load_instance(path+directory.instances+'/test/'+size+'/instance_'+id+'.pkl')
     start_time = systime.time()
+    first = (_run_number<=1)
     agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
     for agent,_ in agents:
         agent = agent.to(device)
@@ -644,14 +655,14 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mo
     shared_critic = shared_critic.to(device)
     graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, debug_mode=debug_mode)
     solution: HeuristicSolution = translate_solution(graph, target_instance)
-    solutions_df = pd.DataFrame({
+    final_metrics = pd.DataFrame({
         'index': [target_instance.id],
         'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
         'computing_time': [systime.time()-start_time],
         'device_used': [device]
     })
-    print(solutions_df)
-    solutions_df.to_csv(path+directory.instances+'/test/'+size+'/solution_gns_'+id+'.csv', index=False)
+    print(final_metrics)
+    final_metrics.to_csv(path+directory.instances+'/test/'+size+'/solution_gns_'+id+'.csv', index=False)
     with open(directory.solutions+'/'+size+'/gns_'+str(run_number)+'_graph_'+id+'.pkl', 'wb') as f:
             pickle.dump(graph, f)
     with open(directory.solutions+'/'+size+'/gns_'+str(run_number)+'_solution_'+id+'.pkl', 'wb') as f:
@@ -681,11 +692,10 @@ if __name__ == '__main__':
     _run_number = int(args.number)
     _device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
     print(f"TPU Device: {_device}...")
-    first = (_run_number<=1)
     if to_bool(args.train):
         if to_bool(args.target):
             # python gns_solver.py --train=true --target=true --size=s --id=151 --mode=test --number=1 --path=./
-            fine_tune_on_target(id=args.id, size=args.size, run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device)
+            fine_tune_on_target(id=args.id, size=args.size, pre_trained_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device, use_pre_train=False)
         else:
             # python gns_solver.py --train=true --target=false --mode=test --number=1 --path=./
             pre_train_on_all_instances(run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device)
