@@ -83,7 +83,7 @@ def display_losses(model_path: str, result_path: str, last: int):
     
 '''
     TEST WITH
-    python results_analysis.py --path=./ --last=11
+    python results_analysis.py --path=./ --last=9
 '''
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 results analysis")
