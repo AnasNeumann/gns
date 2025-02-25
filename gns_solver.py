@@ -14,7 +14,7 @@ from torch.nn import Module
 from translators.instance2graph_translator import translate
 from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import check_completeness, debug_printer
-from gns_ppo_trainer import reward, PPO_train
+from gns_ppo_trainer import reward, PPO_train, load_training_dataset
 from model.agent import MultiAgent_OneInstance
 import pickle
 
@@ -614,65 +614,94 @@ def init_new_models():
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
+def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mode: bool):
+    """
+        Pre-train networks on all instances
+    """
+    previous_run = run_number - 1
+    agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
+    shared_embbeding_stack = shared_embbeding_stack.to(device)
+    shared_critic = shared_critic.to(device)
+    for agent,_ in agents:
+        agent = agent.to(device)
+    optimizer = torch.optim.Adam(
+        list(shared_critic.parameters()) + list(shared_embbeding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
+        lr=LEARNING_RATE
+    )
+    if not first:
+        optimizer.load_state_dict(torch.load(path+directory.models+"/adam_"+str(previous_run)+".pth"))
+    print("Training models with MAPPO...")
+    PPO_train(agents, shared_embbeding_stack, shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
+
+def fine_tune_on_target(id: int, size: int, run_number: int, path: str, debug_mode: bool, device: str):
+    """
+        Fine-tune on target instance (size, id)
+    """
+    pass
+
+def solve_only_target(id: int, size: int, run_number: int, device: str, debug_mode: bool, path: str):
+    """
+        Solve the target instance (size, id) only using inference
+    """
+    print(f"SOLVE TARGET INSTANCE {size}_{id}...")
+    target_instance: Instance = load_instance(path+directory.instances+'/test/'+size+'/instance_'+id+'.pkl')
+    start_time = systime.time()
+    agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
+    for agent,_ in agents:
+        agent = agent.to(device)
+    shared_embbeding_stack = shared_embbeding_stack.to(device)
+    shared_critic = shared_critic.to(device)
+    graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, debug_mode=debug_mode)
+    solution: HeuristicSolution = translate_solution(graph, target_instance)
+    solutions_df = pd.DataFrame({
+        'index': [target_instance.id],
+        'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
+        'computing_time': [systime.time()-start_time],
+        'device_used': [device]
+    })
+    print(solutions_df)
+    solutions_df.to_csv(path+directory.instances+'/test/'+size+'/solution_gns_'+id+'.csv', index=False)
+    with open(directory.solutions+'/'+size+'/gns_'+str(run_number)+'_graph_'+id+'.pkl', 'wb') as f:
+            pickle.dump(graph, f)
+    with open(directory.solutions+'/'+size+'/gns_'+str(run_number)+'_solution_'+id+'.pkl', 'wb') as f:
+            pickle.dump(solution, f)
+
+def solve_all_instances(run_number: int, device: str, debug_mode: bool, path: str):
+    """
+        Solve all instances only in inference mode
+    """
+    instances: list[Instance] = load_training_dataset(path=path, train=True, debug_mode=debug_mode)
+    for i in instances:
+        solve_only_target(id=i.id, size=i.size, run_number=run_number, device=device, debug_mode=debug_mode, path=path)
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 GNS solver")
     parser.add_argument("--size", help="Size of the solved instance", required=False)
     parser.add_argument("--id", help="Id of the solved instance", required=False)
     parser.add_argument("--train", help="Do you want to load a pre-trained model", required=True)
+    parser.add_argument("--target", help="Do you want to load a pre-trained model", required=False)
     parser.add_argument("--mode", help="Execution mode (either prod or test)", required=True)
     parser.add_argument("--path", help="Saving path on the server", required=True)
     parser.add_argument("--number", help="The number of the current run", required=True)
     args = parser.parse_args()
     print(f"Execution mode: {args.mode}...")
-    debug_mode = (args.mode == 'test')
-    run_number = int(args.number)
-    device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"TPU Device: {device}...")
-    first = (run_number<=1)
+    _debug_mode = (args.mode == 'test')
+    _run_number = int(args.number)
+    _device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"TPU Device: {_device}...")
+    first = (_run_number<=1)
     if to_bool(args.train):
-        '''
-            Test training mode with: bash _env.sh
-            python gns_solver.py --train=true --mode=test --number=1 --path=./
-        '''
-        previous_run = run_number - 1
-        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=args.path+directory.models, run_number=previous_run, device=device)
-        shared_embbeding_stack = shared_embbeding_stack.to(device)
-        shared_critic = shared_critic.to(device)
-        for agent,_ in agents:
-            agent = agent.to(device)
-        optimizer = torch.optim.Adam(
-            list(shared_critic.parameters()) + list(shared_embbeding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
-            lr=LEARNING_RATE
-        )
-        if not first:
-            optimizer.load_state_dict(torch.load(args.path+directory.models+"/adam_"+str(previous_run)+".pth"))
-        print("Training models with MAPPO...")
-        PPO_train(agents, shared_embbeding_stack, shared_critic, optimizer=optimizer, path=args.path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
+        if to_bool(args.target):
+            # python gns_solver.py --train=true -target=true --size=s --id=151 --mode=test --number=1 --path=./
+            fine_tune_on_target(id=args.id, size=args.size, run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device)
+        else:
+            # python gns_solver.py --train=true -target=false --mode=test --number=1 --path=./
+            pre_train_on_all_instances(run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device)
     else:
-        '''
-            Test inference mode with: bash _env.sh
-            python gns_solver.py --size=s --id=151 --train=false --mode=test --path=./ --number=1
-        '''
-        print(f"SOLVE TARGET INSTANCE {args.size}_{args.id}...")
-        target_instance: Instance = load_instance(args.path+directory.instances+'/test/'+args.size+'/instance_'+args.id+'.pkl')
-        start_time = systime.time()
-        agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=args.path+directory.models, run_number=run_number, device=device)
-        for agent,_ in agents:
-            agent = agent.to(device)
-        shared_embbeding_stack = shared_embbeding_stack.to(device)
-        shared_critic = shared_critic.to(device)
-        graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, debug_mode=debug_mode)
-        solution: HeuristicSolution = translate_solution(graph, target_instance)
-        solutions_df = pd.DataFrame({
-            'index': [target_instance.id],
-            'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
-            'computing_time': [systime.time()-start_time],
-            'device_used': [device]
-        })
-        print(solutions_df)
-        solutions_df.to_csv(args.path+directory.instances+'/test/'+args.size+'/solution_gns_'+args.id+'.csv', index=False)
-        with open(directory.solutions+'/'+args.size+'/gns_'+args.number+'_graph_'+args.id+'.pkl', 'wb') as f:
-                pickle.dump(graph, f)
-        with open(directory.solutions+'/'+args.size+'/gns_'+args.number+'_solution_'+args.id+'.pkl', 'wb') as f:
-                pickle.dump(solution, f)
+        if to_bool(args.target):
+            # python gns_solver.py --train=false -target=false --mode=test --path=./ --number=1
+            solve_all_instances(run_number=args.number, device=_device, debug_mode=_debug_mode, path=args.path)
+        else:
+            # python gns_solver.py -target=true --size=s --id=151 --train=false --mode=test --path=./ --number=1
+            solve_only_target(id=args.id, size=args.size, run_number=args.number, device=_device, debug_mode=_debug_mode, path=args.path)
     print("===* END OF FILE *===")

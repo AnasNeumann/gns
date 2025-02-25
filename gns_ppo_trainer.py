@@ -60,10 +60,11 @@ def search_instance(instances: list[Instance], id: int) -> Instance:
             return instance
     return None
 
-def load_training_dataset(debug_mode: bool, path: str):
+def load_training_dataset(debug_mode: bool, path: str, train: bool = True):
+    type: str = '/train/' if train else '/test/'
     instances = [] 
     for size in PROBLEM_SIZES[0 if debug_mode else 1]:
-        complete_path = path+directory.instances+'/train/'+size+'/'
+        complete_path = path+directory.instances+type+size+'/'
         for i in os.listdir(complete_path):
             if i.endswith('.pkl'):
                 file_path = os.path.join(complete_path, i)
@@ -106,7 +107,7 @@ def PPO_train(agents: list[(Module, str)], embedding_stack: Module, shared_criti
     epochs: int = PPO_CONF['opt_epochs']
     debug_print: Callable = debug_printer(debug_mode)
     print("Loading dataset....")
-    instances: list[Instance] = load_training_dataset(path=path, debug_mode=debug_mode)
+    instances: list[Instance] = load_training_dataset(path=path, train=True, debug_mode=debug_mode)
     print(f"Dataset loaded after {(systime.time()-start_time)} seconds!")
     embedding_stack.train()
     shared_critic.train()
