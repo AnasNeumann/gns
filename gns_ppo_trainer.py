@@ -54,7 +54,7 @@ MATERIAL_USE = 2
 
 def reward(makespan_old: int, makespan_new: int, cost_old: int=-1, cost_new: int=-1, a: float=-1, use_cost: bool=False):
     if use_cost:
-        return a * (cost_old - cost_new) + (1-a) * (makespan_old - makespan_new)
+        return  a * (makespan_old - makespan_new) + (1-a) * (cost_old - cost_new)
     else:
         return a * (makespan_old - makespan_new)
 
