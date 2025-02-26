@@ -14,8 +14,9 @@ from typing import Callable
 from model.agent import MultiAgent_OneInstance, MultiAgents_Batch, MAPPO_Loss, MAPPO_Losses
 import time as systime
 from tools.common import load_instance
-from model.solution import HeuristicSolution
 from translators.graph2solution_translator import translate_solution
+from debug.loss_tracker import LossTracker
+import math
 
 # ===========================================================
 # =*= PROXIMAL POLICY OPTIMIZATION (PPO) RELATE FUNCTIONS =*=
@@ -45,6 +46,7 @@ PPO_CONF = {
     "bias_variance_tradeoff": 1.0,
     'validation': 10
 }
+AGENTS = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
 OUTSOURCING = 0
 SCHEDULING = 1
@@ -164,7 +166,7 @@ def PPO_pre_train(agents: list[(Module, str)], embedding_stack: Module, shared_c
     save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=optimizer, run_number=run_number, complete_path=complete_path)
     print("<======***--| END OF PRE-TRAINING |--***======>")
 
-def PPO_fine_tuning(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Optimizer, path: str, solve_function: Callable, device: str, id: str, size: str, debug_mode: bool=False):
+def PPO_fine_tuning(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Optimizer, path: str, solve_function: Callable, device: str, id: str, size: str, interactive: bool = False, debug_mode: bool=False):
     """
         PPO function to fine-tune agents on the target instance
     """
@@ -178,9 +180,24 @@ def PPO_fine_tuning(agents: list[(Module, str)], embedding_stack: Module, shared
     for agent,_ in agents:
         agent.train()
     losses = MAPPO_Losses(agent_names=[name for _,name in agents])
-    for iteration in range(iterations):
-        print(f"PPO iteration: {iteration+1}/{iterations}:")
-        loss, graph, current_cmax, current_cost = solve_function(instance=target_instance, agents=agents, train=True, device=device, debug_mode=debug_mode)
+    _vloss_TRACKER: LossTracker = LossTracker(xlabel="Episode", ylabel="Value loss", title="Value loss", color="blue", show=interactive)
+    _scheduling_loss_TRACKER: LossTracker = LossTracker(xlabel="Episode", ylabel="Scheduling loss (policy)", title="Scheduling loss (policy)", color="green", show=interactive)
+    _outsourcing_loss_TRACKER: LossTracker = LossTracker(xlabel="Episode", ylabel="Outsourcing loss (policy)", title="Outsourcing loss (policy)", color="pink", show=interactive)
+    _cost_TRACKER: LossTracker = LossTracker(xlabel="Episode", ylabel="Makespan", title="Final Makespan by episode", color="red", show=interactive)
+    _Cmax_TRACKER: LossTracker = LossTracker(xlabel="Episode", ylabel="Cost", title="Final Cost by episode", color="orange", show=interactive)
+    _best_obj: float = math.inf
+    _best_episode: int = 0
+    _time_to_best: float = 0
+    for episode in range(iterations):
+        print(f"PPO episode: {episode+1}/{iterations}:")
+        loss, graph, cmax, cost = solve_function(instance=target_instance, agents=agents, train=True, device=device, debug_mode=debug_mode)
+        _current_obj = objective_value(cmax, cost, target_instance.w_makespan)
+        if _current_obj < _best_obj:
+            _best_obj = _current_obj
+            _best_episode = episode
+            _time_to_best = systime.time()-start_time
+        _Cmax_TRACKER.update(cmax)
+        _cost_TRACKER.update(cost)
         batch_result: MultiAgents_Batch = MultiAgents_Batch(
                 batch=[loss],
                 agent_names=[name for _,name in agents],
@@ -193,16 +210,29 @@ def PPO_fine_tuning(agents: list[(Module, str)], embedding_stack: Module, shared
         for e in range(epochs):
             print(f"\t Optimization epoch: {e+1}/{epochs}")
             optimizer.zero_grad()
-            training_loss: Tensor = batch_result.compute_losses(agents, return_details=False)
+            training_loss, details = batch_result.compute_losses(agents, return_details=True)
             print(f"\t Multi-agent batch loss: {training_loss} - Differentiable computation graph = {training_loss.requires_grad}!")
             training_loss.backward(retain_graph=False)
             optimizer.step()
-            losses.add(training_loss)
+            details: MAPPO_Loss
+            _vloss_TRACKER.update(details.value_loss)
+            _scheduling_loss_TRACKER.update(details.get(AGENTS[SCHEDULING]).policy_loss)
+            _outsourcing_loss_TRACKER.update(details.get(AGENTS[OUTSOURCING]).policy_loss)
+            losses.add(details)
+    print("<======***--| END OF FINE-TUNING |--***======>")
+
     final_metrics = pd.DataFrame({
         'index': [target_instance.id],
-        'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
+        'value': [_best_obj],
+        'episode': [_best_episode],
+        'time_to_best': [_time_to_best],
         'computing_time': [systime.time()-start_time],
         'device_used': [device]})
+    _vloss_TRACKER.save(directory.solutions+'/'+size+'/value_loss_'+id)
+    _scheduling_loss_TRACKER.save(directory.solutions+'/'+size+'/scheduling_loss_'+id)
+    _outsourcing_loss_TRACKER.save(directory.solutions+'/'+size+'/outsourcing_loss_'+id)
+    _cost_TRACKER.save(directory.solutions+'/'+size+'/final_cost_'+id)
+    _Cmax_TRACKER.save(directory.solutions+'/'+size+'/final_cmax_'+id)
     final_metrics.to_csv(path+directory.instances+'/test/'+size+'/solution_fine_tuned_gns_'+id+'.csv', index=False)
     with open(directory.solutions+'/'+size+'/fine_tune_gns_graph_'+id+'.pkl', 'wb') as f:
         pickle.dump(graph, f)
@@ -210,4 +240,6 @@ def PPO_fine_tuning(agents: list[(Module, str)], embedding_stack: Module, shared
         pickle.dump(translate_solution(graph, target_instance), f)
     with open(directory.solutions+'/'+size+'/fine_tune_losses_'+id+'.pkl', 'wb') as f:
         pickle.dump(losses, f)
-    print("<======***--| END OF FINE-TUNING |--***======>")
+    print("<======***--| ALL RESULTS SAVED |--***======>")
+    
+    

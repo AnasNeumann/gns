@@ -25,6 +25,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
+INTERACTIVE: bool = True
 LEARNING_RATE = 2e-4
 OUTSOURCING = 0
 SCHEDULING = 1
@@ -638,7 +639,7 @@ def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, 
         list(shared_critic.parameters()) + list(shared_embbeding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
         lr=LEARNING_RATE)
     print("Fine-tuning models with MAPPO (on target instance)...")
-    PPO_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, id=id, size=size, debug_mode=debug_mode)
+    PPO_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, id=id, size=size, interactive=INTERACTIVE, debug_mode=debug_mode)
 
 def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mode: bool, path: str):
     """
