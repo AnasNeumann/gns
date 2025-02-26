@@ -697,7 +697,7 @@ if __name__ == '__main__':
     if to_bool(args.train):
         if to_bool(args.target):
             # python gns_solver.py --train=true --target=true --size=s --id=151 --mode=prod --use_pretrain=true --interactive=false --number=1 --path=./ 
-            # python gns_solver.py --train=true --target=true --size=s --id=151 --mode=prod --path=./ --use_pretrain=false --interactive=true
+            # python gns_solver.py --train=true --target=true --size=s --id=151 --mode=prod --use_pretrain=false --interactive=true --number=1 --path=./
             fine_tune_on_target(id=args.id, size=args.size, pre_trained_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device, use_pre_train=to_bool(args.use_pretrain), interactive=to_bool(args.interactive))
         else:
             # python gns_solver.py --train=true --target=false --mode=test --number=1 --path=./

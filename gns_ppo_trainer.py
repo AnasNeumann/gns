@@ -180,11 +180,11 @@ def PPO_fine_tuning(agents: list[(Module, str)], embedding_stack: Module, shared
     for agent,_ in agents:
         agent.train()
     losses = MAPPO_Losses(agent_names=[name for _,name in agents])
-    _vloss_TRACKER: LossTracker = LossTracker(xlabel="Episode", ylabel="Value loss", title="Value loss", color="blue", show=interactive)
-    _scheduling_loss_TRACKER: LossTracker = LossTracker(xlabel="Episode", ylabel="Scheduling loss (policy)", title="Scheduling loss (policy)", color="green", show=interactive)
-    _outsourcing_loss_TRACKER: LossTracker = LossTracker(xlabel="Episode", ylabel="Outsourcing loss (policy)", title="Outsourcing loss (policy)", color="pink", show=interactive)
-    _cost_TRACKER: LossTracker = LossTracker(xlabel="Episode", ylabel="Makespan", title="Final Makespan by episode", color="red", show=interactive)
-    _Cmax_TRACKER: LossTracker = LossTracker(xlabel="Episode", ylabel="Cost", title="Final Cost by episode", color="orange", show=interactive)
+    _vloss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per solving episode)", ylabel="Value loss", title="Value loss", color="blue", show=interactive)
+    _scheduling_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per solving episode)", ylabel="Scheduling loss (policy)", title="Scheduling loss (policy)", color="green", show=interactive)
+    _outsourcing_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per solving episode)", ylabel="Outsourcing loss (policy)", title="Outsourcing loss (policy)", color="pink", show=interactive)
+    _cost_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Makespan", title="Final Makespan by episode", color="red", show=interactive)
+    _Cmax_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Cost", title="Final Cost by episode", color="orange", show=interactive)
     _best_obj: float = math.inf
     _best_episode: int = 0
     _time_to_best: float = 0
