@@ -25,7 +25,6 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-INTERACTIVE: bool = True
 LEARNING_RATE = 2e-4
 OUTSOURCING = 0
 SCHEDULING = 1
@@ -626,7 +625,7 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mo
     print("Pre-training models with MAPPO (on several instances)...")
     PPO_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
 
-def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, debug_mode: bool, device: str, use_pre_train: bool = False):
+def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, debug_mode: bool, device: str, use_pre_train: bool = False, interactive: bool = True):
     """
         Fine-tune on target instance (size, id)
     """
@@ -639,7 +638,7 @@ def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, 
         list(shared_critic.parameters()) + list(shared_embbeding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
         lr=LEARNING_RATE)
     print("Fine-tuning models with MAPPO (on target instance)...")
-    PPO_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, id=id, size=size, interactive=INTERACTIVE, debug_mode=debug_mode)
+    PPO_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, id=id, size=size, interactive=interactive, debug_mode=debug_mode)
 
 def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mode: bool, path: str):
     """
@@ -686,6 +685,8 @@ if __name__ == '__main__':
     parser.add_argument("--target", help="Do you want to load a pre-trained model", required=False)
     parser.add_argument("--mode", help="Execution mode (either prod or test)", required=True)
     parser.add_argument("--path", help="Saving path on the server", required=True)
+    parser.add_argument("--use_pretrain", help="Use a pre-train model while fine-tuning", required=False)
+    parser.add_argument("--interactive", help="Display losses, cmax, and cost in real-time or not", required=False)
     parser.add_argument("--number", help="The number of the current run", required=True)
     args = parser.parse_args()
     print(f"Execution mode: {args.mode}...")
@@ -695,8 +696,9 @@ if __name__ == '__main__':
     print(f"TPU Device: {_device}...")
     if to_bool(args.train):
         if to_bool(args.target):
-            # python gns_solver.py --train=true --target=true --size=s --id=151 --mode=test --number=1 --path=./
-            fine_tune_on_target(id=args.id, size=args.size, pre_trained_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device, use_pre_train=False)
+            # python gns_solver.py --train=true --target=true --size=s --id=151 --mode=prod --use_pretrain=true --interactive=false --number=1 --path=./ 
+            # python gns_solver.py --train=true --target=true --size=s --id=151 --mode=prod --path=./ --use_pretrain=false --interactive=true
+            fine_tune_on_target(id=args.id, size=args.size, pre_trained_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device, use_pre_train=to_bool(args.use_pretrain), interactive=to_bool(args.interactive))
         else:
             # python gns_solver.py --train=true --target=false --mode=test --number=1 --path=./
             pre_train_on_all_instances(run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device)
