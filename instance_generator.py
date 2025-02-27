@@ -2,7 +2,7 @@ import argparse
 import random
 import pickle
 from model.instance import Instance
-from tools.common import init_several_1D, init_several_2D, init_2D, init_1D, init_several_3D, directory
+from tools.common import init_several_1D, init_several_2D, init_2D, init_1D, init_several_3D, directory, to_bool
 
 # ==============================================================
 # =*= RANDOM INSTANCE GENERATOR =*=
@@ -12,24 +12,24 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-PROBLEM_SIZES = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
+PROBLEM_SIZES = ['debug'] + ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 SIZE = 0
 H = 5
 
 # Resources and Types of Resources [4, 6, 11, 15, 19, 25]
-NB_HUMAN_RESOURCES = [1, 2, 3, 4, 5, 8]
-NB_RAW_MATERIAL_TYPES = [1, 2, 2, 3, 4, 5]
-NB_PRODUCTION_MACHINE_TYPES = [2, 3, 4, 6, 8, 9]
-NB_PRODUCTION_MACHINES = [2, 4, 6, 8, 10, 12]
+NB_HUMAN_RESOURCES = [1] + [1, 2, 3, 4, 5, 8]
+NB_RAW_MATERIAL_TYPES = [1] + [1, 2, 2, 3, 4, 5]
+NB_PRODUCTION_MACHINE_TYPES = [1] + [2, 3, 4, 6, 8, 9]
+NB_PRODUCTION_MACHINES = [1] + [2, 4, 6, 8, 10, 12]
 UNKOWN_MACHINE_TYPE = 1
 
 # Types of Operations
-NB_DESIGN_OPERATION_TYPES = [1, 3, 5, 5, 6, 8]
-NB_PRODUCTION_OPERATION_TYPES = [4, 6, 6, 6, 8, 10]
-NB_ASSEMBLY_OPERATION_TYPES = [1, 2, 4, 4, 6, 8]
+NB_DESIGN_OPERATION_TYPES = [1] + [1, 3, 5, 5, 6, 8]
+NB_PRODUCTION_OPERATION_TYPES = [1] + [4, 6, 6, 6, 8, 10]
+NB_ASSEMBLY_OPERATION_TYPES = [1] + [1, 2, 4, 4, 6, 8]
 INIT_QUANTITY = 500
 MAX_QUANTITY_USED = 100
-NB_TYPES_OF_SETTINGS = [1, 2, 3, 4, 5, 6]
+NB_TYPES_OF_SETTINGS = [1] + [1, 2, 3, 4, 5, 6]
 MAX_SETTINGS_VALUE = 5
 MAX_SETUP_TIME = 3
 MAX_PROCESSING_TIMES_DESIGN = 5
@@ -41,9 +41,9 @@ MIN_OUTSOURCING_TIME_SHARE = 0.8
 MAX_OUTSOURCING_TIME_SHARE = 1.2
 
 # Current Projects, Elements and Operations
-NB_PROJECTS = [1, 3, 3, 4, 5, 6] # 1, 3, 3, 4, 5, 6 projects
-NB_ELTS_PER_PROJECT = [7, 7, 10, 10, 10, 10] # 7, 21, 30, 40, 50, 60 elements
-MEAN_OPS_PER_ELT = [3, 3, 3, 3, 4, 5]
+NB_PROJECTS = [1] + [1, 3, 3, 4, 5, 6] # 1, 3, 3, 4, 5, 6 projects
+NB_ELTS_PER_PROJECT = [3] + [7, 7, 10, 10, 10, 10] # 7, 21, 30, 40, 50, 60 elements
+MEAN_OPS_PER_ELT = [3] + [3, 3, 3, 3, 4, 5]
 # 21 (23), 63 (65), 90 (97), 120 (133), 200 (225), 300 (337) tasks
 
 def bias_generator(prop_false: float):
@@ -93,6 +93,7 @@ def build_resources(i: Instance):
     return i
 
 def build_operations(i: Instance):
+    _unknown_machines: int = UNKOWN_MACHINE_TYPE if SIZE > 0 else 0
     found_unkown_elt = False
     nb_projects = NB_PROJECTS[SIZE]
     elts_per_project = NB_ELTS_PER_PROJECT[SIZE]
@@ -124,7 +125,7 @@ def build_operations(i: Instance):
                     i.in_hours[p][o] = True
                 i.operation_family[p][o][ot] = True
                 i.simultaneous[p][o] = bias_generator(0.9)
-                maxRT = i.nb_HR_types-1 if (i.in_days[p][o] or i.in_hours[p][o]) else i.nb_resource_types - i.nb_material - UNKOWN_MACHINE_TYPE -1
+                maxRT = i.nb_HR_types-1 if (i.in_days[p][o] or i.in_hours[p][o]) else i.nb_resource_types - i.nb_material - _unknown_machines -1
                 minRT = 0 if (i.in_days[p][o] or i.in_hours[p][o]) else i.nb_HR_types
                 i.resource_type_needed[p][o][random.randint(minRT, maxRT)] = True
                 if not i.in_days[p][o] and not i.in_hours[p][o] and (bias_generator(0.7) or not project_has_material):
@@ -132,7 +133,7 @@ def build_operations(i: Instance):
                     project_has_material = True
                 if not found_unkown_elt and i.external[p][e] and not i.in_days[p][o] and not i.in_hours[p][o] and len(i.get_children(p,e,True))<=0:
                     found_unkown_elt = True
-                    i.resource_type_needed[p][o][maxRT+i.nb_material+UNKOWN_MACHINE_TYPE] = True
+                    i.resource_type_needed[p][o][maxRT+i.nb_material+_unknown_machines] = True
                     i.external_cost[p][e] = i.external_cost[p][e] * 2
     return i
 
@@ -200,6 +201,7 @@ def build_projects(i: Instance):
     return i
 
 def build_one(size: int, id: int, w_makespan: float):
+    _unknown_machines: int = UNKOWN_MACHINE_TYPE if SIZE > 0 else 0
     nb_projects = NB_PROJECTS[SIZE]
     elts_per_project = NB_ELTS_PER_PROJECT[SIZE]
     i = Instance(size, id, w_makespan, H)
@@ -210,7 +212,7 @@ def build_one(size: int, id: int, w_makespan: float):
     i.nb_production_machines = NB_PRODUCTION_MACHINES[SIZE]
     i.nb_material = NB_RAW_MATERIAL_TYPES[SIZE]
     i.total_elements =  NB_ELTS_PER_PROJECT[SIZE] * NB_PROJECTS[SIZE]
-    i.nb_resource_types = i.nb_HR_types + i.nb_production_machine_types + i.nb_material + UNKOWN_MACHINE_TYPE
+    i.nb_resource_types = i.nb_HR_types + i.nb_production_machine_types + i.nb_material + _unknown_machines
     i.nb_resources = i.nb_human_resources + i.nb_production_machines + i.nb_material
     i.E_size = init_1D(nb_projects, elts_per_project)
     i.EO_size = init_2D(nb_projects, elts_per_project, -1)
@@ -220,21 +222,39 @@ def build_one(size: int, id: int, w_makespan: float):
 if __name__ == '__main__':
     '''
         TEST WITH
-        python instance_generator.py --train=150 --test=50
+        python instance_generator.py --debug=false --train=150 --test=50
+        python instance_generator.py --debug=true
     '''
     parser = argparse.ArgumentParser(description="EPSIII instances generator")
-    parser.add_argument("--train", help="Number of training instances", required=True)
-    parser.add_argument("--test", help="Number of testing instances", required=True)
+    parser.add_argument("--debug", help="Generate for debug mode", required=True)
+    parser.add_argument("--train", help="Number of training instances", required=False)
+    parser.add_argument("--test", help="Number of testing instances", required=False)
     args = parser.parse_args()
-    nb_train = int(args.train)
-    nb_test = int(args.test)
-    for size, size_folder in enumerate(PROBLEM_SIZES):
-        SIZE = size
-        print("Start size "+size_folder+"("+str(SIZE)+")...")
-        for i in range(1, nb_train+nb_test+1):
-            instance = build_one(size_folder, i, random.uniform(0.01, 0.99))
-            folder = "train" if i<=nb_train else "test"
-            with open(directory.instances+'/'+folder+'/'+size_folder+'/instance_'+str(i)+'.pkl', 'wb') as f:
-                pickle.dump(instance, f)
-            print("\t Instance #"+instance.get_name()+" saved successfully!")
-        print("End size "+size_folder+"("+str(SIZE)+")...")
+    _debug: bool = to_bool(args.debug)
+    if _debug:
+        """
+            Debug mode
+        """
+        SIZE = 0
+        instance: Instance = build_one(size='debug', id=0, w_makespan=1.00)
+        print(instance.display())
+        with open(directory.instances+'/debug/debug.pkl', 'wb') as f:
+            pickle.dump(instance, f)
+        print("\t Debug instance saved successfully!")
+    else:
+        """
+            Actual generation
+        """
+        nb_train: int = int(args.train)
+        nb_test: int = int(args.test)
+        for size, size_folder in enumerate(PROBLEM_SIZES):
+            if size > 0:
+                SIZE = size
+                print("Start size "+size_folder+"("+str(SIZE)+")...")
+                for i in range(1, nb_train+nb_test+1):
+                    instance = build_one(size_folder, i, random.uniform(0.01, 0.99))
+                    folder = "train" if i<=nb_train else "test"
+                    with open(directory.instances+'/'+folder+'/'+size_folder+'/instance_'+str(i)+'.pkl', 'wb') as f:
+                        pickle.dump(instance, f)
+                    print("\t Instance #"+instance.get_name()+" saved successfully!")
+                print("End size "+size_folder+"("+str(SIZE)+")...")
