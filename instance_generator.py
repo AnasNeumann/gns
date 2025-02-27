@@ -12,7 +12,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-PROBLEM_SIZES = ['debug'] + ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
+PROBLEM_SIZES = ['d'] + ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 SIZE = 0
 H = 5
 
@@ -236,9 +236,9 @@ if __name__ == '__main__':
             Debug mode
         """
         SIZE = 0
-        instance: Instance = build_one(size='debug', id=0, w_makespan=1.00)
+        instance: Instance = build_one(size='d', id=0, w_makespan=1.00)
         print(instance.display())
-        with open(directory.instances+'/debug/debug.pkl', 'wb') as f:
+        with open(directory.instances+'/test/d/instance_debug.pkl', 'wb') as f:
             pickle.dump(instance, f)
         print("\t Debug instance saved successfully!")
     else:
