@@ -705,7 +705,8 @@ if __name__ == '__main__':
             pre_train_on_all_instances(run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device)
     else:
         if to_bool(args.target):
-            # python gns_solver.py --target=true --size=s --id=151 --train=false --mode=test --path=./ --number=1
+            # SOLVE ACTUAL INSTANCE: python gns_solver.py --target=true --size=s --id=151 --train=false --mode=test --path=./ --number=1
+            # TRY ON DEBUG INSTANCE: python gns_solver.py --target=true --size=d --id=debug --train=false --mode=test --path=./ --number=1
             solve_only_target(id=args.id, size=args.size, run_number=args.number, device=_device, debug_mode=_debug_mode, path=args.path)
         else:
             # python gns_solver.py --train=false --target=false --mode=test --path=./ --number=1
