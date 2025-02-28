@@ -368,7 +368,7 @@ def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previo
             if next_good_to_go:
                 next_id = graph.operations_i2g[p][next]
                 next_time = next_possible_time(instance, available_time, p, next)
-                debug_print(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time}...')
+                debug_print(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time} in its own timescale...')
                 graph.update_operation(next_id, [
                     ('available_time', next_time),
                     ('is_possible', YES)
@@ -376,7 +376,7 @@ def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previo
         if instance.is_last_design(p, e, o):
             for child in instance.get_children(p, e, direct=True):
                 child_id = graph.items_i2g[p][child]
-                debug_print(f'Enabling item {child_id} -> ({p},{child}) for outsourcing...')
+                debug_print(f'Enabling item {child_id} -> ({p},{child}) for outsourcing (decision yet to make)...')
                 graph.update_item(child_id, [('is_possible', YES), ('start_time', available_time)])
     return graph
 
@@ -442,7 +442,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
     operations_to_test = []
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t, debug_print)
-        debug_print(f"Current possible actions: {poss_actions}")
+        debug_print(f"Current possible {ACTIONS_NAMES[actions_type]} actions: {poss_actions}")
         if poss_actions:
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
@@ -469,7 +469,6 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 item_id, outsourcing_choice = poss_actions[idx]
                 p, e = graph.items_g2i[item_id]
                 if outsourcing_choice == YES:
-                    debug_print(f"Outsourcing item {item_id} -> ({p},{e})...")
                     graph, end_date, local_price = outsource_item(graph, instance, item_id, t, enforce_time=False)
                     approximate_design_load, approximate_physical_load = instance.item_processing_time(p, e, total_load=True)
                     for ancestor in instance.get_ancestors(p, e):
@@ -477,18 +476,21 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                         graph.update_item(ancestor_id, [
                             ('children_time', graph.item(ancestor_id, 'children_time')-(approximate_design_load+approximate_physical_load))])
                     graph, max_ancestors_end = shift_ancestors_physical_operations(graph, instance, p, e, end_date)
-                    for o in instance.first_physical_operations(p, instance.get_direct_parent(p, e)):
-                        next_good_to_go = True
-                        for previous in previous_operations[p][o]:
-                            if not graph.is_operation_complete(graph.operations_i2g[p][previous]):
-                                next_good_to_go = False
-                                break
-                        if next_good_to_go:
-                            op_id = graph.operations_i2g[p][o]
-                            available_time = next_possible_time(instance, end_date, p, o)
-                            graph.update_operation(op_id, [('is_possible', YES), ('available_time', available_time)])
                     current_cost += local_price
                     current_cmax = max(current_cmax, max_ancestors_end)
+                    debug_print(f"Outsourcing item {item_id} -> ({p},{e}) at time {graph.item(item_id,'start_time')} to {graph.item(item_id,'end_time')} [NEW CMAX = {current_cmax} - NEW COST = {current_cost}]...")
+                    for o in instance.first_physical_operations(p, instance.get_direct_parent(p, e)):
+                        next_good_to_go: bool = True
+                        for previous in previous_operations[p][o]:
+                            if not graph.is_operation_complete(graph.operations_i2g[p][previous]):
+                                debug_print(f"\t >> Cannot open parent' first physical operation ({p},{o}) due to ({p},{previous}) not finished!")
+                                next_good_to_go = False
+                                break
+                        _open: int = YES if next_good_to_go else graph.operation(op_id, 'is_possible')
+                        op_id = graph.operations_i2g[p][o]
+                        debug_print(f"\t >> Moving parent' first physical operation ({p},{o}) to {end_date}!")
+                        available_time = max(graph.operation(op_id, 'available_time'), next_possible_time(instance, end_date, p, o))
+                        graph.update_operation(op_id, [('is_possible', _open), ('available_time', available_time)])
                 else:
                     graph, shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e, debug_print)
                     current_cmax = max(current_cmax, shifted_project_estimated_end)
@@ -519,9 +521,9 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                                         max_ancestors_end = max(max_ancestors_end, other_max_ancestors_end)
                                         found = True
                                         break
-                debug_print(f"End of scheduling at time {operation_end}...")
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, operation_end, debug_print)
                 current_cmax = max(current_cmax, max_ancestors_end)
+                debug_print(f"End of scheduling at time {operation_end} [NEW CMAX = {current_cmax} - COST = {current_cost}]...")
                 if train:
                     training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(old_cmax, current_cmax, a=instance.w_makespan))
             else:
@@ -646,6 +648,8 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mo
     """
     print(f"SOLVE TARGET INSTANCE {size}_{id}...")
     target_instance: Instance = load_instance(path+directory.instances+'/test/'+size+'/instance_'+id+'.pkl')
+    if id == 'debug':
+        print(target_instance.display())
     start_time = systime.time()
     first = (_run_number<=1)
     agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
