@@ -486,10 +486,10 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                                 debug_print(f"\t >> Cannot open parent' first physical operation ({p},{o}) due to ({p},{previous}) not finished!")
                                 next_good_to_go = False
                                 break
-                        _open: int = YES if next_good_to_go else graph.operation(op_id, 'is_possible')
                         op_id = graph.operations_i2g[p][o]
-                        debug_print(f"\t >> Moving parent' first physical operation ({p},{o}) to {end_date}!")
+                        _open: int = YES if next_good_to_go else graph.operation(op_id, 'is_possible')
                         available_time = max(graph.operation(op_id, 'available_time'), next_possible_time(instance, end_date, p, o))
+                        debug_print(f"\t >> Moving parent' first physical operation ({p},{o}) to {available_time}!")
                         graph.update_operation(op_id, [('is_possible', _open), ('available_time', available_time)])
                 else:
                     graph, shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e, debug_print)
