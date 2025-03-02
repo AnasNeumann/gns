@@ -149,6 +149,7 @@ def shift_one_operation(graph: GraphInstance, instance: Instance, p: int, o: int
     if shift <= 0:
         return graph, 0
     operation_id = graph.operations_i2g[p][o]
+    DEBUG_PRINT(f"\t\t >>> Operation ({p},{o}) shifted by {shift} time unit...")
     graph.inc_operation(operation_id, [('available_time', shift), ('end_time', shift)])
     for r in instance.required_resources(p, o):
         if instance.finite_capacity[r]:
@@ -172,6 +173,7 @@ def shift_children_and_operations(graph: GraphInstance, instance: Instance, p: i
         return graph, 0
     max_child_end = 0
     for child in instance.get_children(p, e, direct=False):
+        DEBUG_PRINT(f"\t >> Children item ({p},{child}) shifted by {shift} time unit (both P and NP operations)...")
         child_id = graph.items_i2g[p][child]
         graph.inc_item(child_id, [
             ('start_time', shift),
@@ -190,6 +192,7 @@ def shift_ancestors_physical_operations(graph: GraphInstance, instance: Instance
             min_ancestor_physical_start = max(min_ancestor_physical_start,start) if min_ancestor_physical_start>0 else start
         shift = max(0, end_time_last_op-min_ancestor_physical_start)
         if shift > 0:
+            DEBUG_PRINT(f"\t >> Ancestor item ({p},{ancestor}) shifted by {shift} time unit (only physical operations)...")
             ancestor_id = graph.items_i2g[p][ancestor]
             graph.inc_item(ancestor_id, [('end_time', shift)])
             max_ancestor_end = max(max_ancestor_end, graph.item(ancestor_id, 'end_time'))
@@ -204,6 +207,7 @@ def shift_ancestors_and_operations(graph: GraphInstance, instance: Instance, p: 
         return graph, 0
     max_ancestor_end = 0
     for ancestor in instance.get_ancestors(p, e):
+        DEBUG_PRINT(f"\t >> Ancestor item ({p},{ancestor}) shifted by {shift} time unit (only physical operations)...")
         ancestor_id = graph.items_i2g[p][ancestor]
         graph.inc_item(ancestor_id, [('end_time', shift)])
         max_ancestor_end = max(max_ancestor_end, graph.item(ancestor_id, 'end_time'))
@@ -685,13 +689,13 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mo
     shared_embbeding_stack = shared_embbeding_stack.to(device)
     shared_critic = shared_critic.to(device)
     graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, debug_mode=debug_mode)
-    solution: HeuristicSolution = translate_solution(graph, target_instance)
     final_metrics = pd.DataFrame({
         'index': [target_instance.id],
         'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
         'computing_time': [systime.time()-start_time],
         'device_used': [device]
     })
+    solution: HeuristicSolution = translate_solution(graph, target_instance)
     print(final_metrics)
     final_metrics.to_csv(path+directory.instances+'/test/'+size+'/solution_gns_'+id+'.csv', index=False)
     with open(directory.solutions+'/'+size+'/gns_'+str(run_number)+'_graph_'+id+'.pkl', 'wb') as f:
