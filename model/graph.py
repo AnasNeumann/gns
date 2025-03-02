@@ -56,7 +56,9 @@ class FeatureConfiguration:
             'remaining_materials': 8,
             'available_time': 9,
             'end_time': 10,
-            'is_possible': 11
+            'is_possible': 11,
+            'init_start_time': 12,
+            'init_end_time': 13
         }
         self.resource = {
             'utilization_ratio': 0,
@@ -84,23 +86,28 @@ class FeatureConfiguration:
             'children_time': 10,
             'start_time': 11,
             'end_time': 12,
-            'is_possible': 13
+            'is_possible': 13,
+            'init_start_time': 14,
+            'init_end_time': 15
         }
         self.need_for_resources = {
             'status': 0,
             'basic_processing_time': 1,
             'current_processing_time': 2,
             'start_time': 3,
-            'end_time': 4
+            'end_time': 4,
+            'init_start_time': 5,
+            'init_end_time': 6
         }
         self.need_for_materials = {
             'status': 0,
             'execution_time': 1,
-            'quantity_needed': 2
+            'quantity_needed': 2,
+            'init_execution_time': 3
         }
 
 class OperationFeatures:
-    def __init__(self, design: num_feature, sync: num_feature, timescale_hours: num_feature, timescale_days: num_feature, direct_successors: num_feature, total_successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, is_possible: num_feature):
+    def __init__(self, design: num_feature, sync: num_feature, timescale_hours: num_feature, timescale_days: num_feature, direct_successors: num_feature, total_successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, is_possible: num_feature, init_start_time: num_feature, init_end_time: num_feature):
         self.design = design
         self.sync = sync
         self.timescale_hours = timescale_hours
@@ -113,9 +120,11 @@ class OperationFeatures:
         self.available_time = available_time
         self.end_time = end_time
         self.is_possible = is_possible
+        self.init_start_time = init_start_time
+        self.init_end_time = init_end_time
     
     def to_tensor_features(self, device: str):
-        return features2tensor([self.design, self.sync, self.timescale_hours, self.timescale_days, self.direct_successors, self.total_successors, self.remaining_time, self.remaining_resources, self.remaining_materials, self.available_time, self.end_time, self.is_possible], device)
+        return features2tensor([self.design, self.sync, self.timescale_hours, self.timescale_days, self.direct_successors, self.total_successors, self.remaining_time, self.remaining_resources, self.remaining_materials, self.available_time, self.end_time, self.is_possible, self.init_start_time, self.init_end_time], device)
     
 class ResourceFeatures:
     def __init__(self, utilization_ratio: num_feature, available_time: num_feature, executed_operations: num_feature, remaining_operations: num_feature, similar_resources: num_feature):
@@ -138,7 +147,7 @@ class MaterialFeatures:
         return features2tensor([self.remaining_init_quantity, self.arrival_time, self.remaining_demand], device)
     
 class ItemFeatures:
-    def __init__(self, head: num_feature, external: num_feature, outsourced: num_feature, outsourcing_cost: num_feature, outsourcing_time: num_feature, remaining_physical_time: num_feature, remaining_design_time: num_feature, parents: num_feature, children: num_feature, parents_physical_time: num_feature, children_time: num_feature, start_time: num_feature, end_time: num_feature, is_possible: num_feature):
+    def __init__(self, head: num_feature, external: num_feature, outsourced: num_feature, outsourcing_cost: num_feature, outsourcing_time: num_feature, remaining_physical_time: num_feature, remaining_design_time: num_feature, parents: num_feature, children: num_feature, parents_physical_time: num_feature, children_time: num_feature, start_time: num_feature, end_time: num_feature, is_possible: num_feature, init_start_time: num_feature, init_end_time: num_feature):
         self.head = head
         self.external = external
         self.outsourced = outsourced
@@ -153,9 +162,11 @@ class ItemFeatures:
         self.start_time = start_time
         self.end_time = end_time
         self.is_possible = is_possible
+        self.init_start_time = init_start_time
+        self.init_end_time = init_end_time
 
     def to_tensor_features(self, device: str):
-        return features2tensor([self.head, self.external, self.outsourced, self.outsourcing_cost, self.outsourcing_time, self.remaining_physical_time, self.remaining_design_time, self.parents, self.children, self.parents_physical_time, self.children_time, self.start_time, self.end_time, self.is_possible], device)
+        return features2tensor([self.head, self.external, self.outsourced, self.outsourcing_cost, self.outsourcing_time, self.remaining_physical_time, self.remaining_design_time, self.parents, self.children, self.parents_physical_time, self.children_time, self.start_time, self.end_time, self.is_possible, self.init_start_time, self.init_end_time], device)
 
     @staticmethod
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
@@ -174,18 +185,23 @@ class ItemFeatures:
             parents_physical_time=tensor[f['parents_physical_time']].item(),
             children_time=tensor[f['children_time']].item(),
             end_time=tensor[f['end_time']].item(),
-            is_possible=tensor[f['is_possible']].item())
+            is_possible=tensor[f['is_possible']].item(),
+            init_start_time=tensor[f['init_start_time']].item(),
+            init_end_time=tensor[f['init_end_time']].item())
+    
 
 class NeedForResourceFeatures:
-    def __init__(self, status: num_feature, basic_processing_time: num_feature, current_processing_time: num_feature, start_time: num_feature, end_time: num_feature):
+    def __init__(self, status: num_feature, basic_processing_time: num_feature, current_processing_time: num_feature, start_time: num_feature, end_time: num_feature, init_start_time: num_feature, init_end_time: num_feature):
         self.status = status
         self.basic_processing_time = basic_processing_time
         self.current_processing_time = current_processing_time
         self.start_time = start_time
         self.end_time = end_time
+        self.init_start_time = init_start_time
+        self.init_end_time = init_end_time
 
     def to_tensor_features(self, device: str):
-        return features2tensor([self.status, self.basic_processing_time, self.current_processing_time, self.start_time, self.end_time], device)
+        return features2tensor([self.status, self.basic_processing_time, self.current_processing_time, self.start_time, self.end_time, self.init_start_time, self.init_end_time], device)
 
     @staticmethod
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
@@ -195,16 +211,19 @@ class NeedForResourceFeatures:
             basic_processing_time=tensor[f['basic_processing_time']].item(),
             current_processing_time=tensor[f['current_processing_time']].item(),
             start_time=tensor[f['start_time']].item(),
-            end_time=tensor[f['end_time']].item())
+            end_time=tensor[f['end_time']].item(),
+            init_start_time=tensor[f['init_start_time']].item(),
+            init_end_time=tensor[f['init_end_time']].item()))
 
 class NeedForMaterialFeatures:
-    def __init__(self, status: num_feature, execution_time: num_feature, quantity_needed: num_feature):
+    def __init__(self, status: num_feature, execution_time: num_feature, quantity_needed: num_feature, init_execution_time: num_feature):
         self.status = status
         self.execution_time = execution_time
         self.quantity_needed = quantity_needed
+        self.init_execution_time = init_execution_time
 
     def to_tensor_features(self, device: str):
-        return features2tensor([self.status, self.execution_time, self.quantity_needed], device)
+        return features2tensor([self.status, self.execution_time, self.quantity_needed, self.init_execution_time], device)
     
     @staticmethod
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
@@ -212,7 +231,8 @@ class NeedForMaterialFeatures:
         return NeedForMaterialFeatures(
             status=tensor[f['status']].item(), 
             execution_time=tensor[f['execution_time']].item(),
-            quantity_needed=tensor[f['quantity_needed']].item())
+            quantity_needed=tensor[f['quantity_needed']].item(),
+            init_execution_time=tensor[f['init_execution_time']].item())
 
 class GraphInstance():
     def __init__(self, device: str):

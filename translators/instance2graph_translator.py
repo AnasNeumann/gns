@@ -44,6 +44,8 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
         children_time = children_time,
         start_time = estimated_start,
         end_time = -1,
+        init_start_time = estimated_start,
+        init_end_time= -1,
         is_possible = YES if head else NOT_YET))
     if i.external[p][e]:
         graph.oustourcable_items += 1
@@ -67,6 +69,7 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
                     required_mat += 1
             else:
                 must_be_outsourced = True
+        _end_time = op_start+operation_mean_time
         op_id = graph.add_operation(p, o, OperationFeatures(
             design = i.is_design[p][o],
             sync = i.simultaneous[p][o],
@@ -78,23 +81,29 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
             remaining_resources = required_res,
             remaining_materials = required_mat,
             available_time = op_start,
-            end_time = op_start+operation_mean_time,
+            end_time = _end_time,
+            init_start_time= op_start,
+            init_end_time = _end_time,
             is_possible = YES if (head and (o == start)) else NOT_YET))
         graph.add_operation_assembly(item_id, op_id)
         for rt in i.required_rt(p,o):
             graph.nb_operations += 1
             for r in i.resources_by_type(rt):
                 if i.finite_capacity[r]:
+                    _ext =  i.execution_time[r][p][o]
                     graph.add_need_for_resources(op_id, graph.resources_i2g[r], NeedForResourceFeatures(
                         status = NOT_YET,
-                        basic_processing_time = i.execution_time[r][p][o],
-                        current_processing_time = i.execution_time[r][p][o],
+                        basic_processing_time = _ext,
+                        current_processing_time = _ext,
                         start_time = op_start,
-                        end_time = op_start+i.execution_time[r][p][o]))
+                        end_time = op_start+_ext,
+                        init_start_time = op_start,
+                        init_end_time = op_start+_ext))
                 else:
                     graph.add_need_for_materials(op_id, graph.materials_i2g[r], NeedForMaterialFeatures(
                         status = NOT_YET,
                         execution_time = op_start,
+                        init_execution_time= op_start,
                         quantity_needed = i.quantity_needed[r][p][o]))
     estimated_start_child = estimated_start if i.external[p][e] else design_mean_time
     estimated_childrend_end = 0
@@ -107,7 +116,7 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
     external_end = estimated_start + i.outsourcing_time[p][e]
     internal_end = estimated_childrend_end + physical_mean_time
     estimated_end = external_end if must_be_outsourced else min(external_end, internal_end) if i.external[p][e] else internal_end
-    graph.update_item(item_id, [('end_time', estimated_end)])
+    graph.update_item(item_id, [('end_time', estimated_end), ('init_end_time', estimated_end)])
     mandatory_cost = estimated_children_cost + (i.external_cost[p][e] if must_be_outsourced else 0)
     return graph, item_id, estimated_end, mandatory_cost
 
