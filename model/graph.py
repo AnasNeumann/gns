@@ -213,7 +213,7 @@ class NeedForResourceFeatures:
             start_time=tensor[f['start_time']].item(),
             end_time=tensor[f['end_time']].item(),
             init_start_time=tensor[f['init_start_time']].item(),
-            init_end_time=tensor[f['init_end_time']].item()))
+            init_end_time=tensor[f['init_end_time']].item())
 
 class NeedForMaterialFeatures:
     def __init__(self, status: num_feature, execution_time: num_feature, quantity_needed: num_feature, init_execution_time: num_feature):
