@@ -676,8 +676,7 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mo
     """
     print(f"SOLVE TARGET INSTANCE {size}_{id}...")
     target_instance: Instance = load_instance(path+directory.instances+'/test/'+size+'/instance_'+id+'.pkl')
-    if id == 'debug':
-        print(target_instance.display())
+    debug_printer(debug_mode)(target_instance.display())
     start_time = systime.time()
     first = (_run_number<=1)
     agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
