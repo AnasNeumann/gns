@@ -369,53 +369,49 @@ class GraphInstance():
     def del_need_for_material(self, op_idx: int, mat_idx: int):
         self.del_edge(('operation', 'needs_mat', 'material'), op_idx, mat_idx)
 
-    def update_operation(self, id: int, updates: list[(str, int)]):
+    def update_operation(self, id: int, updates: list[(str, int)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['operation'].x[id][self.features.operation[feature]] = value
+            self.graph['operation'].x[id][self.features.operation[feature]] = value if not maxx else max(value, self.operation(id, feature))
         
-    def update_resource(self, id: int, updates: list[(str, int)]):
+    def update_resource(self, id: int, updates: list[(str, int)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['resource'].x[id][self.features.resource[feature]] = value
+            self.graph['resource'].x[id][self.features.resource[feature]] = value if not maxx else max(value, self.resource(id, feature))
 
     def inc_resource(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['resource'].x[id][self.features.resource[feature]] += value
     
-    def update_material(self, id: int, updates: list[(str, int)]):
+    def update_material(self, id: int, updates: list[(str, int)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['material'].x[id][self.features.material[feature]] = value
+            self.graph['material'].x[id][self.features.material[feature]] = value if not maxx else max(value, self.material(id, feature))
 
     def inc_material(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['material'].x[id][self.features.material[feature]] += value
     
-    def update_item(self, id: int, updates: list[(str, int)]):
+    def update_item(self, id: int, updates: list[(str, int)], maxx: bool = False, minn: bool = False):
         for feature, value in updates:
-            self.graph['item'].x[id][self.features.item[feature]] = value
+            self.graph['item'].x[id][self.features.item[feature]] = value if not maxx else max(value, self.item(id, feature)) if not minn else min(value, self.item(id, feature))
 
     def inc_item(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['item'].x[id][self.features.item[feature]] += value
-
-    def update_operation(self, id: int, updates: list[(str, int)]):
-        for feature, value in updates:
-            self.graph['operation'].x[id][self.features.operation[feature]] = value
     
     def inc_operation(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
             self.graph['operation'].x[id][self.features.operation[feature]] += value
 
-    def update_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, int)]):
+    def update_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, int)], maxx: bool = False):
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
         for feature, value in updates:
-            self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]] = value
+            self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]] = value if not maxx else max(value, self.need_for_material(operation_id, material_id, feature))
 
-    def update_need_for_resource(self, operation_id: int, resource_id: int, updates: list[(str, int)]):
+    def update_need_for_resource(self, operation_id: int, resource_id: int, updates: list[(str, int)], maxx: bool = False):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
         for feature, value in updates:
-            self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]] = value
+            self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]] = value if not maxx else max(value, self.need_for_resource(operation_id, resource_id, feature))
 
     def inc_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, int)]):
         key = ('operation', 'needs_mat', 'material')

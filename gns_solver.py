@@ -334,11 +334,10 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     for ancestor in instance.get_ancestors(p, e):
         ancestor_id = graph.items_i2g[p][ancestor]
         graph.inc_item(ancestor_id, [('children_time', -estimated_processing_time)])
-        graph.update_item(ancestor_id, [('end_time', max(operation_end, graph.item(ancestor_id, 'end_time')))])
+        graph.update_item(ancestor_id, [('end_time', operation_end)], maxx=True)
     graph, max_next_operation_end = shift_next_operations(graph, instance, p, e, o, shift)
-    graph.update_item(item_id, [
-        ('start_time', min(current_time, graph.item(item_id, 'start_time'))),
-        ('end_time', max(operation_end, max_next_operation_end, graph.item(item_id, 'end_time')))])
+    graph.update_item(item_id, [('start_time', current_time)], minn=True)
+    graph.update_item(item_id, [('end_time', max(operation_end, max_next_operation_end))], maxx=True)
     if not instance.is_design[p][o]:
         graph.inc_item(item_id, [('remaining_physical_time', -estimated_processing_time)])
         if graph.item(item_id, 'remaining_design_time')<= 0:
@@ -369,15 +368,15 @@ def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previo
                 next_id = graph.operations_i2g[p][next]
                 next_time = next_possible_time(instance, available_time, p, next)
                 debug_print(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time} in its own timescale...')
-                graph.update_operation(next_id, [
-                    ('available_time', next_time),
-                    ('is_possible', YES)
-                ])
+                graph.update_operation(next_id, [('is_possible', YES)])
+                graph.update_operation(next_id, [('available_time', next_time)], maxx=True)
         if instance.is_last_design(p, e, o):
             for child in instance.get_children(p, e, direct=True):
                 child_id = graph.items_i2g[p][child]
-                debug_print(f'Enabling item {child_id} -> ({p},{child}) for outsourcing (decision yet to make)...')
-                graph.update_item(child_id, [('is_possible', YES), ('start_time', available_time)])
+                if instance.external[p][child]:
+                    debug_print(f'Enabling item {child_id} -> ({p},{child}) for outsourcing (decision yet to make)...')
+                graph.update_item(child_id, [('is_possible', YES)])
+                graph.update_item(child_id, [('start_time', available_time)], maxx=True)
     return graph
 
 def objective_value(cmax: int, cost: int, cmax_weight: float):
@@ -490,7 +489,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                         _open: int = YES if next_good_to_go else graph.operation(op_id, 'is_possible')
                         available_time = max(graph.operation(op_id, 'available_time'), next_possible_time(instance, end_date, p, o))
                         debug_print(f"\t >> Moving parent' first physical operation ({p},{o}) to {available_time}!")
-                        graph.update_operation(op_id, [('is_possible', _open), ('available_time', available_time)])
+                        graph.update_operation(op_id, [('is_possible', _open)])
+                        graph.update_operation(op_id, [('available_time', available_time)], maxx=True)
                 else:
                     graph, shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e, debug_print)
                     current_cmax = max(current_cmax, shifted_project_estimated_end)
