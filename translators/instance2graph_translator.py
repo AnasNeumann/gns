@@ -102,8 +102,8 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
                         execution_time = op_start,
                         init_time= op_start,
                         quantity_needed = i.quantity_needed[r][p][o]))
-    estimated_start_child = estimated_start if i.external[p][e] else design_mean_time
-    estimated_childrend_end = 0
+    estimated_start_child = estimated_start if i.external[p][e] else (estimated_start + design_mean_time)
+    estimated_childrend_end = (estimated_start + design_mean_time)
     estimated_children_cost = 0
     for children in i.get_children(p, e, direct=True):
         graph, child_id, estimated_end_child, child_cost = build_item(i, graph, p, e=children, head=False, estimated_start=estimated_start_child, must_be_outsourced=must_be_outsourced)
