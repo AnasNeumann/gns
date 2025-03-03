@@ -44,8 +44,7 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
         children_time = children_time,
         start_time = estimated_start,
         end_time = -1,
-        init_start_time = estimated_start,
-        init_end_time= -1,
+        init_time = estimated_start,
         is_possible = YES if head else NOT_YET))
     if i.external[p][e]:
         graph.oustourcable_items += 1
@@ -82,8 +81,7 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
             remaining_materials = required_mat,
             available_time = op_start,
             end_time = _end_time,
-            init_start_time= op_start,
-            init_end_time = _end_time,
+            init_time= op_start,
             is_possible = YES if (head and (o == start)) else NOT_YET))
         graph.add_operation_assembly(item_id, op_id)
         for rt in i.required_rt(p,o):
@@ -97,13 +95,12 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
                         current_processing_time = _ext,
                         start_time = op_start,
                         end_time = op_start+_ext,
-                        init_start_time = op_start,
-                        init_end_time = op_start+_ext))
+                        init_time = op_start))
                 else:
                     graph.add_need_for_materials(op_id, graph.materials_i2g[r], NeedForMaterialFeatures(
                         status = NOT_YET,
                         execution_time = op_start,
-                        init_execution_time= op_start,
+                        init_time= op_start,
                         quantity_needed = i.quantity_needed[r][p][o]))
     estimated_start_child = estimated_start if i.external[p][e] else design_mean_time
     estimated_childrend_end = 0
@@ -116,7 +113,7 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
     external_end = estimated_start + i.outsourcing_time[p][e]
     internal_end = estimated_childrend_end + physical_mean_time
     estimated_end = external_end if must_be_outsourced else min(external_end, internal_end) if i.external[p][e] else internal_end
-    graph.update_item(item_id, [('end_time', estimated_end), ('init_end_time', estimated_end)])
+    graph.update_item(item_id, [('end_time', estimated_end)])
     mandatory_cost = estimated_children_cost + (i.external_cost[p][e] if must_be_outsourced else 0)
     return graph, item_id, estimated_end, mandatory_cost
 
