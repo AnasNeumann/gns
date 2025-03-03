@@ -215,7 +215,6 @@ def item_local_production(graph: GraphInstance, instance: Instance, item_id: int
         Choose to produce an item locally and update its current dates
     """
     DEBUG_PRINT(f"Producing item {item_id} -> ({p},{e}) locally...")
-    _old_end = graph.item(item_id, 'end_time')
     max_child_end = 0
     design_mean_time, physical_mean_time = instance.item_processing_time(p, e, total_load=False)
     graph, max_child_end = shift_children_and_operations(graph, instance, p, e, design_mean_time)
@@ -267,7 +266,7 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id: int, t: in
     for child in instance.get_children(p, e, direct=True):
         graph, child_time, child_cost = outsource_item(graph, instance, graph.items_i2g[p][child], outsourcing_start_time, enforce_time=True)
         cost += child_cost
-        end_date = max(t, child_time)
+        end_date = max(end_date, child_time)
     return graph, end_date, cost
 
 def apply_outsourcing_to_direct_parent(instance: Instance, graph: GraphInstance, current_cmax: int, current_cost: int, previous_operations: list, item_id: int, p: int, e: int, end_date: int, local_price: int):
@@ -617,7 +616,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
         return graph, current_cmax, current_cost
 
 # =====================================================
-# =*= IV. MAIN CODE =*=
+# =*= V. MAIN CODE =*=
 # =====================================================
 
 def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: bool = False, size: str = "", id: str = ""):

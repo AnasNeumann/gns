@@ -49,6 +49,9 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
     if i.external[p][e]:
         graph.oustourcable_items += 1
     start, end = i.get_operations_idx(p,e)
+    physical_ops_ids: list = []
+    pr_ids: list = []
+    pm_ids: list = []
     for o in range(start, end):
         if o > start:
             op_start = op_start+operation_mean_time
@@ -83,6 +86,8 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
             end_time = _end_time,
             init_time= op_start,
             is_possible = YES if (head and (o == start)) else NOT_YET))
+        if not i.is_design[p][o]:
+            physical_ops_ids.append(op_id)
         graph.add_operation_assembly(item_id, op_id)
         for rt in i.required_rt(p,o):
             graph.nb_operations += 1
@@ -96,20 +101,33 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
                         start_time = op_start,
                         end_time = op_start+_ext,
                         init_time = op_start))
+                    if not i.is_design[p][o]:
+                        pr_ids.append((op_id, graph.resources_i2g[r]))
                 else:
                     graph.add_need_for_materials(op_id, graph.materials_i2g[r], NeedForMaterialFeatures(
                         status = NOT_YET,
                         execution_time = op_start,
                         init_time= op_start,
                         quantity_needed = i.quantity_needed[r][p][o]))
-    estimated_start_child = estimated_start if i.external[p][e] else (estimated_start + design_mean_time)
-    estimated_childrend_end = (estimated_start + design_mean_time)
+                    if not i.is_design[p][o]:
+                        pm_ids.append((op_id, graph.materials_i2g[r]))
+    _base_design_end = estimated_start + design_mean_time
+    estimated_start_child = estimated_start if i.external[p][e] else _base_design_end
+    estimated_childrend_end = _base_design_end
     estimated_children_cost = 0
     for children in i.get_children(p, e, direct=True):
         graph, child_id, estimated_end_child, child_cost = build_item(i, graph, p, e=children, head=False, estimated_start=estimated_start_child, must_be_outsourced=must_be_outsourced)
         graph.add_item_assembly(item_id, child_id)
         estimated_childrend_end = max(estimated_childrend_end, estimated_end_child)
         estimated_children_cost += child_cost
+    if estimated_childrend_end > _base_design_end:
+        _shift = estimated_childrend_end - _base_design_end
+        for op_id in physical_ops_ids:
+            graph.inc_operation(op_id, [('init_time', _shift), ('available_time', _shift), ('end_time', _shift)])
+        for op_id, r_id in pr_ids:
+            graph.inc_need_for_resource(op_id, r_id, [('init_time', _shift), ('start_time', _shift), ('end_time', _shift)])
+        for op_id, m_id in pm_ids:
+            graph.inc_need_for_material(op_id, m_id, [('init_time', _shift), ('execution_time', _shift)])
     external_end = estimated_start + i.outsourcing_time[p][e]
     internal_end = estimated_childrend_end + physical_mean_time
     estimated_end = external_end if must_be_outsourced else min(external_end, internal_end) if i.external[p][e] else internal_end
