@@ -558,7 +558,6 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t)
         DEBUG_PRINT(f"Current possible {ACTIONS_NAMES[actions_type]} actions: {poss_actions}")
-        DEBUG_PRINT(f"[BEFORE] --- END TIME OF HEAD ITEM IS {graph.item(graph.items_i2g[0][0], 'end_time')}")
         if poss_actions:
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
@@ -624,7 +623,6 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
             old_cmax = current_cmax
         else: # No more possible action at time t
             graph, utilization, t, terminate = manage_queue_of_possible_actions(instance, graph, utilization, t, debug_mode)
-        DEBUG_PRINT(f"[AFTER] --- END TIME OF HEAD ITEM IS {graph.item(graph.items_i2g[0][0], 'end_time')}")
     if train:
         # TODO see about that later...
         training_results.update_last_reward(agent_name=ACTIONS_NAMES[SCHEDULING], init_cmax=first_cmax)
@@ -639,24 +637,34 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
 def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: bool = False, size: str = "", id: str = ""):
     index = str(run_number)
     base_name = f"{size}_{id}_" if fine_tuned else ""
-    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['embedding_hidden_channels'], GNN_CONF['nb_layers'])
+    _rm_size = GNN_CONF['resource_and_material_embedding_size']
+    _io_size = GNN_CONF['operation_and_item_embedding_size']
+    _hidden_size = GNN_CONF['embedding_hidden_channels']
+    _ac_size = GNN_CONF['actor_hidden_channels']
+    _value_size= GNN_CONF['value_hidden_channels']
+    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(_rm_size, _io_size, _hidden_size, GNN_CONF['nb_layers'])
     shared_GNN.load_state_dict(torch.load(model_path+'/'+base_name+'gnn_weights_'+index+'.pth', map_location=torch.device(device)))
-    shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['value_hidden_channels'])
+    shared_critic: L1_CommonCritic = L1_CommonCritic(_rm_size, _io_size, _value_size)
     shared_critic.load_state_dict(torch.load(model_path+'/'+base_name+'critic_weights_'+index+'.pth', map_location=torch.device(device)))
-    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
-    scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
-    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
+    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
+    scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
+    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     outsourcing_actor.load_state_dict(torch.load(model_path+'/'+base_name+'outsourcing_weights_'+index+'.pth', map_location=torch.device(device)))
     scheduling_actor.load_state_dict(torch.load(model_path+'/'+base_name+'scheduling_weights_'+index+'.pth', map_location=torch.device(device)))
     material_actor.load_state_dict(torch.load(model_path+'/'+base_name+'material_use_weights_'+index+'.pth', map_location=torch.device(device)))
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 def init_new_models():
-    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['embedding_hidden_channels'], GNN_CONF['nb_layers'])
-    shared_critic: L1_CommonCritic = L1_CommonCritic(GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['value_hidden_channels'])
-    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
-    scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
-    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, GNN_CONF['resource_and_material_embedding_size'], GNN_CONF['operation_and_item_embedding_size'], GNN_CONF['actor_hidden_channels'])
+    _rm_size = GNN_CONF['resource_and_material_embedding_size']
+    _io_size = GNN_CONF['operation_and_item_embedding_size']
+    _hidden_size = GNN_CONF['embedding_hidden_channels']
+    _ac_size = GNN_CONF['actor_hidden_channels']
+    _value_size= GNN_CONF['value_hidden_channels']
+    shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(_rm_size, _io_size, _hidden_size, GNN_CONF['nb_layers'])
+    shared_critic: L1_CommonCritic = L1_CommonCritic(_rm_size, _io_size, _value_size)
+    outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
+    scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
+    material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mode: bool):

@@ -239,15 +239,6 @@ class L1_EmbbedingGNN(Module):
             self.resource_layers.append(ResourceEmbeddingLayer(resource_and_material_embedding_size, operation_and_item_embedding_size+len(conf.need_for_resources), resource_and_material_embedding_size))
             self.item_layers.append(ItemEmbeddingLayer(operation_and_item_embedding_size, operation_and_item_embedding_size, embedding_hidden_channels, operation_and_item_embedding_size))
             self.operation_layers.append(OperationEmbeddingLayer(operation_and_item_embedding_size, operation_and_item_embedding_size, resource_and_material_embedding_size, resource_and_material_embedding_size, embedding_hidden_channels, operation_and_item_embedding_size))
-        self.material_attention = Linear(resource_and_material_embedding_size, 1)
-        self.resource_attention = Linear(resource_and_material_embedding_size, 1)
-        self.item_attention = Linear(operation_and_item_embedding_size, 1)
-        self.operation_attention = Linear(operation_and_item_embedding_size, 1)
-        self.graph_level_embedding = Sequential(
-            Linear(STATE_VECTOR_SIZE["decoded"], STATE_VECTOR_SIZE["hidden_1"]), LeakyReLU(),
-            Linear(STATE_VECTOR_SIZE["hidden_1"], STATE_VECTOR_SIZE["hidden_2"]), LeakyReLU(),
-            Linear(STATE_VECTOR_SIZE["hidden_2"], STATE_VECTOR_SIZE["encoded"])
-        )
 
     def forward(self, state: State, related_items: Tensor, parents: Tensor, alpha: Tensor):
         for l in range(self.nb_embedding_layers):
@@ -255,24 +246,19 @@ class L1_EmbbedingGNN(Module):
             state.resources = self.resource_layers[l](state.resources, state.operations, state.need_for_resources, state.same_types)
             state.items = self.item_layers[l](state.items, parents, state.operations, state.item_assembly, state.operation_assembly)
             state.operations = self.operation_layers[l](state.operations, state.items, related_items, state.materials, state.resources, state.need_for_resources, state.need_for_materials, state.precedences)     
-        material_scores = F.softmax(self.material_attention(state.materials), dim=0)
-        resource_scores = F.softmax(self.resource_attention(state.resources), dim=0)
-        item_scores = F.softmax(self.item_attention(state.items), dim=0)
-        operation_scores = F.softmax(self.operation_attention(state.operations), dim=0)
-        pooled_materials = torch.sum(material_scores * state.materials, dim=0, keepdim=True)
-        pooled_resources = torch.sum(resource_scores * state.resources, dim=0, keepdim=True)
-        pooled_items = torch.sum(item_scores * state.items, dim=0, keepdim=True)
-        pooled_operations = torch.sum(operation_scores * state.operations, dim=0, keepdim=True)
+        pooled_materials = torch.mean(state.materials, dim=0, keepdim=True)
+        pooled_resources = torch.mean(state.resources, dim=0, keepdim=True)
+        pooled_items = torch.mean(state.items, dim=0, keepdim=True)
+        pooled_operations = torch.mean(state.operations, dim=0, keepdim=True)
         state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources], dim=-1)[0]
-        encoded_graph_level_vector: Tensor = self.graph_level_embedding(state.graph_level_features)
-        return state, torch.cat([state_embedding, alpha, encoded_graph_level_vector], dim=0)
+        return state, torch.cat([state_embedding, alpha], dim=0)
 
 class L1_CommonCritic(Module):
     def __init__(self, resource_and_material_embedding_size: int, operation_and_item_embedding_size: int, critic_hidden_channels: int):
         super(L1_CommonCritic, self).__init__()
         first_dimension = critic_hidden_channels
         second_dimenstion = int(critic_hidden_channels / 2)
-        state_vector_size = STATE_VECTOR_SIZE["encoded"] + 2*resource_and_material_embedding_size + 2*operation_and_item_embedding_size + 1
+        state_vector_size = 2*resource_and_material_embedding_size + 2*operation_and_item_embedding_size + 1
         self.critic_mlp = Sequential(
             Linear(state_vector_size, first_dimension), Tanh(),
             Linear(first_dimension, second_dimenstion), Tanh(), 
@@ -287,7 +273,7 @@ class L1_OutousrcingActor(Module):
         super(L1_OutousrcingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
-        self.actor_input_size = STATE_VECTOR_SIZE["encoded"] + 2*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 2
+        self.actor_input_size = 2*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 2
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
@@ -312,7 +298,7 @@ class L1_SchedulingActor(Module):
         super(L1_SchedulingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
-        self.actor_input_size = STATE_VECTOR_SIZE["encoded"] + 3*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 1
+        self.actor_input_size = 3*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 1
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
@@ -336,7 +322,7 @@ class L1_MaterialActor(Module):
         super(L1_MaterialActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
-        self.actor_input_size = STATE_VECTOR_SIZE["encoded"] + 3*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 1
+        self.actor_input_size = 3*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 1
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
