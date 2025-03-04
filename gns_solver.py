@@ -624,8 +624,6 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
         else: # No more possible action at time t
             graph, utilization, t, terminate = manage_queue_of_possible_actions(instance, graph, utilization, t, debug_mode)
     if train:
-        # TODO see about that later...
-        training_results.update_last_reward(agent_name=ACTIONS_NAMES[SCHEDULING], init_cmax=first_cmax)
         return training_results, graph, current_cmax, current_cost
     else:
         return graph, current_cmax, current_cost
