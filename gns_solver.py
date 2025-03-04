@@ -146,10 +146,13 @@ def get_feasible_actions(instance: Instance, graph: GraphInstance, operations: l
 # =====================================================
 
 def shift_one_operation(graph: GraphInstance, instance: Instance, p: int, o: int, shift: int):
+    """
+        Shift one operation (dont pay attention to their timescale yet)
+    """
     if shift <= 0:
         return graph, 0
     operation_id = graph.operations_i2g[p][o]
-    DEBUG_PRINT(f"\t\t >>> Operation ({p},{o}) shifted by {shift} time unit...")
+    DEBUG_PRINT(f"\t\t >>> Operation ({p},{o}) shifted by {shift} time unit. It was time {graph.operation(operation_id, 'available_time')}->{graph.operation(operation_id, 'end_time')}...")
     graph.inc_operation(operation_id, [('available_time', shift), ('end_time', shift)])
     for r in instance.required_resources(p, o):
         if instance.finite_capacity[r]:
@@ -159,6 +162,9 @@ def shift_one_operation(graph: GraphInstance, instance: Instance, p: int, o: int
     return graph, graph.operation(operation_id, 'end_time')
 
 def shift_next_operations(graph: GraphInstance, instance: Instance, p: int, e: int, o: int, shift: int):
+    """
+        Shift next operations on the same item (dont pay attention to their timescale yet)
+    """
     if shift <= 0:
         return graph, 0
     _, end = instance.get_operations_idx(p, e)
@@ -169,12 +175,15 @@ def shift_next_operations(graph: GraphInstance, instance: Instance, p: int, e: i
     return graph, max_end
 
 def shift_children_and_operations(graph: GraphInstance, instance: Instance, p: int, e: int, shift: int):
+    """
+        Shift children items and all their operations (dont pay attention to their timescale yet)
+    """
     if shift <= 0:
         return graph, 0
     max_child_end = 0
     for child in instance.get_children(p, e, direct=False):
-        DEBUG_PRINT(f"\t >> Children item ({p},{child}) shifted by {shift} time unit (both P and NP operations)...")
         child_id = graph.items_i2g[p][child]
+        DEBUG_PRINT(f"\t >> Children item ({p},{child}) shifted by {shift} time unit (both P and NP operations). It was {graph.item(child_id, 'start_time')}->{graph.item(child_id, 'end_time')}...")
         graph.inc_item(child_id, [
             ('start_time', shift),
             ('end_time', shift)])
@@ -184,6 +193,9 @@ def shift_children_and_operations(graph: GraphInstance, instance: Instance, p: i
     return graph, max_child_end
 
 def shift_ancestors_physical_operations(graph: GraphInstance, instance: Instance, p: int, e: int, end_time_last_op: int):
+    """
+        Shift ancestors (reccursive way) and all their physical operations
+    """
     max_ancestor_end = 0
     head: bool = False
     while not head:
@@ -198,16 +210,18 @@ def shift_ancestors_physical_operations(graph: GraphInstance, instance: Instance
                 min_ancestor_physical_start = max(min_ancestor_physical_start, start) if min_ancestor_physical_start>0 else start
             _shift = max(0, end_time_last_op-min_ancestor_physical_start)
             if _shift > 0:
-                DEBUG_PRINT(f"\t >> Parent item ({p},{parent}) of child ({p}, {e}) shifted by {_shift} time unit (only physical operations)...")
                 ancestor_id = graph.items_i2g[p][parent]
-                graph.inc_item(ancestor_id, [('end_time', _shift)])
-                max_ancestor_end = max(max_ancestor_end, graph.item(ancestor_id, 'end_time'))
+                DEBUG_PRINT(f"\t >> Parent item ({p},{parent}) of child ({p}, {e}) shifted by {_shift} time unit (only physical operations). It was {graph.item(ancestor_id, 'start_time')}->{graph.item(ancestor_id, 'end_time')}...")
                 for o in instance.loop_item_operations(p, parent):
                     if not instance.is_design[p][o]:
-                        graph,_ = shift_one_operation(graph, instance, p, o, _shift)
-                        max_ancestor_end = max(max_ancestor_end, graph.item(ancestor_id, 'end_time'))
-            e = parent
-            end_time_last_op = max(max_ancestor_end, end_time_last_op)
+                        graph, _ = shift_one_operation(graph, instance, p, o, _shift)
+                graph.inc_item(ancestor_id, [('end_time', _shift)])
+                max_ancestor_end = max(max_ancestor_end, graph.item(ancestor_id, 'end_time'))
+                e = parent
+                end_time_last_op = max(max_ancestor_end, end_time_last_op)
+            else:
+                head = True
+                break
     return graph, max_ancestor_end
 
 def item_local_production(graph: GraphInstance, instance: Instance, item_id: int, p: int, e: int):
@@ -289,12 +303,9 @@ def apply_outsourcing_to_direct_parent(instance: Instance, graph: GraphInstance,
                 DEBUG_PRINT(f"\t >> Cannot open parent' first physical operation ({p},{o}) due to ({p},{previous}) not finished!")
                 next_good_to_go = False
                 break
-        op_id = graph.operations_i2g[p][o]
-        open = YES if next_good_to_go else graph.operation(op_id, 'is_possible')
-        available_time = max(graph.operation(op_id, 'available_time'), next_possible_time(instance, end_date, p, o))
-        DEBUG_PRINT(f"\t >> Moving parent' first physical operation ({p},{o}) to {available_time}!")
-        graph.update_operation(op_id, [('is_possible', open)])
-        graph.update_operation(op_id, [('available_time', available_time)], maxx=True)
+        if next_good_to_go:
+            DEBUG_PRINT(f"\t >> Opening first physical operation ({p},{o})!")
+            graph.update_operation(graph.operations_i2g[p][o], [('is_possible', True)])
     return graph, current_cmax, current_cost
 
 def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: int, material_id: int, required_types_of_materials:list[list[list[int]]], current_time: int):
@@ -322,14 +333,12 @@ def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: i
     graph.update_item(item_id, [
         ('end_time', max(current_time, max_next_operation_end, graph.item(item_id, 'end_time'))),
         ('start_time', min(current_time, graph.item(item_id, 'start_time')))])
-    for ancestor in instance.get_ancestors(p, e):
-        ancestor_id = graph.items_i2g[p][ancestor]
-        graph.update_item(ancestor_id, [('end_time', max(current_time, graph.item(ancestor_id, 'end_time')))])
     if instance.is_design[p][o]:
-        graph,_ = shift_children_and_operations(graph, instance, p, e, shift)
-    graph, max_ancestors_end = shift_ancestors_physical_operations(graph, instance, p, e, max_next_operation_end)
+        graph, _max_child_end, _ = shift_children_and_operations(graph, instance, p, e, shift)
+        max_next_operation_end = max(_max_child_end, max_next_operation_end)
+    graph, _max_ancestors_end = shift_ancestors_physical_operations(graph, instance, p, e, max_next_operation_end)
     required_types_of_materials[p][o].remove(rt)
-    return graph, required_types_of_materials, max(max_ancestors_end, new_end, max_next_operation_end)
+    return graph, required_types_of_materials, max(_max_ancestors_end, max_next_operation_end)
 
 def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: int, resource_id: int, required_types_of_resources: list[list[list[int]]], utilization: list[float], current_time: int):
     current_processing_time = graph.need_for_resource(operation_id, resource_id, 'current_processing_time')
@@ -365,7 +374,6 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     for ancestor in instance.get_ancestors(p, e):
         ancestor_id = graph.items_i2g[p][ancestor]
         graph.inc_item(ancestor_id, [('children_time', -estimated_processing_time)])
-        graph.update_item(ancestor_id, [('end_time', operation_end)], maxx=True)
     graph, _max_next_operation_end = shift_next_operations(graph, instance, p, e, o, shift)
     _end_of_item = max(_max_next_operation_end, operation_end)
     graph.update_item(item_id, [('start_time', current_time)], minn=True)
@@ -550,6 +558,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
     while not terminate:
         poss_actions, actions_type = get_feasible_actions(instance, graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t)
         DEBUG_PRINT(f"Current possible {ACTIONS_NAMES[actions_type]} actions: {poss_actions}")
+        DEBUG_PRINT(f"[BEFORE] --- END TIME OF HEAD ITEM IS {graph.item(graph.items_i2g[0][0], 'end_time')}")
         if poss_actions:
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
@@ -581,8 +590,10 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 else:
                     graph, _shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e)
                     current_cmax = max(current_cmax, _shifted_project_estimated_end)
+                _r = reward(old_cmax, current_cmax, old_cost, current_cost, a=instance.w_makespan, use_cost=True)
+                DEBUG_PRINT(f"\t @reward for 'outsourcing' decision: {_r}")
                 if train:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(old_cmax, current_cmax, old_cost, current_cost, a=instance.w_makespan, use_cost=True))
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=_r)
             elif actions_type == SCHEDULING: # scheduling action
                 operation_id, resource_id = poss_actions[idx]    
                 p, o = graph.operations_g2i[operation_id]
@@ -594,8 +605,10 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, _operation_end)
                 current_cmax = max(current_cmax, _max_ancestors_end)
                 DEBUG_PRINT(f"End of scheduling at time {_operation_end} [NEW CMAX = {current_cmax} - COST = {current_cost}$]...")
+                _r = reward(old_cmax, current_cmax, a=instance.w_makespan)
+                DEBUG_PRINT(f"\t @reward for 'scheduling' decision: {_r}")
                 if train:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(old_cmax, current_cmax, a=instance.w_makespan))
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=_r)
             else: # Material use action
                 operation_id, material_id = poss_actions[idx]
                 p, o = graph.operations_g2i[operation_id]
@@ -603,13 +616,17 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 graph, required_types_of_materials, _max_ancestors_end = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t)
                 current_cmax = max(current_cmax, _max_ancestors_end)
+                _r = reward(old_cmax, current_cmax, a=instance.w_makespan)
+                DEBUG_PRINT(f"\t @reward for 'material use' decision: {_r}")
                 if train and need_reward:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=reward(old_cmax, current_cmax, a=instance.w_makespan))
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=_r)
             old_cost = current_cost
             old_cmax = current_cmax
         else: # No more possible action at time t
             graph, utilization, t, terminate = manage_queue_of_possible_actions(instance, graph, utilization, t, debug_mode)
+        DEBUG_PRINT(f"[AFTER] --- END TIME OF HEAD ITEM IS {graph.item(graph.items_i2g[0][0], 'end_time')}")
     if train:
+        # TODO see about that later...
         training_results.update_last_reward(agent_name=ACTIONS_NAMES[SCHEDULING], init_cmax=first_cmax)
         return training_results, graph, current_cmax, current_cost
     else:
