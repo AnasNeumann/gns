@@ -24,15 +24,9 @@ PROBLEM_SIZES = [['s', 'm'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
     "validation_rate": 20,
     "switch_batch": 10,
-    "train_iterations": {
-        "pre_training": [2, 150], 
-        "fine_tuning": [2, 150]
-    },
+    "train_iterations": [2, 150],
     "opt_epochs": 3,
-    "batch_size": {
-        "pre_training": [2, 15],
-        "fine_tuning": [2, 10],
-    },
+    "batch_size": [2, 15],
     "clip_ratio": 0.2,
     "policy_loss": 1.0,
     "value_loss": 0.5,
@@ -41,7 +35,7 @@ PPO_CONF = {
     "bias_variance_tradeoff": 1.0,
     'validation': 10
 }
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-5
 AGENTS = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
 OUTSOURCING = 0
@@ -111,8 +105,8 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
         PPO function to pre-train agents on several instances
     """
     start_time = systime.time()
-    iterations: int = PPO_CONF['train_iterations']['pre_training'][0 if debug_mode else 1]
-    batch_size: int = PPO_CONF['batch_size']['pre_training'][0 if debug_mode else 1]
+    iterations: int = PPO_CONF['train_iterations'][0 if debug_mode else 1]
+    batch_size: int = PPO_CONF['batch_size'][0 if debug_mode else 1]
     epochs: int = PPO_CONF['opt_epochs']
     debug_print: Callable = debug_printer(debug_mode)
     print("Loading dataset....")

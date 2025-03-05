@@ -14,7 +14,7 @@ from torch.nn import Module
 from translators.instance2graph_translator import translate
 from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import check_completeness, debug_printer
-from multi_stage_pre_training import reward, multi_stage_pre_train, load_training_dataset
+from multi_stage_pre_training import multi_stage_pre_train, load_training_dataset
 from model.agent import MultiAgent_OneInstance
 import pickle
 from multi_stage_ppo_tuning import multi_stage_fine_tuning
@@ -550,12 +550,22 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     t: int = 0
     alpha: Tensor = torch.tensor([instance.w_makespan], device=device)
-    outsourcing_training_stage: bool = train and trainable[OUTSOURCING]
-    scheduling_training_stage: bool = train and trainable[SCHEDULING]
-    material_use_training_stage: bool = train and trainable[MATERIAL_USE]
+    _agents_names: list[str] = []
+    outsourcing_training_stage: bool = False
+    scheduling_training_stage: bool = False
+    material_use_training_stage: bool = False
     if train:
+        if trainable[OUTSOURCING]:
+            _agents_names.append(ACTIONS_NAMES[OUTSOURCING])
+            outsourcing_training_stage = True
+        if trainable[SCHEDULING]:
+            _agents_names.append(ACTIONS_NAMES[SCHEDULING])
+            scheduling_training_stage = True
+        if trainable[MATERIAL_USE]:
+            _agents_names.append(ACTIONS_NAMES[MATERIAL_USE])
+            material_use_training_stage = True
         training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
-            agent_names=[name for _,name in agents], 
+            agent_names=_agents_names, 
             instance_id=instance.id,
             related_items=related_items,
             parent_items=parent_items,
@@ -577,7 +587,9 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             if train:
                 probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
                 idx = policy(probs, greedy=False)
-                if actions_type != MATERIAL_USE or graph.material(poss_actions[idx][1], 'remaining_init_quantity')>0:
+                if (actions_type==SCHEDULING and scheduling_training_stage) \
+                        or (actions_type==OUTSOURCING and outsourcing_training_stage) \
+                        or (actions_type== MATERIAL_USE and material_use_training_stage and graph.material(poss_actions[idx][1],'remaining_init_quantity')>0):
                     need_reward = True
                     training_results.add_step(
                         agent_name=ACTIONS_NAMES[actions_type], 
