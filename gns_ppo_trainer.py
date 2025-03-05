@@ -99,7 +99,7 @@ def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance], 
     instances_results: list[MultiAgent_OneInstance] = []
     for instance in batch:
         print(f"\t start solving instance: {instance.id}...")
-        r,_,_,_ = solve_function(instance=instance, agents=agents, train=True, device=device, debug_mode=debug)
+        r,_,_,_ = solve_function(instance=instance, agents=agents, train=True, trainable=[True for _ in agents], device=device, debug_mode=debug)
         instances_results.append(r)
     batch_result: MultiAgents_Batch = MultiAgents_Batch(
         batch=instances_results, 
@@ -192,7 +192,7 @@ def PPO_fine_tuning(agents: list[(Module, str)], embedding_stack: Module, shared
     _time_to_best: float = 0
     for episode in range(iterations):
         print(f"PPO episode: {episode+1}/{iterations}:")
-        loss, graph, cmax, cost = solve_function(instance=target_instance, agents=agents, train=True, device=device, debug_mode=debug_mode)
+        loss, graph, cmax, cost = solve_function(instance=target_instance, agents=agents, train=True, trainable=[True for _ in agents], device=device, debug_mode=debug_mode)
         _current_obj = objective_value(cmax, cost, target_instance.w_makespan)
         if _current_obj < _best_obj:
             _best_obj = _current_obj

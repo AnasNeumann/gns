@@ -535,12 +535,15 @@ def manage_queue_of_possible_actions(instance: Instance, graph: GraphInstance, u
             check_completeness(graph, DEBUG_PRINT)
         return graph, utilization, t, True
 
-def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, device: str, debug_mode: bool):
+def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, debug_mode: bool):
     graph, current_cmax, current_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
     utilization: list = [0 for _ in graph.loop_resources()]
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     t: int = 0
     alpha: Tensor = torch.tensor([instance.w_makespan], device=device)
+    outsourcing_training_stage: bool = train and trainable[OUTSOURCING]
+    scheduling_training_stage: bool = train and trainable[SCHEDULING]
+    material_use_training_stage: bool = train and trainable[MATERIAL_USE]
     if train:
         training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
             agent_names=[name for _,name in agents], 
@@ -586,15 +589,14 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 if outsourcing_choice == YES:
                     graph, _end_date, _local_price = outsource_item(graph, instance, item_id, t, enforce_time=False)
                     graph, current_cmax, current_cost = apply_outsourcing_to_direct_parent(instance, graph, current_cmax, current_cost, previous_operations, item_id, p, e, _end_date, _local_price)
-                    _r = reward(old_cmax, current_cmax, old_current_end, _end_date, old_cost, current_cost, a=instance.w_makespan, use_cost=True)
+                    if outsourcing_training_stage:
+                        training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(old_cmax, current_cmax, old_current_end, _end_date, old_cost, current_cost, a=instance.w_makespan, use_cost=True))
                     old_current_end = _end_date
                 else:
                     graph, _shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e)
                     current_cmax = max(current_cmax, _shifted_project_estimated_end)
-                    _r = reward(old_cmax, current_cmax, old_current_end, old_current_end, a=instance.w_makespan)
-                DEBUG_PRINT(f"\t @reward for 'outsourcing' decision: {_r}")
-                if train:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=_r)
+                    if outsourcing_training_stage:
+                        training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(old_cmax, current_cmax, old_current_end, old_current_end, a=instance.w_makespan))
             elif actions_type == SCHEDULING: # scheduling action
                 operation_id, resource_id = poss_actions[idx]    
                 p, o = graph.operations_g2i[operation_id]
@@ -606,11 +608,9 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, _operation_end)
                 current_cmax = max(current_cmax, _max_ancestors_end)
                 DEBUG_PRINT(f"End of scheduling at time {_operation_end} [NEW CMAX = {current_cmax} - COST = {current_cost}$]...")
-                _r = reward(old_cmax, current_cmax, old_current_end, _operation_end, a=instance.w_makespan)
+                if scheduling_training_stage:
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(old_cmax, current_cmax, old_current_end, _operation_end, a=instance.w_makespan))
                 old_current_end = _operation_end
-                DEBUG_PRINT(f"\t @reward for 'scheduling' decision: {_r}")
-                if train:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=_r)
             else: # Material use action
                 operation_id, material_id = poss_actions[idx]
                 p, o = graph.operations_g2i[operation_id]
@@ -618,11 +618,9 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 graph, required_types_of_materials, _max_ancestors_end = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t)
                 current_cmax = max(current_cmax, _max_ancestors_end)
-                _r = reward(old_cmax, current_cmax, old_current_end, t, a=instance.w_makespan)
-                DEBUG_PRINT(f"\t @reward for 'material use' decision: {_r}")
+                if material_use_training_stage and need_reward:
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=reward(old_cmax, current_cmax, old_current_end, t, a=instance.w_makespan))
                 old_current_end = t
-                if train and need_reward:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=_r)
             old_cost = current_cost
             old_cmax = current_cmax
         else: # No more possible action at time t
@@ -717,7 +715,7 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mo
         agent = agent.to(device)
     shared_embbeding_stack = shared_embbeding_stack.to(device)
     shared_critic = shared_critic.to(device)
-    graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, debug_mode=debug_mode)
+    graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, trainable=[False for _ in agents], device=device, debug_mode=debug_mode)
     final_metrics = pd.DataFrame({
         'index': [target_instance.id],
         'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
