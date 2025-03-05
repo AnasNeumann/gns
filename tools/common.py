@@ -26,6 +26,11 @@ num_feature = Union[int, float]
 all_types_feature = Union[int, float, bool, list]
 generic_object = Union[object, Dict[Any, Any]]
 
+def objective_value(cmax: int, cost: int, cmax_weight: float):
+    cmax_weight = int(100 * cmax_weight)
+    cost_weight = 100 - cmax_weight
+    return cmax*cmax_weight + cost*cost_weight
+
 def load_instance(path: str):
     with open(path, 'rb') as file:
         return pickle.load(file)

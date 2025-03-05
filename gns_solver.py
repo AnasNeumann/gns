@@ -14,9 +14,10 @@ from torch.nn import Module
 from translators.instance2graph_translator import translate
 from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import check_completeness, debug_printer
-from gns_ppo_trainer import reward, PPO_pre_train, load_training_dataset, PPO_fine_tuning
+from multi_stage_pre_training import reward, multi_stage_pre_train, load_training_dataset
 from model.agent import MultiAgent_OneInstance
 import pickle
+from multi_stage_ppo_tuning import multi_stage_fine_tuning
 
 # =====================================================
 # =*= 1st MAIN FILE OF THE PROJECT: GNS SOLVER =*=
@@ -39,6 +40,8 @@ GNN_CONF = {
     'embedding_hidden_channels': 128,
     'value_hidden_channels': 256,
     'actor_hidden_channels': 256}
+small_steps: float = 0.3
+big_steps: float = 0.7
 
 # =====================================================
 # =*= I. SEARCH FOR FEASIBLE ACTIONS =*=
@@ -535,6 +538,12 @@ def manage_queue_of_possible_actions(instance: Instance, graph: GraphInstance, u
             check_completeness(graph, DEBUG_PRINT)
         return graph, utilization, t, True
 
+def reward(makespan_old: int, makespan_new: int, last_op_old: int, last_op_new: int, cost_old: int=-1, cost_new: int=-1, a: float=-1, use_cost: bool=False):
+    if use_cost:
+        return  a * (big_steps * (makespan_old - makespan_new) + small_steps * (last_op_old - last_op_new)) + (1-a) * (cost_old - cost_new)
+    else:
+        return a * (big_steps * makespan_old - makespan_new + small_steps * (last_op_old - last_op_new))
+
 def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, debug_mode: bool):
     graph, current_cmax, current_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
     utilization: list = [0 for _ in graph.loop_resources()]
@@ -684,7 +693,7 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mo
     if not first:
         optimizer.load_state_dict(torch.load(path+directory.models+"/adam_"+str(previous_run)+".pth"))
     print("Pre-training models with MAPPO (on several instances)...")
-    PPO_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
+    multi_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
 
 def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, debug_mode: bool, device: str, use_pre_train: bool = False, interactive: bool = True):
     """
@@ -695,11 +704,8 @@ def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, 
     shared_critic = shared_critic.to(device)
     for agent,_ in agents:
         agent = agent.to(device)
-    optimizer = torch.optim.Adam(
-        list(shared_critic.parameters()) + list(shared_embbeding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
-        lr=LEARNING_RATE)
     print("Fine-tuning models with MAPPO (on target instance)...")
-    PPO_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, id=id, size=size, interactive=interactive, debug_mode=debug_mode)
+    multi_stage_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, id=id, size=size, interactive=interactive, debug_mode=debug_mode)
 
 def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mode: bool, path: str):
     """
