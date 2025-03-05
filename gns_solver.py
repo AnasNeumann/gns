@@ -26,7 +26,7 @@ __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
 DEBUG_PRINT: callable = None
-LEARNING_RATE = 2e-4
+LEARNING_RATE = 1e-4
 OUTSOURCING = 0
 SCHEDULING = 1
 MATERIAL_USE = 2
@@ -549,8 +549,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
             parent_items=parent_items,
             w_makespan=alpha,
             device=device)
-    first_cmax = -1 * current_cmax * instance.w_makespan
     old_cmax = current_cmax
+    old_current_end = 0
     old_cost = 0
     terminate = False
     operations_to_test = []
@@ -586,10 +586,12 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 if outsourcing_choice == YES:
                     graph, _end_date, _local_price = outsource_item(graph, instance, item_id, t, enforce_time=False)
                     graph, current_cmax, current_cost = apply_outsourcing_to_direct_parent(instance, graph, current_cmax, current_cost, previous_operations, item_id, p, e, _end_date, _local_price)
+                    _r = reward(old_cmax, current_cmax, old_current_end, _end_date, old_cost, current_cost, a=instance.w_makespan, use_cost=True)
+                    old_current_end = _end_date
                 else:
                     graph, _shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e)
                     current_cmax = max(current_cmax, _shifted_project_estimated_end)
-                _r = reward(old_cmax, current_cmax, old_cost, current_cost, a=instance.w_makespan, use_cost=True)
+                    _r = reward(old_cmax, current_cmax, old_current_end, old_current_end, a=instance.w_makespan)
                 DEBUG_PRINT(f"\t @reward for 'outsourcing' decision: {_r}")
                 if train:
                     training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=_r)
@@ -604,7 +606,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, _operation_end)
                 current_cmax = max(current_cmax, _max_ancestors_end)
                 DEBUG_PRINT(f"End of scheduling at time {_operation_end} [NEW CMAX = {current_cmax} - COST = {current_cost}$]...")
-                _r = reward(old_cmax, current_cmax, a=instance.w_makespan)
+                _r = reward(old_cmax, current_cmax, old_current_end, _operation_end, a=instance.w_makespan)
+                old_current_end = _operation_end
                 DEBUG_PRINT(f"\t @reward for 'scheduling' decision: {_r}")
                 if train:
                     training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=_r)
@@ -615,8 +618,9 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 graph, required_types_of_materials, _max_ancestors_end = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t)
                 current_cmax = max(current_cmax, _max_ancestors_end)
-                _r = reward(old_cmax, current_cmax, a=instance.w_makespan)
+                _r = reward(old_cmax, current_cmax, old_current_end, t, a=instance.w_makespan)
                 DEBUG_PRINT(f"\t @reward for 'material use' decision: {_r}")
+                old_current_end = t
                 if train and need_reward:
                     training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=_r)
             old_cost = current_cost
