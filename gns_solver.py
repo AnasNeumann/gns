@@ -33,6 +33,7 @@ SCHEDULING = 1
 MATERIAL_USE = 2
 ACTIONS_NAMES = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
+SOLVING_REPETITIONS = 10
 GNN_CONF = {
     'resource_and_material_embedding_size': 16,
     'operation_and_item_embedding_size': 24,
@@ -105,7 +106,6 @@ def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInst
                             if graph.resource(res_id, 'available_time') <= current_time:
                                 sync_actions.append((operation_id, res_id))
                             else:
-                                DEBUG_PRINT(f"\t Sync impossible at time {current_time} for Operation {operation_id} -> ({p}, {o}) due to resource {res_id}/{r}...")
                                 sync_available = False
                                 break
                     if not sync_available:
@@ -115,7 +115,6 @@ def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInst
                         for m in res_by_types[rt]:
                             mat_id = graph.materials_i2g[m]
                             if instance.purchase_time[m] > current_time and graph.material(mat_id, 'remaining_init_quantity') < instance.quantity_needed[m][p][o]:
-                                DEBUG_PRINT(f"\t Sync impossible at time {current_time} for Operation {operation_id} -> ({p}, {o}) due to material {mat_id}/{m}...")
                                 sync_available = False
                                 break
                         if not sync_available:
@@ -155,7 +154,7 @@ def shift_one_operation(graph: GraphInstance, instance: Instance, p: int, o: int
     if shift <= 0:
         return graph, 0
     operation_id = graph.operations_i2g[p][o]
-    DEBUG_PRINT(f"\t\t >>> Operation ({p},{o}) shifted by {shift} time unit. It was time {graph.operation(operation_id, 'available_time')}->{graph.operation(operation_id, 'end_time')}...")
+    DEBUG_PRINT(f"\t\t >>> Operation ({p},{o}) shifted by {shift} time units...")
     graph.inc_operation(operation_id, [('available_time', shift), ('end_time', shift)])
     for r in instance.required_resources(p, o):
         if instance.finite_capacity[r]:
@@ -186,7 +185,7 @@ def shift_children_and_operations(graph: GraphInstance, instance: Instance, p: i
     max_child_end = 0
     for child in instance.get_children(p, e, direct=False):
         child_id = graph.items_i2g[p][child]
-        DEBUG_PRINT(f"\t >> Children item ({p},{child}) shifted by {shift} time unit (both P and NP operations). It was {graph.item(child_id, 'start_time')}->{graph.item(child_id, 'end_time')}...")
+        DEBUG_PRINT(f"\t >> Children item ({p},{child}) shifted by {shift} time unit (both P and NP operations)...")
         graph.inc_item(child_id, [
             ('start_time', shift),
             ('end_time', shift)])
@@ -214,7 +213,7 @@ def shift_ancestors_physical_operations(graph: GraphInstance, instance: Instance
             _shift = max(0, end_time_last_op-min_ancestor_physical_start)
             if _shift > 0:
                 ancestor_id = graph.items_i2g[p][parent]
-                DEBUG_PRINT(f"\t >> Parent item ({p},{parent}) of child ({p}, {e}) shifted by {_shift} time unit (only physical operations). It was {graph.item(ancestor_id, 'start_time')}->{graph.item(ancestor_id, 'end_time')}...")
+                DEBUG_PRINT(f"\t >> Parent item ({p},{parent}) of child ({p}, {e}) shifted by {_shift} time unit (only physical operations)...")
                 for o in instance.loop_item_operations(p, parent):
                     if not instance.is_design[p][o]:
                         graph, _ = shift_one_operation(graph, instance, p, o, _shift)
@@ -544,7 +543,7 @@ def reward(makespan_old: int, makespan_new: int, last_op_old: int, last_op_new: 
     else:
         return a * (big_steps * makespan_old - makespan_new + small_steps * (last_op_old - last_op_new))
 
-def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, debug_mode: bool):
+def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, debug_mode: bool, greedy: bool = False):
     graph, current_cmax, current_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
     utilization: list = [0 for _ in graph.loop_resources()]
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
@@ -608,7 +607,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             else:
                 with torch.no_grad():
                     probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
-                idx = policy(probs, greedy=True)
+                idx = policy(probs, greedy=greedy)
             if actions_type == OUTSOURCING: # Outsourcing action
                 item_id, outsourcing_choice = poss_actions[idx]
                 p, e = graph.items_g2i[item_id]
@@ -727,24 +726,35 @@ def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, 
     print("Fine-tuning models with MAPPO (on target instance)...")
     multi_stage_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, id=id, size=size, interactive=interactive, debug_mode=debug_mode)
 
-def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mode: bool, path: str):
+def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mode: bool, path: str, repetitions: int=1):
     """
         Solve the target instance (size, id) only using inference
     """
-    print(f"SOLVE TARGET INSTANCE {size}_{id}...")
     target_instance: Instance = load_instance(path+directory.instances+'/test/'+size+'/instance_'+id+'.pkl')
-    DEBUG_PRINT(target_instance.display())
     start_time = systime.time()
+    best_cmax = -1.0
+    best_cost = -1.0
+    best_obj = -1.0
     first = (_run_number<=1)
     agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
     for agent,_ in agents:
         agent = agent.to(device)
     shared_embbeding_stack = shared_embbeding_stack.to(device)
     shared_critic = shared_critic.to(device)
-    graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, trainable=[False for _ in agents], device=device, debug_mode=debug_mode)
+    for rep in range(repetitions):
+        print(f"SOLVING INSTANCE {size}_{id} (repetition {rep+1}/{repetitions})...")
+        graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, trainable=[False for _ in agents], device=device, debug_mode=debug_mode, greedy=(rep==0))
+        _obj = objective_value(current_cmax, current_cost, target_instance.w_makespan)/100
+        if best_obj < 0 or _obj < best_obj:
+            best_obj = _obj
+            best_cmax = current_cmax
+            best_cost = current_cost
     final_metrics = pd.DataFrame({
         'index': [target_instance.id],
-        'value': [objective_value(current_cmax, current_cost, target_instance.w_makespan)/100], 
+        'value': [best_obj],
+        'cmax': [best_cmax],
+        'cost': [best_cost],
+        'repetitions': [repetitions],
         'computing_time': [systime.time()-start_time],
         'device_used': [device]
     })
@@ -763,7 +773,7 @@ def solve_all_instances(run_number: int, device: str, debug_mode: bool, path: st
     instances: list[Instance] = load_training_dataset(path=path, train=False, debug_mode=debug_mode)
     for i in instances:
         if (i.size, i.id) not in [('s', 172)]:
-            solve_only_target(id=str(i.id), size=str(i.size), run_number=run_number, device=device, debug_mode=debug_mode, path=path)
+            solve_only_target(id=str(i.id), size=str(i.size), run_number=run_number, device=device, debug_mode=debug_mode, path=path, repetitions=SOLVING_REPETITIONS)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 GNS solver")
