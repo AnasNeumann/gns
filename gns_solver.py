@@ -40,8 +40,8 @@ GNN_CONF = {
     'embedding_hidden_channels': 128,
     'value_hidden_channels': 256,
     'actor_hidden_channels': 256}
-small_steps: float = 0.3
-big_steps: float = 0.7
+small_steps: float = 0.85
+big_steps: float = 0.15
 
 # =====================================================
 # =*= I. SEARCH FOR FEASIBLE ACTIONS =*=
@@ -584,6 +584,10 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
+            if (actions_type == OUTSOURCING) and not outsourcing_training_stage and len(poss_actions) > 1:
+                poss_actions = [ax for ax in poss_actions if ax[1] == YES]
+            if (actions_type == MATERIAL_USE) and not material_use_training_stage and len(poss_actions) > 1: 
+                poss_actions = poss_actions[:1]
             if train:
                 probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
                 idx = policy(probs, greedy=False)
@@ -610,9 +614,10 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 if outsourcing_choice == YES:
                     graph, _end_date, _local_price = outsource_item(graph, instance, item_id, t, enforce_time=False)
                     graph, current_cmax, current_cost = apply_outsourcing_to_direct_parent(instance, graph, current_cmax, current_cost, previous_operations, item_id, p, e, _end_date, _local_price)
+                    _max_end = max(old_current_end, _end_date)
                     if outsourcing_training_stage:
-                        training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(old_cmax, current_cmax, old_current_end, _end_date, old_cost, current_cost, a=instance.w_makespan, use_cost=True))
-                    old_current_end = _end_date
+                        training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(old_cmax, current_cmax, old_current_end, _max_end, old_cost, current_cost, a=instance.w_makespan, use_cost=True))    
+                    old_current_end = _max_end
                 else:
                     graph, _shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e)
                     current_cmax = max(current_cmax, _shifted_project_estimated_end)
@@ -629,9 +634,10 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, _operation_end)
                 current_cmax = max(current_cmax, _max_ancestors_end)
                 DEBUG_PRINT(f"End of scheduling at time {_operation_end} [NEW CMAX = {current_cmax} - COST = {current_cost}$]...")
+                _max_end = max(old_current_end, _operation_end)
                 if scheduling_training_stage:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(old_cmax, current_cmax, old_current_end, _operation_end, a=instance.w_makespan))
-                old_current_end = _operation_end
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(old_cmax, current_cmax, old_current_end, _max_end, a=instance.w_makespan))
+                old_current_end = _max_end
             else: # Material use action
                 operation_id, material_id = poss_actions[idx]
                 p, o = graph.operations_g2i[operation_id]
@@ -639,9 +645,10 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 graph, required_types_of_materials, _max_ancestors_end = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t)
                 current_cmax = max(current_cmax, _max_ancestors_end)
+                _max_end = max(old_current_end, t)
                 if material_use_training_stage and need_reward:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=reward(old_cmax, current_cmax, old_current_end, t, a=instance.w_makespan))
-                old_current_end = t
+                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=reward(old_cmax, current_cmax, old_current_end, _max_end, a=instance.w_makespan))
+                old_current_end = _max_end
             old_cost = current_cost
             old_cmax = current_cmax
         else: # No more possible action at time t
