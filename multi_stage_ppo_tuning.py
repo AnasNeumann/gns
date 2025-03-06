@@ -25,15 +25,13 @@ __license__ = "Apache 2.0 License"
 
 PROBLEM_SIZES = [['s', 'm'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
-    "validation_rate": 20,
-    "switch_batch": 10,
     "train_iterations": [2, 300],
     "opt_epochs": 3,
     "clip_ratio": 0.1,
     "policy_loss": 1.0,
-    "batch": 10,
+    "batch": 3,
     "value_loss": 0.5,
-    "entropy": 0.01,
+    "entropy": 0.05,
     "discount_factor": 1.0,
     "bias_variance_tradeoff": 1.0
 }
@@ -67,7 +65,7 @@ def scheduling_stage(target_instance : Instance, agents: list[(Module, str)], em
     _agent.train()
     losses = MAPPO_Losses(agent_names=[AGENTS[SCHEDULING]])
     _vloss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per batch of episodes)", ylabel="Value loss", title="Value loss", color="blue", show=interactive)
-    _scheduling_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per solving episode)", ylabel="Scheduling loss (policy)", title="Scheduling loss (policy)", color="green", show=interactive)
+    _scheduling_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per batch of episodes)", ylabel="Scheduling loss (policy)", title="Scheduling loss (policy)", color="green", show=interactive)
     _Cmax_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Makespan", title="Final Makespan by episode", color="red", show=interactive)
     batch_results: list[MultiAgent_OneInstance] = []
     for episode in range(iterations):
@@ -75,7 +73,7 @@ def scheduling_stage(target_instance : Instance, agents: list[(Module, str)], em
         loss, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,1,0], device=device, debug_mode=debug_mode)
         batch_results.append(loss)
         _Cmax_TRACKER.update(cmax)
-        if episode % batch_size == 0:
+        if (episode+1) % batch_size == 0:
             print(f"PPO time for optimization after episode: {episode+1}/{iterations}!")
             batch_result: MultiAgents_Batch = MultiAgents_Batch(
                     batch=batch_results,
@@ -128,7 +126,7 @@ def outsourcing_stage(target_instance : Instance, agents: list[(Module, str)], e
         _Cmax_TRACKER.update(cmax)
         _cost_TRACKER.update(cost)
         batch_results.append(loss)
-        if episode % batch_size == 0:
+        if (episode+1) % batch_size == 0:
             print(f"PPO time for optimization after episode: {episode+1}/{iterations}!")
             batch_result: MultiAgents_Batch = MultiAgents_Batch(
                     batch=batch_results,
@@ -189,7 +187,7 @@ def multi_agent_stage(target_instance : Instance, agents: list[(Module, str)], e
             _time_to_best = systime.time()-start_time
         _Cmax_TRACKER.update(cmax)
         _cost_TRACKER.update(cost)
-        if episode % batch_size == 0:
+        if (episode+1) % batch_size == 0:
             print(f"PPO time for optimization after episode: {episode+1}/{iterations}!")
             batch_result: MultiAgents_Batch = MultiAgents_Batch(
                     batch=batch_results,

@@ -30,7 +30,7 @@ PPO_CONF = {
     "clip_ratio": 0.2,
     "policy_loss": 1.0,
     "value_loss": 0.5,
-    "entropy": 0.01,
+    "entropy": 0.05,
     "discount_factor": 1.0,
     "bias_variance_tradeoff": 1.0,
     'validation': 10
