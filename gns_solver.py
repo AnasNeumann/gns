@@ -549,11 +549,11 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
     utilization: list = [0 for _ in graph.loop_resources()]
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     t: int = 0
-    alpha: Tensor = torch.tensor([instance.w_makespan], device=device)
     _agents_names: list[str] = []
     outsourcing_training_stage: bool = False
     scheduling_training_stage: bool = False
     material_use_training_stage: bool = False
+    alpha: Tensor = torch.tensor([instance.w_makespan], device=device)
     if train:
         if trainable[OUTSOURCING]:
             _agents_names.append(ACTIONS_NAMES[OUTSOURCING])
@@ -564,6 +564,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
         if trainable[MATERIAL_USE]:
             _agents_names.append(ACTIONS_NAMES[MATERIAL_USE])
             material_use_training_stage = True
+        alpha = alpha if outsourcing_training_stage else torch.tensor([1.0], device=device) 
         training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
             agent_names=_agents_names, 
             instance_id=instance.id,
@@ -585,7 +586,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
             if (actions_type == OUTSOURCING) and not outsourcing_training_stage and len(poss_actions) > 1:
-                poss_actions = [ax for ax in poss_actions if ax[1] == YES]
+                poss_actions = [ax for ax in poss_actions if ax[1] == NO]
             if (actions_type == MATERIAL_USE) and not material_use_training_stage and len(poss_actions) > 1: 
                 poss_actions = poss_actions[:1]
             if train:
