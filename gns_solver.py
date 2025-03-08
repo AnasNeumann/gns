@@ -41,8 +41,8 @@ GNN_CONF = {
     'embedding_hidden_channels': 64,
     'value_hidden_channels': 128,
     'actor_hidden_channels': 128}
-small_steps: float = 0.85
-big_steps: float = 0.15
+small_steps: float = 0.75
+big_steps: float = 0.25
 
 # =====================================================
 # =*= I. SEARCH FOR FEASIBLE ACTIONS =*=
