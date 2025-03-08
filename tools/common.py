@@ -2,6 +2,7 @@ import pickle
 import os
 import resource
 from typing import Union, Any, Dict
+from torch.nn import Module
 
 # =====================================================================
 # =*= COMMON TOOLS (objects and functions) USED ACCROSS THE PROJECT =*=
@@ -76,3 +77,21 @@ def search_object_by_id(objects: list[generic_object], id: int):
         if obj['id'] == id:
             return obj
     return None
+
+def freeze(agent: Module):
+    for param in agent.parameters():
+        param.requires_grad = False
+
+def unfreeze(agent: Module):
+    agent.train()
+    for param in agent.parameters():
+        param.requires_grad = True
+
+def freeze_several(agents: list[(Module, str)], to_freeze: list[str]):
+    for agent, name in agents:
+        if name in to_freeze:
+            freeze(agent)
+
+def unfreeze_all(agents: list[(Module, str)]):
+    for agent, _ in agents:
+        unfreeze(agent)

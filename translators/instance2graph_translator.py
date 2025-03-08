@@ -32,19 +32,16 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
         parents_physical_time += apt
     item_id = graph.add_item(p, e, ItemFeatures(
         head = head,
-        external = i.external[p][e],
         outsourced = NOT_YET if i.external[p][e] else NO,
         outsourcing_cost = i.external_cost[p][e],
         outsourcing_time = i.outsourcing_time[p][e],
-        remaining_physical_time = physical_load,
-        remaining_design_time = design_load,
+        remaining_time = physical_load + design_load,
         parents = len(ancestors),
         children = len(childrens),
         parents_physical_time = parents_physical_time,
         children_time = children_time,
         start_time = estimated_start,
         end_time = -1,
-        init_time = estimated_start,
         is_possible = YES if head else NOT_YET))
     if i.external[p][e]:
         graph.oustourcable_items += 1
@@ -73,18 +70,14 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
                 must_be_outsourced = True
         _end_time = op_start+operation_mean_time
         op_id = graph.add_operation(p, o, OperationFeatures(
-            design = i.is_design[p][o],
             sync = i.simultaneous[p][o],
-            timescale_hours = i.in_hours[p][o],
-            timescale_days = i.in_days[p][o],
-            direct_successors = succs,
-            total_successors = childrens_physical_operations + succs + (childrens_design_operations if i.is_design[p][o] else 0),
+            large_timescale = i.in_days[p][o],
+            successors = childrens_physical_operations + succs + (childrens_design_operations if i.is_design[p][o] else 0),
             remaining_time = operation_load,
             remaining_resources = required_res,
             remaining_materials = required_mat,
             available_time = op_start,
             end_time = _end_time,
-            init_time= op_start,
             is_possible = YES if (head and (o == start)) else NOT_YET))
         if not i.is_design[p][o]:
             physical_ops_ids.append(op_id)
@@ -96,18 +89,15 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
                     _ext =  i.execution_time[r][p][o]
                     graph.add_need_for_resources(op_id, graph.resources_i2g[r], NeedForResourceFeatures(
                         status = NOT_YET,
-                        basic_processing_time = _ext,
                         current_processing_time = _ext,
                         start_time = op_start,
-                        end_time = op_start+_ext,
-                        init_time = op_start))
+                        end_time = op_start+_ext))
                     if not i.is_design[p][o]:
                         pr_ids.append((op_id, graph.resources_i2g[r]))
                 else:
                     graph.add_need_for_materials(op_id, graph.materials_i2g[r], NeedForMaterialFeatures(
                         status = NOT_YET,
                         execution_time = op_start,
-                        init_time= op_start,
                         quantity_needed = i.quantity_needed[r][p][o]))
                     if not i.is_design[p][o]:
                         pm_ids.append((op_id, graph.materials_i2g[r]))
@@ -123,11 +113,11 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
     if estimated_childrend_end > _base_design_end:
         _shift = estimated_childrend_end - _base_design_end
         for op_id in physical_ops_ids:
-            graph.inc_operation(op_id, [('init_time', _shift), ('available_time', _shift), ('end_time', _shift)])
+            graph.inc_operation(op_id, [('available_time', _shift), ('end_time', _shift)])
         for op_id, r_id in pr_ids:
-            graph.inc_need_for_resource(op_id, r_id, [('init_time', _shift), ('start_time', _shift), ('end_time', _shift)])
+            graph.inc_need_for_resource(op_id, r_id, [('start_time', _shift), ('end_time', _shift)])
         for op_id, m_id in pm_ids:
-            graph.inc_need_for_material(op_id, m_id, [('init_time', _shift), ('execution_time', _shift)])
+            graph.inc_need_for_material(op_id, m_id, [('execution_time', _shift)])
     external_end = estimated_start + i.outsourcing_time[p][e]
     internal_end = estimated_childrend_end + physical_mean_time
     estimated_end = external_end if must_be_outsourced else min(external_end, internal_end) if i.external[p][e] else internal_end
@@ -185,7 +175,6 @@ def translate(i: Instance, device: str):
                 res_id = graph.add_resource(r, i.nb_settings, ResourceFeatures(
                     utilization_ratio = 0,
                     available_time = 0,
-                    executed_operations = 0,
                     remaining_operations = len(operations),
                     similar_resources = len(resources)))
                 for other_id in res_idx:

@@ -1,6 +1,6 @@
 import torch
 from torch_geometric.data.storage import EdgeStorage
-from torch.nn import Sequential, Linear, ELU, Tanh, Parameter, LeakyReLU, Module, ModuleList
+from torch.nn import Sequential, Linear, ReLU, Tanh, Parameter, LeakyReLU, Module, ModuleList
 import torch.nn.functional as F
 from torch import Tensor
 from .graph import FeatureConfiguration, State
@@ -12,8 +12,6 @@ from torch_geometric.utils import scatter
 __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
-
-STATE_VECTOR_SIZE = {"decoded": 10, "hidden_1": 32, "hidden_2": 16, "encoded": 8}
 
 class MaterialEmbeddingLayer(Module):
     def __init__(self, material_dimension: int, operation_dimension: int, embedding_dimension: int):
@@ -107,29 +105,25 @@ class ItemEmbeddingLayer(Module):
         first_dimension = hidden_channels
         second_dimension = int(hidden_channels/2)
         self.mlp_combined = Sequential(
-            Linear(4 * out_channels, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
+            Linear(4 * out_channels, first_dimension), ReLU(),
+            Linear(first_dimension, second_dimension), ReLU(),
             Linear(second_dimension, out_channels)
         )
         self.mlp_operations = Sequential(
-            Linear(operation_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
-            Linear(second_dimension, out_channels)
+            Linear(operation_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, out_channels)
         )
         self.mlp_parent = Sequential(
-            Linear(item_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
-            Linear(second_dimension, out_channels)
+            Linear(item_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, out_channels)
         )
         self.mlp_children = Sequential(
-            Linear(item_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
-            Linear(second_dimension, out_channels)
+            Linear(item_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, out_channels)
         )
         self.mlp_self = Sequential(
-            Linear(item_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
-            Linear(second_dimension, out_channels)
+            Linear(item_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, out_channels)
         )
 
     def forward(self, items: Tensor, parents: Tensor, operations: Tensor, item_assembly: EdgeStorage, operation_assembly: EdgeStorage):
@@ -157,39 +151,33 @@ class OperationEmbeddingLayer(Module):
         first_dimension = hidden_channels
         second_dimension = int(hidden_channels/2)
         self.mlp_combined = Sequential(
-            Linear(4 * out_channels + resources_dimension + material_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
+            Linear(4 * out_channels + resources_dimension + material_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, second_dimension), ReLU(),
             Linear(second_dimension, out_channels)
         )
         self.mlp_items = Sequential(
-            Linear(item_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
-            Linear(second_dimension, out_channels)
+            Linear(item_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, out_channels)
         )
         self.mlp_predecessors = Sequential(
-            Linear(operation_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
-            Linear(second_dimension, out_channels)
+            Linear(operation_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, out_channels)
         )
         self.mlp_successors = Sequential(
-            Linear(operation_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
-            Linear(second_dimension, out_channels)
+            Linear(operation_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, out_channels)
         )
         self.mlp_resources = Sequential(
-            Linear(resources_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
-            Linear(second_dimension, resources_dimension)
+            Linear(resources_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, resources_dimension)
         )
         self.mlp_materials = Sequential(
-            Linear(material_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
-            Linear(second_dimension, material_dimension)
+            Linear(material_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, material_dimension)
         )
         self.mlp_self = Sequential(
-            Linear(operation_dimension, first_dimension), ELU(),
-            Linear(first_dimension, second_dimension), ELU(),
-            Linear(second_dimension, out_channels)
+            Linear(operation_dimension, first_dimension), ReLU(),
+            Linear(first_dimension, out_channels)
         )
 
     def forward(self, operations: Tensor, items: Tensor, related_items: Tensor, materials: Tensor, resources: Tensor, need_for_resources: EdgeStorage, need_for_materials: EdgeStorage, precedences: EdgeStorage):

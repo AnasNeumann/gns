@@ -13,7 +13,7 @@ from torch import Tensor
 from torch.nn import Module
 from translators.instance2graph_translator import translate
 from translators.graph2solution_translator import translate_solution
-from debug.debug_gns import check_completeness, debug_printer
+from debug.debug_gns import debug_printer
 from multi_stage_pre_training import multi_stage_pre_train, load_training_dataset
 from model.agent import MultiAgent_OneInstance
 import pickle
@@ -35,12 +35,12 @@ ACTIONS_NAMES = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
 SOLVING_REPETITIONS = 10
 GNN_CONF = {
-    'resource_and_material_embedding_size': 16,
-    'operation_and_item_embedding_size': 24,
+    'resource_and_material_embedding_size': 12,
+    'operation_and_item_embedding_size': 12,
     'nb_layers': 2,
-    'embedding_hidden_channels': 128,
-    'value_hidden_channels': 256,
-    'actor_hidden_channels': 256}
+    'embedding_hidden_channels': 64,
+    'value_hidden_channels': 128,
+    'actor_hidden_channels': 128}
 small_steps: float = 0.85
 big_steps: float = 0.15
 
@@ -50,12 +50,12 @@ big_steps: float = 0.15
 
 def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item_id: int):
     actions = []
-    external = graph.item(item_id, 'external')
+    p, e = graph.items_g2i[item_id]
+    external: bool = instance.external[p][e]
     decision_made = graph.item(item_id, 'outsourced')
     available = graph.item(item_id, 'is_possible')
     if available==YES:
-        if external==YES and decision_made==NOT_YET:
-            p, e = graph.items_g2i[item_id]
+        if external and decision_made==NOT_YET:
             need_to_be_outsourced = False
             for o in instance.loop_item_operations(p,e):
                 for rt in instance.required_rt(p, o):
@@ -68,7 +68,7 @@ def reccursive_outourcing_actions(instance: Instance, graph: GraphInstance, item
                 actions.append((item_id, YES))
             else:
                 actions.extend([(item_id, YES), (item_id, NO)])
-        elif external==NO or decision_made==NO:
+        elif not external or decision_made==NO:
             for child in graph.get_direct_children(instance, item_id):
                 actions.extend(reccursive_outourcing_actions(instance, graph, child))
     return actions
@@ -89,7 +89,7 @@ def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInst
         item_id = graph.items_i2g[p][e]
         timescale = 60*instance.H if instance.in_days[p][o] else 60 if instance.in_hours[p][o] else 1
         if graph.item(item_id, 'is_possible')==YES \
-                and (graph.item(item_id, 'external')==NO or graph.item(item_id, 'outsourced')==NO) \
+                and graph.item(item_id, 'outsourced')==NO \
                 and graph.operation(operation_id, 'is_possible') == YES \
                 and graph.operation(operation_id, 'available_time') <= current_time \
                 and current_time % timescale == 0:
@@ -250,12 +250,10 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id: int, t: in
     graph.update_item(item_id, [
         ('outsourced', YES),
         ('is_possible', YES),
-        ('remaining_physical_time', 0),
-        ('remaining_design_time', 0),
+        ('remaining_time', 0),
         ('children_time', 0),
         ('start_time', outsourcing_start_time),
         ('end_time', end_date)])
-    graph.executed_items += 1
     graph.oustourced_items += 1
     for o in instance.loop_item_operations(p,e):
         op_id = graph.operations_i2g[p][o]
@@ -354,7 +352,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     rt = instance.get_resource_familly(r)
     estimated_processing_time = instance.operation_resource_time(p, o, rt, max_load=True)
     item_id = graph.items_i2g[p][e]
-    graph.inc_resource(resource_id, [('executed_operations', 1), ('remaining_operations', -1)])
+    graph.inc_resource(resource_id, [('remaining_operations', -1)])
     graph.update_resource(resource_id, [('available_time', operation_end)])
     graph.update_need_for_resource(operation_id, resource_id, [
         ('status', YES),
@@ -379,14 +377,11 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     graph, _max_next_operation_end = shift_next_operations(graph, instance, p, e, o, shift)
     _end_of_item = max(_max_next_operation_end, operation_end)
     graph.update_item(item_id, [('start_time', current_time)], minn=True)
+    graph.inc_item(item_id, [('remaining_time', -estimated_processing_time)])
     if instance.is_design[p][o]:
-        graph.inc_item(item_id, [('remaining_design_time', -estimated_processing_time)])
         graph, _max_end_of_children = shift_children_and_operations(graph, instance, p, e, shift)
         _end_of_item = max(_end_of_item, _max_end_of_children)
     else:
-        graph.inc_item(item_id, [('remaining_physical_time', -estimated_processing_time)])
-        if graph.item(item_id, 'remaining_physical_time')<= 0:
-            graph.executed_items += 1
         for child in instance.get_children(p, e, direct=False):
             graph.inc_item(graph.items_i2g[p][child], [('parents_physical_time', -estimated_processing_time)])
     graph.update_item(item_id, [('end_time', _end_of_item)], maxx=True)
@@ -482,10 +477,11 @@ def policy(probabilities: Tensor, greedy: bool=True):
 def update_processing_time(instance: Instance, graph: GraphInstance, op_id: int, res_id: int):
     p, o = graph.operations_g2i[op_id]
     r = graph.resources_g2i[res_id]
+    basic_processing_time = instance.execution_time[r][p][o]
     op_setup_time = 0 if (instance.get_operation_type(p, o) == graph.current_operation_type[res_id] or graph.current_operation_type[res_id]<0) else instance.operation_setup[r]
     for d in range(instance.nb_settings):
         op_setup_time += 0 if (graph.current_design_value[res_id][d] == instance.design_value[p][o][d] or graph.current_design_value[res_id][d]<0) else instance.design_setup[r][d] 
-    return graph.need_for_resource(op_id, res_id, 'basic_processing_time') + op_setup_time
+    return basic_processing_time + op_setup_time
 
 def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
     scale = 60*instance.H if instance.in_days[p][o] else 60 if instance.in_hours[p][o] else 1
@@ -532,21 +528,16 @@ def manage_queue_of_possible_actions(instance: Instance, graph: GraphInstance, u
         DEBUG_PRINT(f"New current time t={t}...")
         return graph, utilization, t, False
     else:
-        if debug_mode:
-            DEBUG_PRINT("End of solving stage!")
-            check_completeness(graph, DEBUG_PRINT)
         return graph, utilization, t, True
 
 def reward(init_cmax: int, init_cost: int, makespan_old: int, makespan_new: int, last_op_old: int, last_op_new: int, cost_old: int=-1, cost_new: int=-1, a: float=-1, use_cost: bool=False):
     """
         Compute the reward for each decision
     """
-    _r = None
     if use_cost:
-        _r = a * (big_steps * (makespan_old - makespan_new) + small_steps * (last_op_old - last_op_new)) + (1-a) * (cost_old - cost_new)
+        return a * (big_steps * (makespan_old - makespan_new) + small_steps * (last_op_old - last_op_new)) + (1-a) * (cost_old - cost_new)
     else:
-        _r = a * (big_steps * makespan_old - makespan_new + small_steps * (last_op_old - last_op_new))
-    return _r / (a*init_cmax + (1-a)*init_cost)
+        return a * (big_steps * makespan_old - makespan_new + small_steps * (last_op_old - last_op_new))
 
 def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, debug_mode: bool, greedy: bool = False):
     graph, current_cmax, current_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
