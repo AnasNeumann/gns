@@ -5,9 +5,9 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-small_steps: float = 0.1
-big_steps: float = 0.3
-final_value: float = 0.6
+small_steps: float = 0.05
+big_steps: float = 0.25
+final_value: float = 0.7
 standardization: float = 1.0
 
 class Reward:
