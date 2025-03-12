@@ -17,6 +17,7 @@ from multi_stage_pre_training import multi_stage_pre_train, load_training_datase
 from model.agent import MultiAgent_OneInstance
 import pickle
 from multi_stage_ppo_tuning import multi_stage_fine_tuning
+from model.reward import Reward
 
 # =====================================================
 # =*= 1st MAIN FILE OF THE PROJECT: GNS SOLVER =*=
@@ -40,8 +41,6 @@ GNN_CONF = {
     'embedding_hidden_channels': 64,
     'value_hidden_channels': 128,
     'actor_hidden_channels': 128}
-small_steps: float = 0.2
-big_steps: float = 0.8
 
 # =====================================================
 # =*= I. SEARCH FOR FEASIBLE ACTIONS =*=
@@ -529,16 +528,6 @@ def manage_queue_of_possible_actions(instance: Instance, graph: GraphInstance, u
     else:
         return graph, utilization, t, True
 
-def reward(init_cmax: int, init_cost: int, makespan_old: int, makespan_new: int, last_op_old: int, last_op_new: int, cost_old: int=-1, cost_new: int=-1, a: float=-1, use_cost: bool=False):
-    """
-        Compute the reward for each decision
-    """
-    _d: float = 0.05*(a*init_cmax + (1-a)*init_cost)
-    if use_cost:
-        return (a * (big_steps * (makespan_old - makespan_new) + small_steps * (last_op_old - last_op_new)) + (1-a) * (cost_old - cost_new))/_d
-    else:
-        return (a * (big_steps * makespan_old - makespan_new + small_steps * (last_op_old - last_op_new)))/_d
-
 def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, debug_mode: bool, greedy: bool = False):
     graph, current_cmax, current_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
     utilization: list = [0 for _ in graph.loop_resources()]
@@ -559,7 +548,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
         if trainable[MATERIAL_USE]:
             _agents_names.append(ACTIONS_NAMES[MATERIAL_USE])
             material_use_training_stage = True
-        alpha = alpha if outsourcing_training_stage else torch.tensor([1.0], device=device) 
+        alpha = alpha if outsourcing_training_stage else torch.tensor([1.0], device=device)
+        rewards: list[Reward] = []
         training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
             agent_names=_agents_names, 
             instance_id=instance.id,
@@ -614,13 +604,33 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                     graph, current_cmax, current_cost = apply_outsourcing_to_direct_parent(instance, graph, current_cmax, current_cost, previous_operations, item_id, p, e, _end_date, _local_price)
                     _max_end = max(old_current_end, _end_date)
                     if outsourcing_training_stage:
-                        training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(lb_cmax, lb_cost, old_cmax, current_cmax, old_current_end, _max_end, old_cost, current_cost, a=instance.w_makespan, use_cost=True))    
+                        rewards.append(Reward(agent_name=ACTIONS_NAMES[OUTSOURCING], 
+                                              init_cost=lb_cost, 
+                                              init_cmax=lb_cmax, 
+                                              makespan_old=old_cmax, 
+                                              makespan_new=current_cmax, 
+                                              last_op_old=old_current_end, 
+                                              last_op_new=_max_end, 
+                                              cost_old=old_cost, 
+                                              cost_new=current_cost, 
+                                              a=instance.w_makespan, 
+                                              use_cost=True))
                     old_current_end = _max_end
                 else:
                     graph, _shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e)
                     current_cmax = max(current_cmax, _shifted_project_estimated_end)
                     if outsourcing_training_stage:
-                        training_results.add_reward(agent_name=ACTIONS_NAMES[OUTSOURCING], reward=reward(lb_cmax, lb_cost, old_cmax, current_cmax, old_current_end, old_current_end, a=instance.w_makespan))
+                        rewards.append(Reward(agent_name=ACTIONS_NAMES[OUTSOURCING], 
+                                              init_cost=lb_cost, 
+                                              init_cmax=lb_cmax, 
+                                              makespan_old=old_cmax, 
+                                              makespan_new=current_cmax, 
+                                              last_op_old=old_current_end, 
+                                              last_op_new=old_current_end, 
+                                              cost_old=old_cost, 
+                                              cost_new=current_cost, 
+                                              a=instance.w_makespan, 
+                                              use_cost=True))
             elif actions_type == SCHEDULING: # scheduling action
                 operation_id, resource_id = poss_actions[idx]    
                 p, o = graph.operations_g2i[operation_id]
@@ -634,7 +644,15 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 DEBUG_PRINT(f"End of scheduling at time {_operation_end} [NEW CMAX = {current_cmax} - COST = {current_cost}$]...")
                 _max_end = max(old_current_end, _operation_end)
                 if scheduling_training_stage:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[SCHEDULING], reward=reward(lb_cmax, lb_cost, old_cmax, current_cmax, old_current_end, _max_end, a=instance.w_makespan))
+                    rewards.append(Reward(agent_name=ACTIONS_NAMES[SCHEDULING], 
+                                              init_cost=lb_cost, 
+                                              init_cmax=lb_cmax, 
+                                              makespan_old=old_cmax, 
+                                              makespan_new=current_cmax, 
+                                              last_op_old=old_current_end, 
+                                              last_op_new=_max_end,  
+                                              a=instance.w_makespan, 
+                                              use_cost=False))
                 old_current_end = _max_end
             else: # Material use action
                 operation_id, material_id = poss_actions[idx]
@@ -645,13 +663,23 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 current_cmax = max(current_cmax, _max_ancestors_end)
                 _max_end = max(old_current_end, t)
                 if material_use_training_stage and need_reward:
-                    training_results.add_reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], reward=reward(lb_cmax, lb_cost, old_cmax, current_cmax, old_current_end, _max_end, a=instance.w_makespan))
+                    rewards.append(Reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], 
+                                              init_cost=lb_cost, 
+                                              init_cmax=lb_cmax, 
+                                              makespan_old=old_cmax, 
+                                              makespan_new=current_cmax, 
+                                              last_op_old=old_current_end, 
+                                              last_op_new=_max_end,  
+                                              a=instance.w_makespan, 
+                                              use_cost=False))
                 old_current_end = _max_end
             old_cost = current_cost
             old_cmax = current_cmax
         else: # No more possible action at time t
             graph, utilization, t, terminate = manage_queue_of_possible_actions(instance, graph, utilization, t, debug_mode)
     if train:
+        for reward in rewards:
+            training_results.add_reward(agent_name=reward.agent_name, reward=reward.compute(final_cost=current_cost, final_makespan=current_cmax))  
         return training_results, graph, current_cmax, current_cost
     else:
         return graph, current_cmax, current_cost
