@@ -8,7 +8,7 @@ __license__ = "Apache 2.0 License"
 small_steps: float = 0.1
 big_steps: float = 0.3
 final_value: float = 0.6
-standardization: float = 0.2
+standardization: float = 1.0
 
 class Reward:
     def __init__(self, agent_name: str, init_cost: int, init_cmax: int, makespan_old: int, makespan_new: int, last_op_old: int, last_op_new: int, cost_old: int=-1, cost_new: int=-1, a: float=-1.0, use_cost: bool=False):
