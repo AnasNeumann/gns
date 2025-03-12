@@ -528,7 +528,7 @@ def manage_queue_of_possible_actions(instance: Instance, graph: GraphInstance, u
     else:
         return graph, utilization, t, True
 
-def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, debug_mode: bool, greedy: bool = False):
+def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, debug_mode: bool, greedy: bool = False, fixed_alpha: float = -1):
     graph, current_cmax, current_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
     utilization: list = [0 for _ in graph.loop_resources()]
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
@@ -537,7 +537,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
     outsourcing_training_stage: bool = False
     scheduling_training_stage: bool = False
     material_use_training_stage: bool = False
-    alpha: Tensor = torch.tensor([instance.w_makespan], device=device)
+    alpha: Tensor = torch.tensor([instance.w_makespan], device=device) if fixed_alpha < 0 else torch.tensor([fixed_alpha], device=device)
     if train:
         if trainable[OUTSOURCING]:
             _agents_names.append(ACTIONS_NAMES[OUTSOURCING])

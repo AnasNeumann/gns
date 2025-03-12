@@ -69,14 +69,14 @@ def load_training_dataset(debug_mode: bool, path: str, train: bool = True):
     print(f"End of loading {len(instances)} instances!")
     return instances
 
-def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance], train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, debug: bool):
+def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance], train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, debug: bool, fixed_alpha: float = -1):
     """
         Train or validate on a batch of instances
     """
     instances_results: list[MultiAgent_OneInstance] = []
     for instance in batch:
         print(f"\t start solving instance: {instance.id}...")
-        r,_,_,_ = solve_function(instance=instance, agents=agents, train=True, trainable=[True for _ in agents], device=device, debug_mode=debug)
+        r,_,_,_ = solve_function(instance=instance, agents=agents, train=True, trainable=[True for _ in agents], device=device, debug_mode=debug, fixed_alpha=fixed_alpha)
         instances_results.append(r)
     batch_result: MultiAgents_Batch = MultiAgents_Batch(
         batch=instances_results, 
@@ -125,7 +125,7 @@ def scheduling_stage(agents: list[(Module, str)], embedding_stack: Module, share
         if iteration % PPO_CONF['switch_batch'] == 0:
             debug_print(f"\t time to sample new batch of size {batch_size}...")
             current_batch: list[Instance] = random.sample(train_data, batch_size)
-        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=optimizer, solve_function=solve_function, device=device, debug=debug_mode)
+        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=optimizer, solve_function=solve_function, device=device, debug=debug_mode, fixed_alpha=1.0)
         if iteration % PPO_CONF['validation_rate'] == 0:
             debug_print("\t time to validate the loss...")
             for agent,_ in agents:
@@ -133,7 +133,7 @@ def scheduling_stage(agents: list[(Module, str)], embedding_stack: Module, share
             embedding_stack.eval()
             shared_critic.eval()
             with torch.no_grad():
-                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode)
+                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode, fixed_alpha=1.0)
                 vlosses.add(current_vloss)
             for agent,_ in agents:
                 agent.train()
@@ -169,7 +169,7 @@ def material_use_stage(agents: list[(Module, str)], embedding_stack: Module, sha
         if iteration % PPO_CONF['switch_batch'] == 0:
             debug_print(f"\t time to sample new batch of size {batch_size}...")
             current_batch: list[Instance] = random.sample(train_data, batch_size)
-        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=optimizer, solve_function=solve_function, device=device, debug=debug_mode)
+        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=optimizer, solve_function=solve_function, device=device, debug=debug_mode, fixed_alpha=1.0)
         if iteration % PPO_CONF['validation_rate'] == 0:
             debug_print("\t time to validate the loss...")
             for agent,_ in agents:
@@ -177,7 +177,7 @@ def material_use_stage(agents: list[(Module, str)], embedding_stack: Module, sha
             embedding_stack.eval()
             shared_critic.eval()
             with torch.no_grad():
-                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode)
+                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode, fixed_alpha=1.0)
                 vlosses.add(current_vloss)
             for agent,_ in agents:
                 agent.train()

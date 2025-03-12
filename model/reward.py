@@ -29,7 +29,9 @@ class Reward:
             Compute the final reward
         """
         _d: float = standardization*(self.a*self.init_cmax + (1-self.a)*self.init_cost)
-        makespan_part: float = big_steps * (self.makespan_old - self.makespan_new) + small_steps * (self.last_op_old - self.last_op_new) + final_value * final_makespan
+        makespan_part: float = big_steps * (self.makespan_old - self.makespan_new) \
+            + small_steps * (self.last_op_old - self.last_op_new) \
+            + final_value * final_makespan
         if self.use_cost:
             cost_part: float = (big_steps+small_steps) * (self.cost_old - self.cost_new) + final_value * final_cost
             return (self.a*makespan_part + (1-self.a)*cost_part)/_d

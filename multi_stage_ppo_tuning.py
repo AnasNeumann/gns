@@ -60,7 +60,7 @@ def scheduling_stage(target_instance : Instance, agents: list[(Module, str)], so
     replay_memory: list[MultiAgent_OneInstance] = []
     for episode in range(iterations):
         print(f"PPO solving episode: {episode+1}/{iterations}...")
-        transitions, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,1,0], device=device, debug_mode=debug_mode)
+        transitions, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,1,0], device=device, debug_mode=debug_mode, fixed_alpha=1.0)
         replay_memory.append(transitions)
         _Cmax_TRACKER.update(cmax)
         if (episode+1) % batch_size == 0:
@@ -103,7 +103,7 @@ def material_use_stage(target_instance : Instance, agents: list[(Module, str)], 
     replay_memory: list[MultiAgent_OneInstance] = []
     for episode in range(iterations):
         print(f"PPO solving episode: {episode+1}/{iterations}...")
-        transitions, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,0,1], device=device, debug_mode=debug_mode)
+        transitions, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,0,1], device=device, debug_mode=debug_mode, fixed_alpha=1.0)
         replay_memory.append(transitions)
         _Cmax_TRACKER.update(cmax)
         if (episode+1) % batch_size == 0:
