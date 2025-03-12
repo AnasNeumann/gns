@@ -125,8 +125,8 @@ def scheduling_stage(train_data: list[Instance], val_data: list[Instance], agent
                 _scheduling_loss_TRACKER.update(current_vloss.get(AGENTS[SCHEDULING]).policy_loss)
             agents[SCHEDULING][AGENT].train()
     complete_path = path + directory.models
-    _vloss_TRACKER.save(complete_path+'/'+str(1)+'_value_loss')
-    _scheduling_loss_TRACKER.save(complete_path+'/'+str(1)+'_scheduling_loss')
+    _vloss_TRACKER.save(complete_path+'/stage_'+str(1)+'_value_loss')
+    _scheduling_loss_TRACKER.save(complete_path+'/stage_'+str(1)+'_scheduling_loss')
     with open(complete_path+'/validation_'+str(1)+'.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
     save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=scheduling_optimizer, run_number=1, complete_path=complete_path)
@@ -156,8 +156,8 @@ def material_use_stage(train_data: list[Instance], val_data: list[Instance], age
                 _material_loss_TRACKER.update(current_vloss.get(AGENTS[MATERIAL_USE]).policy_loss)
             agents[MATERIAL_USE][AGENT].train()
     complete_path = path + directory.models
-    _vloss_TRACKER.save(complete_path+'/'+str(2)+'_value_loss')
-    _material_loss_TRACKER.save(complete_path+'/'+str(2)+'_material_loss')
+    _vloss_TRACKER.save(complete_path+'/stage_'+str(2)+'_value_loss')
+    _material_loss_TRACKER.save(complete_path+'/stage_'+str(2)+'_material_loss')
     with open(complete_path+'/validation_'+str(2)+'.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
     save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=material_optimizer, run_number=2, complete_path=complete_path)
@@ -188,8 +188,8 @@ def outsourcing_stage(train_data: list[Instance], val_data: list[Instance], agen
             agents[OUTSOURCING][AGENT].train()
     complete_path = path + directory.models
     _run: int = 2 + substage
-    _vloss_TRACKER.save(complete_path+'/'+str(_run)+'_value_loss')
-    _outsourcing_loss_TRACKER.save(complete_path+'/'+str(_run)+'_outsourcing_loss')
+    _vloss_TRACKER.save(complete_path+'/stage_'+str(_run)+'_value_loss')
+    _outsourcing_loss_TRACKER.save(complete_path+'/stage_'+str(_run)+'_outsourcing_loss')
     with open(complete_path+'/validation_'+str(_run)+'.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
     save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=outsourcing_optimizer, run_number=_run, complete_path=complete_path)
