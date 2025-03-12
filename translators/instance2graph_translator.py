@@ -141,12 +141,14 @@ def build_precedence(i: Instance, graph: GraphInstance):
                 for pred in preds:
                     pred_id = graph.operations_i2g[p][pred]
                     graph.add_precedence(pred_id, o_id)
-                for pld in parent_last_design:
-                    pred_id = graph.operations_i2g[p][pld]
-                    graph.add_precedence(pred_id, o_id)
-                for pfp in parent_first_physical:
-                    succ_id = graph.operations_i2g[p][pfp]
-                    graph.add_precedence(o_id, succ_id)
+                if o == start:
+                    for pld in parent_last_design:
+                        pred_id = graph.operations_i2g[p][pld]
+                        graph.add_precedence(pred_id, o_id)
+                if o == (end-1):
+                    for pfp in parent_first_physical:
+                        succ_id = graph.operations_i2g[p][pfp]
+                        graph.add_precedence(o_id, succ_id)
     return graph
 
 def discover_levels(i: Instance, p: int, e: int):

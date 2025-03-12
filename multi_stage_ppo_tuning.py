@@ -5,7 +5,6 @@ from tools.common import directory
 import torch
 torch.autograd.set_detect_anomaly(True)
 import pandas as pd
-from torch import Tensor
 from torch.nn import Module
 from torch.optim import Optimizer
 from typing import Callable
@@ -23,9 +22,8 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-PROBLEM_SIZES = [['s', 'm'], ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']]
 PPO_CONF = {
-    "train_iterations": [[2,2,2,2,2], [300, 150, 150, 150, 300]],
+    "train_iterations": [300, 150, 150, 150, 300],
     "opt_epochs": 3,
     "clip_ratio": 0.1,
     "policy_loss": 1.0,
@@ -41,8 +39,6 @@ AGENT = 0
 OUTSOURCING = 0
 SCHEDULING = 1
 MATERIAL_USE = 2
-small_steps: float = 0.3
-big_steps: float = 0.7
 
 def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Optimizer, run_number:int, complete_path: str):
     index = str(run_number)
@@ -251,7 +247,7 @@ def multi_stage_fine_tuning(agents: list[(Module, str)], embedding_stack: Module
     """
         Multi-stage PPO function to fine-tune agents on the target instance
     """
-    _itrs: int = PPO_CONF['train_iterations'][0 if debug_mode else 1]
+    _itrs: int = PPO_CONF['train_iterations']
     _epochs: int = PPO_CONF['opt_epochs']
     _batch_size: int = PPO_CONF['batch']
     _instance: Instance = load_instance(path+directory.instances+'/test/'+size+'/instance_'+id+'.pkl')

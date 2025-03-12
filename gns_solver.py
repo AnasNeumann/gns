@@ -8,7 +8,6 @@ import torch
 torch.autograd.set_detect_anomaly(True)
 import pandas as pd
 import time as systime
-from typing import Callable
 from torch import Tensor
 from torch.nn import Module
 from translators.instance2graph_translator import translate
@@ -35,14 +34,14 @@ ACTIONS_NAMES = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
 SOLVING_REPETITIONS = 10
 GNN_CONF = {
-    'resource_and_material_embedding_size': 12,
+    'resource_and_material_embedding_size': 8,
     'operation_and_item_embedding_size': 12,
     'nb_layers': 2,
     'embedding_hidden_channels': 64,
     'value_hidden_channels': 128,
     'actor_hidden_channels': 128}
-small_steps: float = 0.75
-big_steps: float = 0.25
+small_steps: float = 0.2
+big_steps: float = 0.8
 
 # =====================================================
 # =*= I. SEARCH FOR FEASIBLE ACTIONS =*=
@@ -534,10 +533,11 @@ def reward(init_cmax: int, init_cost: int, makespan_old: int, makespan_new: int,
     """
         Compute the reward for each decision
     """
+    _d: float = 0.05*(a*init_cmax + (1-a)*init_cost)
     if use_cost:
-        return a * (big_steps * (makespan_old - makespan_new) + small_steps * (last_op_old - last_op_new)) + (1-a) * (cost_old - cost_new)
+        return (a * (big_steps * (makespan_old - makespan_new) + small_steps * (last_op_old - last_op_new)) + (1-a) * (cost_old - cost_new))/_d
     else:
-        return a * (big_steps * makespan_old - makespan_new + small_steps * (last_op_old - last_op_new))
+        return (a * (big_steps * makespan_old - makespan_new + small_steps * (last_op_old - last_op_new)))/_d
 
 def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, debug_mode: bool, greedy: bool = False):
     graph, current_cmax, current_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
@@ -693,7 +693,7 @@ def init_new_models():
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
-def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mode: bool):
+def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mode: bool, interactive: bool = True):
     """
         Pre-train networks on all instances
     """
@@ -704,13 +704,8 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mo
     shared_critic = shared_critic.to(device)
     for agent,_ in agents:
         agent = agent.to(device)
-    optimizer = torch.optim.Adam(
-        list(shared_critic.parameters()) + list(shared_embbeding_stack.parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[SCHEDULING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), 
-        lr=LEARNING_RATE)
-    if not first:
-        optimizer.load_state_dict(torch.load(path+directory.models+"/adam_"+str(previous_run)+".pth"))
     print("Pre-training models with MAPPO (on several instances)...")
-    multi_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
+    multi_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, run_number=run_number, interactive=interactive, debug_mode=debug_mode)
 
 def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, debug_mode: bool, device: str, use_pre_train: bool = False, interactive: bool = True):
     """
@@ -799,7 +794,7 @@ if __name__ == '__main__':
             fine_tune_on_target(id=args.id, size=args.size, pre_trained_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device, use_pre_train=to_bool(args.use_pretrain), interactive=to_bool(args.interactive))
         else:
             # python gns_solver.py --train=true --target=false --mode=test --number=1 --path=./
-            pre_train_on_all_instances(run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device)
+            pre_train_on_all_instances(run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device, interactive=to_bool(args.interactive))
     else:
         if to_bool(args.target):
             # SOLVE ACTUAL INSTANCE: python gns_solver.py --target=true --size=s --id=151 --train=false --mode=test --path=./ --number=1
