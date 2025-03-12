@@ -69,18 +69,18 @@ def load_training_dataset(debug_mode: bool, path: str, train: bool = True):
     print(f"End of loading {len(instances)} instances!")
     return instances
 
-def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance], train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, debug: bool, trainable: list, fixed_alpha: float = -1):
+def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance], agent_names: list[str], train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str, debug: bool, trainable: list, fixed_alpha: float = -1):
     """
         Train or validate on a batch of instances
     """
-    instances_results: list[MultiAgent_OneInstance] = []
+    replay_memory: list[MultiAgent_OneInstance] = []
     for instance in batch:
         print(f"\t start solving instance: {instance.id}...")
-        r,_,_,_ = solve_function(instance=instance, agents=agents, train=True, trainable=[True for _ in agents], device=device, debug_mode=debug, trainable=trainable, fixed_alpha=fixed_alpha)
-        instances_results.append(r)
+        transitions,_,_,_ = solve_function(instance=instance, agents=agents, train=True, trainable=[True for _ in agents], device=device, debug_mode=debug, trainable=trainable, fixed_alpha=fixed_alpha)
+        replay_memory.append(transitions)
     batch_result: MultiAgents_Batch = MultiAgents_Batch(
-        batch=instances_results, 
-        agent_names=[name for _,name in agents], 
+        batch=replay_memory, 
+        agent_names=agent_names, 
         gamma=PPO_CONF['discount_factor'], 
         lam=PPO_CONF['bias_variance_tradeoff'],
         weight_policy_loss=PPO_CONF['policy_loss'],
@@ -100,127 +100,135 @@ def train_or_validate_batch(agents: list[(Module, str)], batch: list[Instance], 
         print(f'\t Multi-agent batch loss: {current_vloss:.4f}')
         return current_details
 
-def scheduling_stage(train_data: list[Instance], val_data: list[Instance], agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, interactive: bool=False, debug_mode: bool=False):
+def scheduling_stage(train_data: list[Instance], val_data: list[Instance], agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, switch_batch: int, validation_rate: int, device: str, interactive: bool=False, debug_mode: bool=False):
     """
         First (1st) optimization stage: scheduling agent alone
     """
     scheduling_optimizer = torch.optim.Adam(list(agents[SCHEDULING][AGENT].parameters()), lr=LEARNING_RATE)
     debug_print: Callable = debug_printer(debug_mode)
     vlosses = MAPPO_Losses(agent_names=[AGENTS[SCHEDULING]])
+    _vloss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs", ylabel="Value loss", title="Value loss", color="blue", show=interactive)
+    _scheduling_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs", ylabel="Scheduling loss (policy)", title="Scheduling loss (policy)", color="green", show=interactive)
     for iteration in range(iterations):
         print(f"PPO iteration: {iteration+1}/{iterations}:")
-        if iteration % PPO_CONF['switch_batch'] == 0:
+        if iteration % switch_batch == 0:
             debug_print(f"\t time to sample new batch of size {batch_size}...")
             current_batch: list[Instance] = random.sample(train_data, batch_size)
-        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=scheduling_optimizer, solve_function=solve_function, device=device, debug=debug_mode, trainable=[0,1,0], fixed_alpha=1.0)
-        if iteration % PPO_CONF['validation_rate'] == 0:
+        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, agent_names=[name for _,name in agents], optimizer=scheduling_optimizer, agent_names=[AGENTS[SCHEDULING]], solve_function=solve_function, device=device, debug=debug_mode, trainable=[0,1,0], fixed_alpha=1.0)
+        if iteration % validation_rate == 0:
             debug_print("\t time to validate the loss...")
-            for agent,_ in agents:
-                agent.eval()
-            embedding_stack.eval()
-            shared_critic.eval()
+            agents[SCHEDULING][AGENT].eval()
             with torch.no_grad():
-                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode, trainable=[0,1,0], fixed_alpha=1.0)
+                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, solve_function=solve_function, agent_names=[AGENTS[SCHEDULING]], device=device, debug=debug_mode, trainable=[0,1,0], fixed_alpha=1.0)
                 vlosses.add(current_vloss)
-            for agent,_ in agents:
-                agent.train()
-            embedding_stack.train()
-            embedding_stack.train()
+                _vloss_TRACKER.update(current_vloss.value_loss)
+                _scheduling_loss_TRACKER.update(current_vloss.get(AGENTS[SCHEDULING]).policy_loss)
+            agents[SCHEDULING][AGENT].train()
     complete_path = path + directory.models
+    _vloss_TRACKER.save(complete_path+'/'+str(1)+'_value_loss')
+    _scheduling_loss_TRACKER.save(complete_path+'/'+str(1)+'_scheduling_loss')
     with open(complete_path+'/validation_'+str(1)+'.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
     save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=scheduling_optimizer, run_number=1, complete_path=complete_path)
 
-def material_use_stage(train_data: list[Instance], val_data: list[Instance], agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, interactive: bool=False, debug_mode: bool=False):
+def material_use_stage(train_data: list[Instance], val_data: list[Instance], agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, switch_batch: int, validation_rate: int, device: str, interactive: bool=False, debug_mode: bool=False):
     """
         Second (2nd) optimization stage: material use agent alone
     """
     material_optimizer = torch.optim.Adam(list(agents[MATERIAL_USE][AGENT].parameters()),  lr=LEARNING_RATE)
     debug_print: Callable = debug_printer(debug_mode)
     vlosses = MAPPO_Losses(agent_names=[AGENTS[MATERIAL_USE]])
+    _vloss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs", ylabel="Value loss", title="Value loss", color="blue", show=interactive)
+    _material_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs", ylabel="Material use loss (policy)", title="Material use loss (policy)", color="yellow", show=interactive)
     for iteration in range(iterations):
         print(f"PPO iteration: {iteration+1}/{iterations}:")
-        if iteration % PPO_CONF['switch_batch'] == 0:
+        if iteration % switch_batch == 0:
             debug_print(f"\t time to sample new batch of size {batch_size}...")
             current_batch: list[Instance] = random.sample(train_data, batch_size)
-        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=material_optimizer, solve_function=solve_function, device=device, debug=debug_mode, trainable=[0,0,1], fixed_alpha=1.0)
-        if iteration % PPO_CONF['validation_rate'] == 0:
+        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=material_optimizer, solve_function=solve_function, agent_names=[AGENTS[MATERIAL_USE]], device=device, debug=debug_mode, trainable=[0,0,1], fixed_alpha=1.0)
+        if iteration % validation_rate == 0:
             debug_print("\t time to validate the loss...")
-            for agent,_ in agents:
-                agent.eval()
-            embedding_stack.eval()
-            shared_critic.eval()
+            agents[MATERIAL_USE][AGENT].eval()
             with torch.no_grad():
-                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode, trainable=[0,0,1], fixed_alpha=1.0)
+                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, agent_names=[AGENTS[MATERIAL_USE]], solve_function=solve_function, device=device, debug=debug_mode, trainable=[0,0,1], fixed_alpha=1.0)
                 vlosses.add(current_vloss)
-            for agent,_ in agents:
-                agent.train()
-            embedding_stack.train()
-            embedding_stack.train()
+                _vloss_TRACKER.update(current_vloss.value_loss)
+                _material_loss_TRACKER.update(current_vloss.get(AGENTS[MATERIAL_USE]).policy_loss)
+            agents[MATERIAL_USE][AGENT].train()
     complete_path = path + directory.models
+    _vloss_TRACKER.save(complete_path+'/'+str(2)+'_value_loss')
+    _material_loss_TRACKER.save(complete_path+'/'+str(2)+'_material_loss')
     with open(complete_path+'/validation_'+str(2)+'.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
     save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=material_optimizer, run_number=2, complete_path=complete_path)
 
-def outsourcing_stage(train_data: list[Instance], val_data: list[Instance], agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, substage: int, device: str, interactive: bool=False, debug_mode: bool=False):
+def outsourcing_stage(train_data: list[Instance], val_data: list[Instance], agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, substage: int, switch_batch: int, validation_rate: int, device: str, interactive: bool=False, debug_mode: bool=False):
     """
         Third (3rd) optimization stage: outsourcing agent alone
     """
     outsourcing_optimizer = torch.optim.Adam(list(agents[OUTSOURCING][AGENT].parameters()), lr=LEARNING_RATE)
     debug_print: Callable = debug_printer(debug_mode)
     vlosses = MAPPO_Losses(agent_names=[AGENTS[OUTSOURCING]])
+    _vloss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs", ylabel="Value loss", title="Value loss", color="blue", show=interactive)
+    _outsourcing_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs", ylabel="Outsourcing loss (policy)", title="Outsourcing loss (policy)", color="red", show=interactive)
     for iteration in range(iterations):
         print(f"PPO iteration: {iteration+1}/{iterations}:")
-        if iteration % PPO_CONF['switch_batch'] == 0:
+        if iteration % switch_batch == 0:
             debug_print(f"\t time to sample new batch of size {batch_size}...")
             current_batch: list[Instance] = random.sample(train_data, batch_size)
-        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=outsourcing_optimizer, solve_function=solve_function, device=device, debug=debug_mode, trainable=[1,0,0])
-        if iteration % PPO_CONF['validation_rate'] == 0:
+        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=outsourcing_optimizer, agent_names=[AGENTS[OUTSOURCING]], solve_function=solve_function, device=device, debug=debug_mode, trainable=[1,0,0])
+        if iteration % validation_rate == 0:
             debug_print("\t time to validate the loss...")
-            for agent,_ in agents:
-                agent.eval()
-            embedding_stack.eval()
-            shared_critic.eval()
+            agents[OUTSOURCING][AGENT].eval()
             with torch.no_grad():
-                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode, trainable=[1,0,0])
+                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, agent_names=[AGENTS[OUTSOURCING]], optimizer=None, solve_function=solve_function, device=device, debug=debug_mode, trainable=[1,0,0])
                 vlosses.add(current_vloss)
-            for agent,_ in agents:
-                agent.train()
-            embedding_stack.train()
-            embedding_stack.train()
+                _vloss_TRACKER.update(current_vloss.value_loss)
+                _outsourcing_loss_TRACKER.update(current_vloss.get(AGENTS[OUTSOURCING]).policy_loss)
+            agents[OUTSOURCING][AGENT].train()
     complete_path = path + directory.models
     _run: int = 2 + substage
+    _vloss_TRACKER.save(complete_path+'/'+str(_run)+'_value_loss')
+    _outsourcing_loss_TRACKER.save(complete_path+'/'+str(_run)+'_outsourcing_loss')
     with open(complete_path+'/validation_'+str(_run)+'.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
     save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=outsourcing_optimizer, run_number=_run, complete_path=complete_path)
 
-def multi_agent_stage(train_data: list[Instance], val_data: list[Instance], agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, interactive: bool=False, debug_mode: bool=False):
+def multi_agent_stage(train_data: list[Instance], val_data: list[Instance], agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, switch_batch: int, validation_rate: int, device: str, interactive: bool=False, debug_mode: bool=False):
     """
         Last (4th) optimization stage: all three agents together
     """
     multi_agent_optimizer = torch.optim.Adam(list(agents[SCHEDULING][AGENT].parameters()) + list(agents[OUTSOURCING][AGENT].parameters()) + list(agents[MATERIAL_USE][AGENT].parameters()), lr=LEARNING_RATE)
     debug_print: Callable = debug_printer(debug_mode)
     vlosses = MAPPO_Losses(agent_names=[name for _,name in agents])
+    _vloss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs", ylabel="Value loss", title="Value loss", color="blue", show=interactive)
+    _scheduling_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs", ylabel="Scheduling loss (policy)", title="Scheduling loss (policy)", color="green", show=interactive)
+    _material_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs", ylabel="Material use loss (policy)", title="Material use loss (policy)", color="yellow", show=interactive)
+    _outsourcing_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs", ylabel="Outsourcing loss (policy)", title="Outsourcing loss (policy)", color="red", show=interactive)
     for iteration in range(iterations):
         print(f"PPO iteration: {iteration+1}/{iterations}:")
-        if iteration % PPO_CONF['switch_batch'] == 0:
+        if iteration % switch_batch == 0:
             debug_print(f"\t time to sample new batch of size {batch_size}...")
             current_batch: list[Instance] = random.sample(train_data, batch_size)
-        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=multi_agent_optimizer, solve_function=solve_function, device=device, debug=debug_mode, trainable=[1,1,1])
-        if iteration % PPO_CONF['validation_rate'] == 0:
+        train_or_validate_batch(agents, current_batch, train=True, epochs=epochs, optimizer=multi_agent_optimizer, agent_names=[name for _,name in agents], solve_function=solve_function, device=device, debug=debug_mode, trainable=[1,1,1])
+        if iteration % validation_rate == 0:
             debug_print("\t time to validate the loss...")
             for agent,_ in agents:
                 agent.eval()
-            embedding_stack.eval()
-            shared_critic.eval()
             with torch.no_grad():
-                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, optimizer=None, solve_function=solve_function, device=device, debug=debug_mode, trainable=[1,1,1])
+                current_vloss: MAPPO_Loss = train_or_validate_batch(agents, val_data, train=False, epochs=-1, agent_names=[name for _,name in agents], optimizer=None, solve_function=solve_function, device=device, debug=debug_mode, trainable=[1,1,1])
                 vlosses.add(current_vloss)
+                _vloss_TRACKER.update(current_vloss.value_loss)
+                _material_loss_TRACKER.update(current_vloss.get(AGENTS[MATERIAL_USE]).policy_loss)
+                _scheduling_loss_TRACKER.update(current_vloss.get(AGENTS[SCHEDULING]).policy_loss)
+                _outsourcing_loss_TRACKER.update(current_vloss.get(AGENTS[OUTSOURCING]).policy_loss)
             for agent,_ in agents:
                 agent.train()
-            embedding_stack.train()
-            embedding_stack.train()
     complete_path = path + directory.models
+    _vloss_TRACKER.save(complete_path+'/final_value_loss')
+    _scheduling_loss_TRACKER.save(complete_path+'/final_scheduling_loss')
+    _outsourcing_loss_TRACKER.save(complete_path+'/final_outsourcing_loss')
+    _material_loss_TRACKER.save(complete_path+'/final_material_loss')
     with open(complete_path+'/validation_'+str(5)+'.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
     save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=multi_agent_optimizer, run_number=5, complete_path=complete_path)
@@ -232,6 +240,8 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
     _itrs: int = PPO_CONF['train_iterations']
     _epochs: int = PPO_CONF['opt_epochs']
     _batch_size: int = PPO_CONF['batch_size']
+    _switch_batch: int = PPO_CONF['switch_batch']
+    _validation_rate: int = PPO_CONF['validation_rate']
     _start_time = systime.time()
     print("Loading dataset....")
     instances: list[Instance] = load_training_dataset(path=path, train=True, debug_mode=debug_mode)
@@ -255,6 +265,8 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
                                   epochs=_epochs, 
                                   iterations=_itrs[0], 
                                   batch_size=_batch_size, 
+                                  switch_batch=_switch_batch,
+                                  validation_rate=_validation_rate,
                                   device=device,
                                   interactive=interactive, 
                                   debug_mode=debug_mode)
@@ -273,6 +285,8 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
                                     epochs=_epochs, 
                                     iterations=_itrs[1], 
                                     batch_size=_batch_size, 
+                                    switch_batch=_switch_batch,
+                                    validation_rate=_validation_rate,
                                     device=device, 
                                     interactive=interactive, 
                                     debug_mode=debug_mode)
@@ -290,6 +304,8 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
                                    path=path, epochs=_epochs, 
                                    iterations=_itrs[2], 
                                    batch_size=_batch_size, 
+                                   switch_batch=_switch_batch,
+                                   validation_rate=_validation_rate,
                                    device=device, 
                                    substage=1, 
                                    interactive=interactive, 
@@ -305,6 +321,8 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
                                    path=path, epochs=_epochs, 
                                    iterations=_itrs[3], 
                                    batch_size=_batch_size, 
+                                   switch_batch=_switch_batch,
+                                   validation_rate=_validation_rate,
                                    device=device, 
                                    substage=2,
                                    interactive=interactive, 
@@ -322,6 +340,8 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
                                    path=path, epochs=_epochs, 
                                    iterations=_itrs[4],
                                    batch_size=_batch_size, 
+                                   switch_batch=_switch_batch,
+                                   validation_rate=_validation_rate,
                                    device=device, 
                                    interactive=interactive, 
                                    debug_mode=debug_mode)
