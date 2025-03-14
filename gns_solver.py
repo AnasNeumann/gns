@@ -1,6 +1,6 @@
 import argparse
 from model.instance import Instance
-from model.graph import GraphInstance, NO, NOT_YET, YES
+from model.graph import GraphInstance, State, NO, NOT_YET, YES
 from model.gnn import L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, L1_CommonCritic
 from model.solution import HeuristicSolution
 from tools.common import load_instance, to_bool, directory
@@ -17,7 +17,7 @@ from multi_stage_pre_training import multi_stage_pre_train, load_training_datase
 from model.agent import MultiAgent_OneInstance
 import pickle
 from multi_stage_ppo_tuning import multi_stage_fine_tuning
-from model.reward import Reward
+from model.reward_memory import Memory, Decision
 
 # =====================================================
 # =*= 1st MAIN FILE OF THE PROJECT: GNS SOLVER =*=
@@ -293,7 +293,7 @@ def apply_outsourcing_to_direct_parent(instance: Instance, graph: GraphInstance,
     graph, max_ancestors_end = shift_ancestors_physical_operations(graph, instance, p, e, end_date)
     current_cost += local_price
     current_cmax = max(current_cmax, max_ancestors_end)
-    DEBUG_PRINT(f"Outsourcing item {item_id} -> ({p},{e}) at time {graph.item(item_id,'start_time')} to {graph.item(item_id,'end_time')} [NEW CMAX = {current_cmax} - NEW COST = {current_cost}$]...")
+    DEBUG_PRINT(f"Outsourcing item {item_id} -> ({p},{e}) [NEW CMAX = {current_cmax} - NEW COST = {current_cost}$]...")
     for o in instance.first_physical_operations(p, instance.get_direct_parent(p, e)):
         next_good_to_go: bool = True
         for previous in previous_operations[p][o]:
@@ -434,7 +434,7 @@ def build_required_resources(i: Instance):
                     else:
                         required_types_of_materials[p][o].append(rt)
     return required_types_of_resources, required_types_of_materials, res_by_types
-
+        
 # =====================================================
 # =*= IV. EXECUTE ONE INSTANCE =*=
 # =====================================================
@@ -488,12 +488,11 @@ def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
     else:
         return ((current_time // scale) + 1) * scale
 
-def manage_queue_of_possible_actions(instance: Instance, graph: GraphInstance, utilization: list, t: int, debug_mode: bool = False):
+def manage_current_time(instance: Instance, graph: GraphInstance, utilization: list, t: int):
     """
         Manage the queue of possible actions
     """
     next_date = -1
-    operations_to_test = []
     for material_id in graph.loop_materials():
         arrival_time = graph.material(material_id, 'arrival_time')
         if arrival_time>t and (arrival_time<next_date or next_date<0):
@@ -507,17 +506,9 @@ def manage_queue_of_possible_actions(instance: Instance, graph: GraphInstance, u
     for operation_id in graph.loop_operations():
         if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
             available_time = graph.operation(operation_id, 'available_time')
-            if available_time <= t:
-                p, o = graph.operations_g2i[operation_id]
-                available_time = next_possible_time(instance, t, p, o)
-            if graph.operation(operation_id, 'remaining_resources')>0:
-                DEBUG_PRINT(f"\t --> operation {operation_id} can be scheduled at time {available_time} [t={t}]")
-            elif graph.operation(operation_id, 'remaining_materials')>0:
-                DEBUG_PRINT(f"\t --> operation {operation_id} can use material at time {available_time} [t={t}]")
-            if available_time>t: 
-                operations_to_test.append(operation_id)
-                if available_time<next_date or next_date<0:
-                    next_date = available_time
+            DEBUG_PRINT(f"\t --> operation {operation_id} can be scheduled since {available_time} [t={t}]")
+            if available_time>t and (available_time<next_date or next_date<0):
+                next_date = available_time
     if next_date>=0:
         t = next_date
         if t > 0:
@@ -528,7 +519,7 @@ def manage_queue_of_possible_actions(instance: Instance, graph: GraphInstance, u
     else:
         return graph, utilization, t, True
 
-def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, debug_mode: bool, greedy: bool = False, fixed_alpha: float = -1):
+def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, greedy: bool = False, fixed_alpha: float = -1, reward_MEMORY: Memory = None):
     graph, current_cmax, current_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
     utilization: list = [0 for _ in graph.loop_resources()]
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
@@ -549,7 +540,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             _agents_names.append(ACTIONS_NAMES[MATERIAL_USE])
             material_use_training_stage = True
         alpha = alpha if outsourcing_training_stage else torch.tensor([1.0], device=device)
-        rewards: list[Reward] = []
+        _local_decisions: list[Decision] = []
         training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
             agent_names=_agents_names, 
             instance_id=instance.id,
@@ -577,7 +568,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             if (actions_type == MATERIAL_USE) and not material_use_training_stage and len(poss_actions) > 1: 
                 poss_actions = poss_actions[:1]
             if train:
-                probs, state_value = agents[actions_type][AGENT](graph.to_state(device=device), poss_actions, related_items, parent_items, alpha)
+                state: State = graph.to_state(device=device)
+                probs, state_value = agents[actions_type][AGENT](state, poss_actions, related_items, parent_items, alpha)
                 idx = policy(probs, greedy=False)
                 if (actions_type==SCHEDULING and scheduling_training_stage) \
                         or (actions_type==OUTSOURCING and outsourcing_training_stage) \
@@ -585,7 +577,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                     need_reward = True
                     training_results.add_step(
                         agent_name=ACTIONS_NAMES[actions_type], 
-                        state=graph.to_state(device=device),
+                        state=state,
                         probabilities=probs.detach(),
                         actions=poss_actions,
                         id=idx,
@@ -676,11 +668,13 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             old_cost = current_cost
             old_cmax = current_cmax
         else: # No more possible action at time t
-            graph, utilization, t, terminate = manage_queue_of_possible_actions(instance, graph, utilization, t, debug_mode)
+            graph, utilization, t, terminate = manage_current_time(instance, graph, utilization, t)
+            if terminate:
+                break
     if train:
-        for reward in rewards:
-            training_results.add_reward(agent_name=reward.agent_name, reward=reward.compute(final_cost=current_cost, final_makespan=current_cmax))  
-        return training_results, graph, current_cmax, current_cost
+        for decision in _local_decisions:
+            training_results.add_reward(agent_name=decision.agent_name, reward=decision.compute_reward(a=alpha, final_cost=current_cost, final_makespan=current_cmax, init_cmax=lb_cmax, init_cost=lb_cost))  
+        return training_results, reward_MEMORY, graph, current_cmax, current_cost
     else:
         return graph, current_cmax, current_cost
 
@@ -821,7 +815,7 @@ if __name__ == '__main__':
             # TRY ON DEBUG INSTANCE: python gns_solver.py --train=true --target=true --size=d --id=debug --mode=prod --use_pretrain=false --interactive=true --number=1 --path=./
             fine_tune_on_target(id=args.id, size=args.size, pre_trained_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device, use_pre_train=to_bool(args.use_pretrain), interactive=to_bool(args.interactive))
         else:
-            # python gns_solver.py --train=true --target=false --mode=test --number=1 --path=./
+            # python gns_solver.py --train=true --target=false --mode=prod --number=1 --interactive=true --path=./
             pre_train_on_all_instances(run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device, interactive=to_bool(args.interactive))
     else:
         if to_bool(args.target):

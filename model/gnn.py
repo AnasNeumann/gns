@@ -1,6 +1,6 @@
 import torch
 from torch_geometric.data.storage import EdgeStorage
-from torch.nn import Sequential, Linear, ReLU, Tanh, Parameter, LeakyReLU, Module, ModuleList
+from torch.nn import Sequential, Linear, ReLU, Parameter, LeakyReLU, Module, ModuleList
 import torch.nn.functional as F
 from torch import Tensor
 from .graph import FeatureConfiguration, State
@@ -16,25 +16,25 @@ __license__ = "Apache 2.0 License"
 class MaterialEmbeddingLayer(Module):
     def __init__(self, material_dimension: int, operation_dimension: int, embedding_dimension: int):
         super(MaterialEmbeddingLayer, self).__init__()
-        self.material_transform = Linear(material_dimension, embedding_dimension, bias=False)
+        self.material_upscale = Linear(material_dimension, embedding_dimension, bias=False)
         self.att_self_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
-        self.operation_transform = Linear(operation_dimension, embedding_dimension, bias=False)
+        self.operation_upscale = Linear(operation_dimension, embedding_dimension, bias=False)
         self.att_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
         self.leaky_relu = LeakyReLU(negative_slope=0.2)
         self.reset_parameters()
 
     def reset_parameters(self):
-        torch.nn.init.xavier_uniform_(self.material_transform.weight.data, gain=1.414)
-        torch.nn.init.xavier_uniform_(self.operation_transform.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.material_upscale.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.operation_upscale.weight.data, gain=1.414)
         torch.nn.init.xavier_uniform_(self.att_coef.data, gain=1.414)
         torch.nn.init.xavier_uniform_(self.att_self_coef.data, gain=1.414)
 
     def forward(self, materials: Tensor, operations: Tensor, need_for_materials: EdgeStorage):
-        materials = self.material_transform(materials)
-        self_attention = self.leaky_relu(torch.matmul(torch.cat([materials, materials], dim=-1), self.att_self_coef))
+        upscaled_materials = self.material_upscale(materials)
+        self_attention = self.leaky_relu(torch.matmul(torch.cat([upscaled_materials, upscaled_materials], dim=-1), self.att_self_coef))
         
-        ops_by_edges = self.operation_transform(torch.cat([operations[need_for_materials.edge_index[0]], need_for_materials.edge_attr], dim=-1))
-        mat_by_edges = materials[need_for_materials.edge_index[1]]
+        ops_by_edges = self.operation_upscale(torch.cat([operations[need_for_materials.edge_index[0]], need_for_materials.edge_attr], dim=-1))
+        mat_by_edges = upscaled_materials[need_for_materials.edge_index[1]]
         cross_attention = self.leaky_relu(torch.matmul(torch.cat([mat_by_edges, ops_by_edges], dim=-1), self.att_coef))
 
         normalizer = F.softmax(torch.cat([self_attention, cross_attention], dim=0), dim=0)
@@ -44,15 +44,15 @@ class MaterialEmbeddingLayer(Module):
         weighted_ops_by_edges = norm_cross_attention * ops_by_edges
         sum_ops_by_edges = scatter(weighted_ops_by_edges, need_for_materials.edge_index[1], dim=0, dim_size=materials.size(0))
         
-        embedding = F.elu(norm_self_attention * materials + sum_ops_by_edges)
+        embedding = F.elu(norm_self_attention * upscaled_materials + sum_ops_by_edges)
         return embedding
 
 class ResourceEmbeddingLayer(Module):
     def __init__(self, resource_dimension: int, operation_dimension: int, embedding_dimension: int):
         super(ResourceEmbeddingLayer, self).__init__()
-        self.self_transform = Linear(resource_dimension, embedding_dimension, bias=False)
-        self.resource_transform = Linear(resource_dimension, embedding_dimension, bias=False)
-        self.operation_transform = Linear(operation_dimension, embedding_dimension, bias=False)
+        self.self_upscale = Linear(resource_dimension, embedding_dimension, bias=False)
+        self.resource_upscale = Linear(resource_dimension, embedding_dimension, bias=False)
+        self.operation_upscale = Linear(operation_dimension, embedding_dimension, bias=False)
         self.att_operation_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
         self.att_resource_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
         self.att_self_coef = Parameter(torch.zeros(size=(2 * embedding_dimension, 1)))
@@ -60,23 +60,23 @@ class ResourceEmbeddingLayer(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        torch.nn.init.xavier_uniform_(self.self_transform.weight.data, gain=1.414)
-        torch.nn.init.xavier_uniform_(self.resource_transform.weight.data, gain=1.414)
-        torch.nn.init.xavier_uniform_(self.operation_transform.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.self_upscale.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.resource_upscale.weight.data, gain=1.414)
+        torch.nn.init.xavier_uniform_(self.operation_upscale.weight.data, gain=1.414)
         torch.nn.init.xavier_uniform_(self.att_operation_coef.data, gain=1.414)
         torch.nn.init.xavier_uniform_(self.att_resource_coef.data, gain=1.414)
         torch.nn.init.xavier_uniform_(self.att_self_coef.data, gain=1.414)
 
     def forward(self, resources: Tensor, operations: Tensor, need_for_resources: EdgeStorage, same_types: EdgeStorage):
-        self_resources = self.self_transform(resources) 
-        self_attention = self.leaky_relu(torch.matmul(torch.cat([self_resources, self_resources], dim=-1), self.att_self_coef))
-        ops_by_need_edges = self.operation_transform(torch.cat([operations[need_for_resources.edge_index[0]], need_for_resources.edge_attr], dim=-1))
-        res_by_need_edges = self_resources[need_for_resources.edge_index[1]]
+        self_resources_upscaled = self.self_upscale(resources) 
+        self_attention = self.leaky_relu(torch.matmul(torch.cat([self_resources_upscaled, self_resources_upscaled], dim=-1), self.att_self_coef))
+        ops_by_need_edges = self.operation_upscale(torch.cat([operations[need_for_resources.edge_index[0]], need_for_resources.edge_attr], dim=-1))
+        res_by_need_edges = self_resources_upscaled[need_for_resources.edge_index[1]]
         operations_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res_by_need_edges, ops_by_need_edges], dim=-1), self.att_operation_coef))
         
         if same_types:
-            res1_by_same_edges = self.resource_transform(resources[same_types.edge_index[0]])
-            res2_by_same_edges = self_resources[same_types.edge_index[1]]
+            res1_by_same_edges = self.resource_upscale(resources[same_types.edge_index[0]])
+            res2_by_same_edges = self_resources_upscaled[same_types.edge_index[1]]
             resources_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res2_by_same_edges, res1_by_same_edges], dim=-1), self.att_resource_coef))
 
             normalizer = F.softmax(torch.cat([self_attention, operations_cross_attention, resources_cross_attention], dim=0), dim=0)
@@ -84,18 +84,18 @@ class ResourceEmbeddingLayer(Module):
             norm_resources_cross_attention = normalizer[self_attention.size(0)+operations_cross_attention.size(0):]
 
             weighted_res_by_edges = norm_resources_cross_attention * res1_by_same_edges
-            sum_res_by_edges = scatter(weighted_res_by_edges, same_types.edge_index[1], dim=0, dim_size=self_resources.size(0))
+            sum_res_by_edges = scatter(weighted_res_by_edges, same_types.edge_index[1], dim=0, dim_size=self_resources_upscaled.size(0))
 
             weighted_ops_by_edges = norm_operations_cross_attention * ops_by_need_edges
-            sum_ops_by_edges = scatter(weighted_ops_by_edges, need_for_resources.edge_index[1], dim=0, dim_size=self_resources.size(0))
-            embedding = F.elu(normalizer[:self_attention.size(0)] * self_resources + sum_ops_by_edges + sum_res_by_edges)
+            sum_ops_by_edges = scatter(weighted_ops_by_edges, need_for_resources.edge_index[1], dim=0, dim_size=self_resources_upscaled.size(0))
+            embedding = F.elu(normalizer[:self_attention.size(0)] * self_resources_upscaled + sum_ops_by_edges + sum_res_by_edges)
         else:
             normalizer = F.softmax(torch.cat([self_attention, operations_cross_attention], dim=0), dim=0)
             norm_operations_cross_attention = normalizer[self_attention.size(0):]
 
             weighted_ops_by_edges = norm_operations_cross_attention * ops_by_need_edges
-            sum_ops_by_edges = scatter(weighted_ops_by_edges, need_for_resources.edge_index[1], dim=0, dim_size=self_resources.size(0))
-            embedding = F.elu(normalizer[:self_attention.size(0)] * self_resources + sum_ops_by_edges)
+            sum_ops_by_edges = scatter(weighted_ops_by_edges, need_for_resources.edge_index[1], dim=0, dim_size=self_resources_upscaled.size(0))
+            embedding = F.elu(normalizer[:self_attention.size(0)] * self_resources_upscaled + sum_ops_by_edges)
         return embedding
 
 class ItemEmbeddingLayer(Module):
@@ -229,17 +229,21 @@ class L1_EmbbedingGNN(Module):
             self.operation_layers.append(OperationEmbeddingLayer(operation_and_item_embedding_size, operation_and_item_embedding_size, resource_and_material_embedding_size, resource_and_material_embedding_size, embedding_hidden_channels, operation_and_item_embedding_size))
 
     def forward(self, state: State, related_items: Tensor, parents: Tensor, alpha: Tensor):
-        for l in range(self.nb_embedding_layers):
-            state.materials = self.material_layers[l](state.materials, state.operations, state.need_for_materials)
-            state.resources = self.resource_layers[l](state.resources, state.operations, state.need_for_resources, state.same_types)
-            state.items = self.item_layers[l](state.items, parents, state.operations, state.item_assembly, state.operation_assembly)
-            state.operations = self.operation_layers[l](state.operations, state.items, related_items, state.materials, state.resources, state.need_for_resources, state.need_for_materials, state.precedences)     
-        pooled_materials = torch.mean(state.materials, dim=0, keepdim=True)
-        pooled_resources = torch.mean(state.resources, dim=0, keepdim=True)
-        pooled_items = torch.mean(state.items, dim=0, keepdim=True)
-        pooled_operations = torch.mean(state.operations, dim=0, keepdim=True)
+        m_embeddings = self.material_layers[0](state.materials, state.operations, state.need_for_materials)
+        r_embbedings = self.resource_layers[0](state.resources, state.operations, state.need_for_resources, state.same_types)
+        i_embbedings = self.item_layers[0](state.items, parents, state.operations, state.item_assembly, state.operation_assembly)
+        o_embbedings = self.operation_layers[0](state.operations, i_embbedings, related_items, m_embeddings, r_embbedings, state.need_for_resources, state.need_for_materials, state.precedences) 
+        for l in range(1, self.nb_embedding_layers):
+            m_embeddings = self.material_layers[l](m_embeddings, o_embbedings, state.need_for_materials)
+            r_embbedings = self.resource_layers[l](r_embbedings, o_embbedings, state.need_for_resources, state.same_types)
+            i_embbedings = self.item_layers[l](i_embbedings, parents, o_embbedings, state.item_assembly, state.operation_assembly)
+            o_embbedings = self.operation_layers[l](o_embbedings, i_embbedings, related_items, m_embeddings, r_embbedings, state.need_for_resources, state.need_for_materials, state.precedences)     
+        pooled_materials = torch.mean(m_embeddings, dim=0, keepdim=True)
+        pooled_resources = torch.mean(r_embbedings, dim=0, keepdim=True)
+        pooled_items = torch.mean(i_embbedings, dim=0, keepdim=True)
+        pooled_operations = torch.mean(o_embbedings, dim=0, keepdim=True)
         state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources], dim=-1)[0]
-        return state, torch.cat([state_embedding, alpha], dim=0)
+        return torch.cat([state_embedding, alpha], dim=0), m_embeddings, r_embbedings, i_embbedings, o_embbedings
 
 class L1_CommonCritic(Module):
     def __init__(self, resource_and_material_embedding_size: int, operation_and_item_embedding_size: int, critic_hidden_channels: int):
@@ -248,8 +252,8 @@ class L1_CommonCritic(Module):
         second_dimenstion = int(critic_hidden_channels / 2)
         state_vector_size = 2*resource_and_material_embedding_size + 2*operation_and_item_embedding_size + 1
         self.critic_mlp = Sequential(
-            Linear(state_vector_size, first_dimension), Tanh(),
-            Linear(first_dimension, second_dimenstion), Tanh(), 
+            Linear(state_vector_size, first_dimension), ReLU(),
+            Linear(first_dimension, second_dimenstion), ReLU(), 
             Linear(second_dimenstion, 1)
         )
 
@@ -265,17 +269,17 @@ class L1_OutousrcingActor(Module):
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
-            Linear(self.actor_input_size, first_dimension), Tanh(),
-            Linear(first_dimension, second_dimenstion), Tanh(),
+            Linear(self.actor_input_size, first_dimension), ReLU(),
+            Linear(first_dimension, second_dimenstion), ReLU(),
             Linear(second_dimenstion, 1)
         )
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
-        state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
+        state_embedding, _, _, i_embbedings, _ = self.shared_embedding_layers(state, related_items, parents, alpha)
         item_ids, outsourcing_choices = zip(*actions)
         outsourcing_choices_tensor = torch.tensor(outsourcing_choices, dtype=torch.float32, device=parents.device).unsqueeze(1)
         state_embedding_expanded = state_embedding.unsqueeze(0).expand(len(actions), -1)
-        inputs = torch.cat([state.items[list(item_ids)], outsourcing_choices_tensor, state_embedding_expanded], dim=1)
+        inputs = torch.cat([i_embbedings[list(item_ids)], outsourcing_choices_tensor, state_embedding_expanded], dim=1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
@@ -290,16 +294,16 @@ class L1_SchedulingActor(Module):
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
-            Linear(self.actor_input_size, first_dimension), Tanh(),
-            Linear(first_dimension, second_dimenstion), Tanh(),
+            Linear(self.actor_input_size, first_dimension), ReLU(),
+            Linear(first_dimension, second_dimenstion), ReLU(),
             Linear(second_dimenstion, 1)
         )
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
-        state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
+        state_embedding, _, r_embbedings, _, o_embbedings = self.shared_embedding_layers(state, related_items, parents, alpha)
         operations_ids, resources_ids = zip(*actions)
         state_embedding_expanded = state_embedding.unsqueeze(0).expand(len(actions), -1)
-        inputs = torch.cat([state.operations[list(operations_ids)], state.resources[list(resources_ids)], state_embedding_expanded], dim=1)
+        inputs = torch.cat([o_embbedings[list(operations_ids)], r_embbedings[list(resources_ids)], state_embedding_expanded], dim=1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
@@ -314,16 +318,16 @@ class L1_MaterialActor(Module):
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
-            Linear(self.actor_input_size, first_dimension), Tanh(),
-            Linear(first_dimension, second_dimenstion), Tanh(),
+            Linear(self.actor_input_size, first_dimension), ReLU(),
+            Linear(first_dimension, second_dimenstion), ReLU(),
             Linear(second_dimenstion, 1)
         )
 
     def forward(self, state: State, actions: list[(int, int)], related_items: Tensor, parents: Tensor, alpha: Tensor):
-        state, state_embedding = self.shared_embedding_layers(state, related_items, parents, alpha)
+        state_embedding, m_embeddings, _, _, o_embbedings = self.shared_embedding_layers(state, related_items, parents, alpha)
         operations_ids, materials_ids = zip(*actions)
         state_embedding_expanded = state_embedding.unsqueeze(0).expand(len(actions), -1)
-        inputs = torch.cat([state.operations[list(operations_ids)], state.materials[list(materials_ids)], state_embedding_expanded], dim=1)
+        inputs = torch.cat([o_embbedings[list(operations_ids)], m_embeddings[list(materials_ids)], state_embedding_expanded], dim=1)
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)

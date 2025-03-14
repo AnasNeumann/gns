@@ -14,6 +14,7 @@ from tools.common import load_instance, objective_value, freeze, unfreeze, unfre
 from translators.graph2solution_translator import translate_solution
 from debug.loss_tracker import LossTracker
 import math
+from model.reward_memory import Memory
 
 # ==================================================================
 # =*= MULTI-STAGE PROXIMAL POLICY OPTIMIZATION (PPO) FINE TUNING =*=
@@ -33,7 +34,7 @@ PPO_CONF = {
     "discount_factor": 1.0,
     "bias_variance_tradeoff": 1.0
 }
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 2e-4
 AGENTS = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
 OUTSOURCING = 0
@@ -48,25 +49,27 @@ def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_cri
     for agent, name in agents:
         torch.save(agent.state_dict(), complete_path+'/'+name+'_weights_'+index+'.pth')
 
-def scheduling_stage(target_instance : Instance, agents: list[(Module, str)], solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, id: str, size: str, interactive: bool = False, debug_mode: bool=False):
+def scheduling_stage(target_instance : Instance, agents: list[(Module, str)], solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, id: str, size: str, interactive: bool = False):
     """
         First (1st) optimization stage: scheduling agent alone
     """
+    
     scheduling_optimizer = torch.optim.Adam(list(agents[SCHEDULING][AGENT].parameters()), lr=LEARNING_RATE)
     losses = MAPPO_Losses(agent_names=[AGENTS[SCHEDULING]])
     _vloss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per batch of episodes)", ylabel="Value loss", title="Value loss", color="blue", show=interactive)
     _scheduling_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per batch of episodes)", ylabel="Scheduling loss (policy)", title="Scheduling loss (policy)", color="green", show=interactive)
     _Cmax_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Makespan", title="Final Makespan by episode", color="red", show=interactive)
-    replay_memory: list[MultiAgent_OneInstance] = []
+    _batch_replay_memory: list[MultiAgent_OneInstance] = []
+    reward_MEMORY: Memory = Memory(target_instance.id)
     for episode in range(iterations):
         print(f"PPO solving episode: {episode+1}/{iterations}...")
-        transitions, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,1,0], device=device, debug_mode=debug_mode, fixed_alpha=1.0)
-        replay_memory.append(transitions)
+        transitions, reward_MEMORY, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,1,0], device=device, fixed_alpha=1.0, reward_MEMORY=reward_MEMORY)
+        _batch_replay_memory.append(transitions)
         _Cmax_TRACKER.update(cmax)
         if (episode+1) % batch_size == 0:
             print(f"PPO time for optimization after episode: {episode+1}/{iterations}!")
             batch_result: MultiAgents_Batch = MultiAgents_Batch(
-                    batch=replay_memory,
+                    batch=_batch_replay_memory,
                     agent_names=[AGENTS[SCHEDULING]],
                     gamma=PPO_CONF['discount_factor'],
                     lam=PPO_CONF['bias_variance_tradeoff'],
@@ -85,31 +88,33 @@ def scheduling_stage(target_instance : Instance, agents: list[(Module, str)], so
                 _vloss_TRACKER.update(details.value_loss)
                 _scheduling_loss_TRACKER.update(details.get(AGENTS[SCHEDULING]).policy_loss)
                 losses.add(details)
-            replay_memory = []
+            _batch_replay_memory = []
     _vloss_TRACKER.save(path+directory.solutions+'/'+size+'/stage_1_value_loss_'+id)
     _scheduling_loss_TRACKER.save(path+directory.solutions+'/'+size+'/stage_1_scheduling_loss_'+id)
     _Cmax_TRACKER.save(path+directory.solutions+'/'+size+'/stage_1_cmax_'+id)
     return agents
     
-def material_use_stage(target_instance : Instance, agents: list[(Module, str)], solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, id: str, size: str, interactive: bool = False, debug_mode: bool=False):
+def material_use_stage(target_instance : Instance, agents: list[(Module, str)], solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, id: str, size: str, interactive: bool = False):
     """
         Second (2nd) optimization stage: material use agent alone
     """
+
     material_optimizer = torch.optim.Adam(list(agents[MATERIAL_USE][AGENT].parameters()),  lr=LEARNING_RATE)
     losses = MAPPO_Losses(agent_names=[AGENTS[MATERIAL_USE]])
     _vloss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per batch of episodes)", ylabel="Value loss", title="Value loss", color="blue", show=interactive)
     _material_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per batch of episodes)", ylabel="Material use loss (policy)", title="Material use loss (policy)", color="green", show=interactive)
     _Cmax_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Makespan", title="Final Makespan by episode", color="red", show=interactive)
-    replay_memory: list[MultiAgent_OneInstance] = []
+    _batch_replay_memory: list[MultiAgent_OneInstance] = []
+    reward_MEMORY: Memory = Memory(target_instance.id)
     for episode in range(iterations):
         print(f"PPO solving episode: {episode+1}/{iterations}...")
-        transitions, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,0,1], device=device, debug_mode=debug_mode, fixed_alpha=1.0)
-        replay_memory.append(transitions)
+        transitions, reward_MEMORY, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,0,1], device=device, fixed_alpha=1.0, reward_MEMORY=reward_MEMORY)
+        _batch_replay_memory.append(transitions)
         _Cmax_TRACKER.update(cmax)
         if (episode+1) % batch_size == 0:
             print(f"PPO time for optimization after episode: {episode+1}/{iterations}!")
             batch_result: MultiAgents_Batch = MultiAgents_Batch(
-                    batch=replay_memory,
+                    batch=_batch_replay_memory,
                     agent_names=[AGENTS[MATERIAL_USE]],
                     gamma=PPO_CONF['discount_factor'],
                     lam=PPO_CONF['bias_variance_tradeoff'],
@@ -128,13 +133,13 @@ def material_use_stage(target_instance : Instance, agents: list[(Module, str)], 
                 _vloss_TRACKER.update(details.value_loss)
                 _material_loss_TRACKER.update(details.get(AGENTS[MATERIAL_USE]).policy_loss)
                 losses.add(details)
-            replay_memory = []
+            _batch_replay_memory = []
     _vloss_TRACKER.save(path+directory.solutions+'/'+size+'/stage_2_value_loss_'+id)
     _material_loss_TRACKER.save(path+directory.solutions+'/'+size+'/stage_2_material_use_loss_'+id)
     _Cmax_TRACKER.save(path+directory.solutions+'/'+size+'/stage_2_cmax_'+id)
     return agents
 
-def outsourcing_stage(target_instance : Instance, agents: list[(Module, str)], solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, id: str, size: str, substage: int, interactive: bool = False, debug_mode: bool=False):
+def outsourcing_stage(target_instance : Instance, agents: list[(Module, str)], solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, id: str, size: str, substage: int, interactive: bool = False):
     """
         Third (3rd) optimization stage: outsourcing agent alone
     """
@@ -144,17 +149,18 @@ def outsourcing_stage(target_instance : Instance, agents: list[(Module, str)], s
     _outsourcing_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per batch of episodes)", ylabel="Outsourcing loss (policy)", title="Outsourcing loss (policy)", color="pink", show=interactive)
     _Cmax_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Makespan", title="Final Makespan by episode", color="red", show=interactive)
     _cost_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Cost", title="Final Cost by episode", color="orange", show=interactive)
-    replay_memory: list[MultiAgent_OneInstance] = []
+    _batch_replay_memory: list[MultiAgent_OneInstance] = []
+    reward_MEMORY: Memory = Memory(target_instance.id)
     for episode in range(iterations):
         print(f"PPO solving episode: {episode+1}/{iterations}...")
-        transitions, _, cmax, cost = solve_function(instance=target_instance, agents=agents, train=True, trainable=[1,0,0], device=device, debug_mode=debug_mode)
+        transitions, reward_MEMORY, _, cmax, cost = solve_function(instance=target_instance, agents=agents, train=True, trainable=[1,0,0], device=device, reward_MEMORY=reward_MEMORY)
         _Cmax_TRACKER.update(cmax)
         _cost_TRACKER.update(cost)
-        replay_memory.append(transitions)
+        _batch_replay_memory.append(transitions)
         if (episode+1) % batch_size == 0:
             print(f"PPO time for optimization after episode: {episode+1}/{iterations}!")
             batch_result: MultiAgents_Batch = MultiAgents_Batch(
-                    batch=replay_memory,
+                    batch=_batch_replay_memory,
                     agent_names=[AGENTS[OUTSOURCING]],
                     gamma=PPO_CONF['discount_factor'],
                     lam=PPO_CONF['bias_variance_tradeoff'],
@@ -173,14 +179,14 @@ def outsourcing_stage(target_instance : Instance, agents: list[(Module, str)], s
                 _vloss_TRACKER.update(details.value_loss)
                 _outsourcing_loss_TRACKER.update(details.get(AGENTS[OUTSOURCING]).policy_loss)
                 losses.add(details)
-            replay_memory = []
+            _batch_replay_memory = []
     _vloss_TRACKER.save(path+directory.solutions+'/'+size+'/stage_3_'+str(substage)+'_value_loss_'+id)
     _outsourcing_loss_TRACKER.save(path+directory.solutions+'/'+size+'/stage_3_'+str(substage)+'_outsourcing_loss_'+id)
     _cost_TRACKER.save(path+directory.solutions+'/'+size+'/stage_3_'+str(substage)+'_cost_'+id)
     _Cmax_TRACKER.save(path+directory.solutions+'/'+size+'/stage_3_'+str(substage)+'_cmax_'+id)
     return agents
 
-def multi_agent_stage(target_instance : Instance, agents: list[(Module, str)], solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, id: str, size: str, start_time: int, interactive: bool = False, debug_mode: bool=False):
+def multi_agent_stage(target_instance : Instance, agents: list[(Module, str)], solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, device: str, id: str, size: str, start_time: int, interactive: bool = False):
     """
         Last (4th) optimization stage: all three agents together
     """
@@ -194,11 +200,12 @@ def multi_agent_stage(target_instance : Instance, agents: list[(Module, str)], s
     _best_obj: float = math.inf
     _best_episode: int = 0
     _time_to_best: float = 0
-    replay_memory: list[MultiAgent_OneInstance] = []
+    _batch_replay_memory: list[MultiAgent_OneInstance] = []
+    reward_MEMORY: Memory = Memory(target_instance.id)
     for episode in range(iterations):
         print(f"PPO solving episode: {episode+1}/{iterations}...")
-        transitions, graph, cmax, cost = solve_function(instance=target_instance, agents=agents, train=True, trainable=[1,1,1], device=device, debug_mode=debug_mode)
-        replay_memory.append(transitions)
+        transitions, reward_MEMORY, graph, cmax, cost = solve_function(instance=target_instance, agents=agents, train=True, trainable=[1,1,1], device=device, reward_MEMORY=reward_MEMORY)
+        _batch_replay_memory.append(transitions)
         _current_obj = objective_value(cmax, cost, target_instance.w_makespan)
         if _current_obj < _best_obj:
             _best_obj = _current_obj
@@ -209,7 +216,7 @@ def multi_agent_stage(target_instance : Instance, agents: list[(Module, str)], s
         if (episode+1) % batch_size == 0:
             print(f"PPO time for optimization after episode: {episode+1}/{iterations}!")
             batch_result: MultiAgents_Batch = MultiAgents_Batch(
-                    batch=replay_memory,
+                    batch=_batch_replay_memory,
                     agent_names=[name for _,name in agents],
                     gamma=PPO_CONF['discount_factor'],
                     lam=PPO_CONF['bias_variance_tradeoff'],
@@ -229,7 +236,7 @@ def multi_agent_stage(target_instance : Instance, agents: list[(Module, str)], s
                 _scheduling_loss_TRACKER.update(details.get(AGENTS[SCHEDULING]).policy_loss)
                 _outsourcing_loss_TRACKER.update(details.get(AGENTS[OUTSOURCING]).policy_loss)
                 losses.add(details)
-            replay_memory = []
+            _batch_replay_memory = []
     _vloss_TRACKER.save(path+directory.solutions+'/'+size+'/final_value_loss_'+id)
     _scheduling_loss_TRACKER.save(path+directory.solutions+'/'+size+'/final_scheduling_loss_'+id)
     _outsourcing_loss_TRACKER.save(path+directory.solutions+'/'+size+'/final_outsourcing_loss_'+id)
@@ -260,31 +267,31 @@ def multi_stage_fine_tuning(agents: list[(Module, str)], embedding_stack: Module
     
     print("I. FINE TUNING STAGE 1: scheduling agent")
     freeze_several(agents, [AGENTS[OUTSOURCING], AGENTS[MATERIAL_USE]])
-    agents = scheduling_stage(_instance, agents, solve_function, path, _epochs, _itrs[0], _batch_size, device, id, size, interactive, debug_mode)
+    agents = scheduling_stage(_instance, agents, solve_function, path, _epochs, _itrs[0], _batch_size, device, id, size, interactive)
     
     print("II. FINE TUNING STAGE 2: material use agent with freezed embedding and critic layers")
     unfreeze_all(agents)
     freeze_several(agents, [AGENTS[SCHEDULING], AGENTS[OUTSOURCING]])
     freeze(embedding_stack)
     freeze(shared_critic)
-    agents = material_use_stage(_instance, agents, solve_function, path, _epochs, _itrs[1], _batch_size, device, id, size, interactive, debug_mode)
+    agents = material_use_stage(_instance, agents, solve_function, path, _epochs, _itrs[1], _batch_size, device, id, size, interactive)
     
     print("III. FINE TUNING STAGE 3.1: outsourcing agent with freezed embedding and critic layers")
     unfreeze_all(agents)
     freeze_several(agents, [AGENTS[SCHEDULING], AGENTS[MATERIAL_USE]])
     freeze(embedding_stack)
     freeze(shared_critic)
-    agents = outsourcing_stage(_instance, agents, solve_function, path, _epochs, _itrs[2], _batch_size, device, id, size, 1, interactive, debug_mode)
+    agents = outsourcing_stage(_instance, agents, solve_function, path, _epochs, _itrs[2], _batch_size, device, id, size, 1, interactive)
     
     print("III. FINE TUNING STAGE 3.2: outsourcing agent and all layers")
     unfreeze(embedding_stack)
-    agents = outsourcing_stage(_instance, agents, solve_function, path, _epochs, _itrs[3], _batch_size, device, id, size, 2, interactive, debug_mode)
+    agents = outsourcing_stage(_instance, agents, solve_function, path, _epochs, _itrs[3], _batch_size, device, id, size, 2, interactive)
 
     print("IV. FINE TUNING STAGE 4: multi-agent with all layers")
     unfreeze_all(agents)
     unfreeze(embedding_stack)
     unfreeze(shared_critic)
-    _best_obj, _best_episode, _time_to_best = multi_agent_stage(_instance, agents, solve_function, path, _epochs, _itrs[4], _batch_size, device, id, size, _start_time, interactive, debug_mode)
+    _best_obj, _best_episode, _time_to_best = multi_agent_stage(_instance, agents, solve_function, path, _epochs, _itrs[4], _batch_size, device, id, size, _start_time, interactive)
     final_metrics = pd.DataFrame({
         'index': [_instance.id],
         'value': [_best_obj],

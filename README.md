@@ -44,7 +44,7 @@ bash _env.sh
 ```
 1. Pre-train on several instances (using MAPPO) 
 ```bash
-python gns_solver.py --train=true --target=false --mode=test --path=./ --number=1 
+python gns_solver.py --train=true --target=false --mode=prod --number=1 --interactive=true --path=./
 ```
 2. Solve on instance (inference mode only) 
 ```bash

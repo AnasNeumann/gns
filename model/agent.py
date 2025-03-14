@@ -150,8 +150,8 @@ class Agent_OneInstance:
         log_old_probs: Tensor = None
         entropies: Tensor = None
         for step, state in enumerate(self.states):
-            temp_state: State = state.clone(self.device)
-            new_probabilities,_ = agent(temp_state, self.possibles_actions[step], self.related_items, self.parent_items, self.w_makespan)
+            # temp_state: State = state.clone(self.device)
+            new_probabilities,_ = agent(state, self.possibles_actions[step], self.related_items, self.parent_items, self.w_makespan)
             old_action_id: int = self.actions_idx[step]
             entropy = torch.sum(-new_probabilities*torch.log(new_probabilities+1e-8), dim=-1)
             new_log = torch.log(new_probabilities[old_action_id]+1e-8)
