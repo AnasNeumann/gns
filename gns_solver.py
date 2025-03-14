@@ -488,7 +488,7 @@ def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
     else:
         return ((current_time // scale) + 1) * scale
 
-def manage_current_time(instance: Instance, graph: GraphInstance, utilization: list, t: int):
+def manage_current_time(graph: GraphInstance, utilization: list, t: int):
     """
         Manage the queue of possible actions
     """
@@ -520,7 +520,7 @@ def manage_current_time(instance: Instance, graph: GraphInstance, utilization: l
         return graph, utilization, t, True
 
 def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, greedy: bool = False, fixed_alpha: float = -1, reward_MEMORY: Memory = None):
-    graph, current_cmax, current_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
+    graph, lb_cmax, lb_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
     utilization: list = [0 for _ in graph.loop_resources()]
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
     t: int = 0
@@ -548,8 +548,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             parent_items=parent_items,
             w_makespan=alpha,
             device=device)
-    lb_cmax = current_cmax
-    lb_cost = current_cost
+    current_cmax = lb_cmax
+    current_cost = lb_cost
     old_cmax = current_cmax
     old_current_end = 0
     old_cost = 0
@@ -591,38 +591,26 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             if actions_type == OUTSOURCING: # Outsourcing action
                 item_id, outsourcing_choice = poss_actions[idx]
                 p, e = graph.items_g2i[item_id]
+                _max_end = old_current_end
                 if outsourcing_choice == YES:
                     graph, _end_date, _local_price = outsource_item(graph, instance, item_id, t, enforce_time=False)
                     graph, current_cmax, current_cost = apply_outsourcing_to_direct_parent(instance, graph, current_cmax, current_cost, previous_operations, item_id, p, e, _end_date, _local_price)
                     _max_end = max(old_current_end, _end_date)
-                    if outsourcing_training_stage:
-                        rewards.append(Reward(agent_name=ACTIONS_NAMES[OUTSOURCING], 
-                                              init_cost=lb_cost, 
-                                              init_cmax=lb_cmax, 
-                                              makespan_old=old_cmax, 
-                                              makespan_new=current_cmax, 
-                                              last_op_old=old_current_end, 
-                                              last_op_new=_max_end, 
-                                              cost_old=old_cost, 
-                                              cost_new=current_cost, 
-                                              a=instance.w_makespan, 
-                                              use_cost=True))
-                    old_current_end = _max_end
                 else:
                     graph, _shifted_project_estimated_end = item_local_production(graph, instance, item_id, p, e)
                     current_cmax = max(current_cmax, _shifted_project_estimated_end)
-                    if outsourcing_training_stage:
-                        rewards.append(Reward(agent_name=ACTIONS_NAMES[OUTSOURCING], 
-                                              init_cost=lb_cost, 
-                                              init_cmax=lb_cmax, 
-                                              makespan_old=old_cmax, 
-                                              makespan_new=current_cmax, 
-                                              last_op_old=old_current_end, 
-                                              last_op_new=old_current_end, 
-                                              cost_old=old_cost, 
-                                              cost_new=current_cost, 
-                                              a=instance.w_makespan, 
-                                              use_cost=True))
+                if outsourcing_training_stage:
+                    _local_decisions.append(Decision(type=actions_type,
+                                                    agent_name=ACTIONS_NAMES[OUTSOURCING],
+                                                    target=item_id, 
+                                                    value=outsourcing_choice, 
+                                                    end_old=old_current_end, 
+                                                    end_new=_max_end, 
+                                                    cost_old=old_cost, 
+                                                    cost_new=current_cost,
+                                                    parent=_local_decisions[-1] if _local_decisions else None, 
+                                                    use_cost=True))
+                old_current_end = _max_end
             elif actions_type == SCHEDULING: # scheduling action
                 operation_id, resource_id = poss_actions[idx]    
                 p, o = graph.operations_g2i[operation_id]
@@ -636,15 +624,14 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 DEBUG_PRINT(f"End of scheduling at time {_operation_end} [NEW CMAX = {current_cmax} - COST = {current_cost}$]...")
                 _max_end = max(old_current_end, _operation_end)
                 if scheduling_training_stage:
-                    rewards.append(Reward(agent_name=ACTIONS_NAMES[SCHEDULING], 
-                                              init_cost=lb_cost, 
-                                              init_cmax=lb_cmax, 
-                                              makespan_old=old_cmax, 
-                                              makespan_new=current_cmax, 
-                                              last_op_old=old_current_end, 
-                                              last_op_new=_max_end,  
-                                              a=instance.w_makespan, 
-                                              use_cost=False))
+                    _local_decisions.append(Decision(type=actions_type,
+                                                    agent_name=ACTIONS_NAMES[SCHEDULING],
+                                                    target=operation_id, 
+                                                    value=resource_id, 
+                                                    end_old=old_current_end, 
+                                                    end_new=_max_end, 
+                                                    parent=_local_decisions[-1] if _local_decisions else None, 
+                                                    use_cost=False))
                 old_current_end = _max_end
             else: # Material use action
                 operation_id, material_id = poss_actions[idx]
@@ -655,25 +642,25 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 current_cmax = max(current_cmax, _max_ancestors_end)
                 _max_end = max(old_current_end, t)
                 if material_use_training_stage and need_reward:
-                    rewards.append(Reward(agent_name=ACTIONS_NAMES[MATERIAL_USE], 
-                                              init_cost=lb_cost, 
-                                              init_cmax=lb_cmax, 
-                                              makespan_old=old_cmax, 
-                                              makespan_new=current_cmax, 
-                                              last_op_old=old_current_end, 
-                                              last_op_new=_max_end,  
-                                              a=instance.w_makespan, 
-                                              use_cost=False))
+                    _local_decisions.append(Decision(type=actions_type,
+                                                    agent_name=ACTIONS_NAMES[MATERIAL_USE],
+                                                    target=operation_id, 
+                                                    value=material_id, 
+                                                    end_old=old_current_end, 
+                                                    end_new=_max_end, 
+                                                    parent=_local_decisions[-1] if _local_decisions else None, 
+                                                    use_cost=False))
                 old_current_end = _max_end
             old_cost = current_cost
             old_cmax = current_cmax
         else: # No more possible action at time t
-            graph, utilization, t, terminate = manage_current_time(instance, graph, utilization, t)
+            graph, utilization, t, terminate = manage_current_time(graph, utilization, t)
             if terminate:
                 break
     if train:
+        reward_MEMORY.add_or_update_decision(_local_decisions[0], a=alpha, final_cost=current_cost, final_makespan=current_cmax, init_cmax=lb_cmax, init_cost=lb_cost)
         for decision in _local_decisions:
-            training_results.add_reward(agent_name=decision.agent_name, reward=decision.compute_reward(a=alpha, final_cost=current_cost, final_makespan=current_cmax, init_cmax=lb_cmax, init_cost=lb_cost))  
+            training_results.add_reward(agent_name=decision.agent_name, reward=decision.reward)  
         return training_results, reward_MEMORY, graph, current_cmax, current_cost
     else:
         return graph, current_cmax, current_cost

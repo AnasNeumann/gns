@@ -25,6 +25,8 @@ class Decision:
         self.next_decisions: list[Decision] = []
         self.parent: Decision = parent
         self.reward: float = -1
+        if parent is not None:
+            self.parent.next_decisions.append(self)
 
     def same(self, d) -> bool:
         """
@@ -54,20 +56,47 @@ class Memory:
         self.instance_id: int = instance_id
         self.decisions: list[Decision] = []
 
-    def add_or_update_decision(self, decision: Decision) -> Decision:
+    def add_or_update_decision(self, decision: Decision, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1) -> Decision:
         """
             Add decision in the memory or update reward if already exist
         """
+        decision.compute_reward(a=a, final_cost=final_cost, final_makespan=final_makespan, init_cmax=init_cmax, init_cost=init_cost)
         if decision.parent is None:
-            self.decisions.append(decision)
-            return decision
+            _found: bool = False
+            for _other_first in self.decisions:
+                if _other_first.same(decision):
+                    _found = True
+                    _other_first.reward = min(_other_first.reward, decision.reward)
+                    for _next_decision in decision.next_decisions:
+                        _next_decision.parent = _other_first
+                        self.add_or_update_decision(decision=_next_decision, 
+                                                    a=a, 
+                                                    final_cost=final_cost, 
+                                                    final_makespan=final_makespan, 
+                                                    init_cmax=init_cmax, 
+                                                    init_cost=init_cost)
+                    return _other_first
+            if not _found:
+                self.decisions.append(decision)
+                return decision
         else:
-            for next in decision.parent.next_decisions:
-                if next.same(decision):
-                    next.reward = min(next.reward, decision.reward)
+            _found: bool = False
+            for _next in decision.parent.next_decisions:
+                if _next.same(decision):
+                    _found = True
+                    _next.reward = min(_next.reward, decision.reward)
+                    for _next_decision in decision.next_decisions:
+                        _next_decision.parent = _next
+                        self.add_or_update_decision(decision=_next_decision, 
+                                                    a=a, 
+                                                    final_cost=final_cost, 
+                                                    final_makespan=final_makespan, 
+                                                    init_cmax=init_cmax, 
+                                                    init_cost=init_cost)
                     return next
-            decision.parent.next_decisions.append(decision)
-            return decision
+            if not _found:
+                decision.parent.next_decisions.append(decision)
+                return decision
 
 class Memories:
     """
