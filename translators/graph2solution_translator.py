@@ -1,6 +1,6 @@
 from model.instance import Instance
 from model.solution import HeuristicSolution, Item, Operation, Execution, MaterialUse, Machine, Material, RT
-from model.graph import YES, NO, GraphInstance, NeedForResourceFeatures, NeedForMaterialFeatures, ItemFeatures
+from model.graph import YES, NO, GraphInstance, NeedForResourceFeatures, NeedForMaterialFeatures, ItemFeatures, FC
 
 # =============================================================================
 # =*= TRANSLATE GRPAH 2 SOLUTION =*=
@@ -20,7 +20,7 @@ def translate_solution(graph: GraphInstance, instance: Instance):
     # 1/4 Outsourcing decisions
     for project in solution.projects:
         for item in project.flat_items:
-            item_features: ItemFeatures = ItemFeatures.from_tensor(graph.items()[graph.items_i2g[item.project.id][item.id]], graph.features)
+            item_features: ItemFeatures = ItemFeatures.from_tensor(graph.items()[graph.items_i2g[item.project.id][item.id]], FC)
             if item_features.outsourced == YES:
                 item.outsourced = True
                 item.start = item_features.start_time
@@ -31,7 +31,7 @@ def translate_solution(graph: GraphInstance, instance: Instance):
     # 2/4 Execution on finite-capacity resources
     execution_index, execution_features, execution_loop = graph.loop_need_for_resource()
     for i in execution_loop:
-        ex_features: NeedForResourceFeatures = NeedForResourceFeatures.from_tensor(execution_features[i], graph.features)
+        ex_features: NeedForResourceFeatures = NeedForResourceFeatures.from_tensor(execution_features[i], FC)
         p, o = graph.operations_g2i[execution_index[0, i].item()]
         r = graph.resources_g2i[execution_index[1, i].item()]
         rt = instance.get_resource_type(r)
@@ -50,7 +50,7 @@ def translate_solution(graph: GraphInstance, instance: Instance):
     # 3/4 Execution on consumable materials
     mat_use_index, mat_use_features, mat_use_loop = graph.loop_need_for_material()
     for i in mat_use_loop:
-        mat_features: NeedForMaterialFeatures = NeedForMaterialFeatures.from_tensor(mat_use_features[i], graph.features)
+        mat_features: NeedForMaterialFeatures = NeedForMaterialFeatures.from_tensor(mat_use_features[i], FC)
         p, o = graph.operations_g2i[mat_use_index[0, i].item()]
         m = graph.materials_g2i[mat_use_index[1, i].item()]
         operation: Operation = solution.projects[p].flat_operations[o]

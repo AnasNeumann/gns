@@ -18,22 +18,6 @@ NOT_YET = 0
 YES = 1
 NO = -1
 
-class State:
-    def __init__(self, items: Tensor, operations: Tensor, resources: Tensor, materials: Tensor, need_for_materials: EdgeStorage, need_for_resources: EdgeStorage, operation_assembly: EdgeStorage, item_assembly: EdgeStorage, precedences: EdgeStorage, same_types: EdgeStorage, device: str=""):
-        self.items: Tensor = items.clone().to(device)
-        self.operations: Tensor = operations.clone().to(device)
-        self.resources: Tensor = resources.clone().to(device)
-        self.materials: Tensor = materials.clone().to(device)
-        self.need_for_resources: EdgeStorage = need_for_resources.clone().to(device)
-        self.need_for_materials: EdgeStorage = need_for_materials.clone().to(device)
-        self.operation_assembly: EdgeStorage = operation_assembly
-        self.item_assembly: EdgeStorage = item_assembly
-        self.precedences: EdgeStorage = precedences
-        self.same_types: EdgeStorage = same_types
-    
-    def clone(self, device: str):
-        return State(self.items, self.operations, self.resources, self.materials, self.need_for_materials, self.need_for_resources, self.operation_assembly, self.item_assembly, self.precedences, self.same_types, device=device)
-
 class FeatureConfiguration:
     def __init__(self):
         self.operation = {
@@ -83,6 +67,57 @@ class FeatureConfiguration:
             'execution_time': 1,
             'quantity_needed': 2
         }
+FC: FeatureConfiguration = FeatureConfiguration()
+
+class State:
+    def __init__(self, items: Tensor, operations: Tensor, resources: Tensor, materials: Tensor, need_for_materials: EdgeStorage, need_for_resources: EdgeStorage, operation_assembly: EdgeStorage, item_assembly: EdgeStorage, precedences: EdgeStorage, same_types: EdgeStorage, device: str="", should_std: bool=True):
+        self.items: Tensor = items.clone().to(device)
+        self.operations: Tensor = operations.clone().to(device)
+        self.resources: Tensor = resources.clone().to(device)
+        self.materials: Tensor = materials.clone().to(device)
+        self.need_for_resources: EdgeStorage = need_for_resources.clone().to(device)
+        self.need_for_materials: EdgeStorage = need_for_materials.clone().to(device)
+        self.operation_assembly: EdgeStorage = operation_assembly
+        self.item_assembly: EdgeStorage = item_assembly
+        self.precedences: EdgeStorage = precedences
+        self.same_types: EdgeStorage = same_types
+        if should_std:
+            self.standardize(self.need_for_materials.edge_attr, FC.need_for_materials['execution_time'])
+            self.standardize(self.need_for_materials.edge_attr, FC.need_for_materials['quantity_needed'])
+            self.standardize(self.need_for_resources.edge_attr, FC.need_for_resources['current_processing_time'])
+            self.standardize(self.need_for_resources.edge_attr, FC.need_for_resources['start_time'])
+            self.standardize(self.need_for_resources.edge_attr, FC.need_for_resources['end_time'])
+            self.standardize(self.items, FC.item['start_time'])
+            self.standardize(self.items, FC.item['end_time'])
+            self.standardize(self.items, FC.item['outsourcing_cost'])
+            self.standardize(self.items, FC.item['outsourcing_time'])
+            self.standardize(self.items, FC.item['remaining_time'])
+            self.standardize(self.items, FC.item['parents'])
+            self.standardize(self.items, FC.item['children'])
+            self.standardize(self.items, FC.item['parents_physical_time'])
+            self.standardize(self.items, FC.item['children_time'])
+            self.standardize(self.operations, FC.operation['successors'])
+            self.standardize(self.operations, FC.operation['remaining_time'])
+            self.standardize(self.operations, FC.operation['remaining_resources'])
+            self.standardize(self.operations, FC.operation['remaining_materials'])
+            self.standardize(self.operations, FC.operation['available_time'])
+            self.standardize(self.operations, FC.operation['end_time'])
+            self.standardize(self.materials, FC.material['remaining_init_quantity'])
+            self.standardize(self.materials, FC.material['arrival_time'])
+            self.standardize(self.materials, FC.material['remaining_demand'])
+            self.standardize(self.resources, FC.resource['available_time'])
+            self.standardize(self.resources, FC.resource['remaining_operations'])
+            self.standardize(self.resources, FC.resource['similar_resources'])
+
+    def standardize(self, tensor: Tensor, pos: int):
+        """
+            Standardize a feature
+        """
+        data = tensor[:, pos]
+        min_val = data.min()
+        max_val = data.max()
+        _d = max_val - min_val
+        tensor[:, pos] = (data - min_val) / _d
 
 class OperationFeatures:
     def __init__(self, sync: num_feature, large_timescale: num_feature, successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, is_possible: num_feature):
@@ -206,8 +241,7 @@ class GraphInstance():
         self.current_design_value = []
         self.project_heads = []
 
-        self.features = FeatureConfiguration()
-        self.graph = HeteroData()
+        self.graph: HeteroData = HeteroData()
         self.device: str = device
         self.graph.to(device)
 
@@ -228,12 +262,12 @@ class GraphInstance():
         return id
     
     def add_dummy_item(self, device: str):
-        self.add_node('item', torch.tensor([[0.0 for _ in range(len(self.features.item))]], dtype=torch.float, device=device))
+        self.add_node('item', torch.tensor([[0.0 for _ in range(len(FC.item))]], dtype=torch.float, device=device))
         dummy_item_id = len(self.graph['item'].x)-1
         for head_id in self.project_heads:
             self.add_item_assembly(dummy_item_id, head_id) 
         for item_id, item in enumerate(self.graph['item'].x):
-            if item_id<dummy_item_id and item[self.features.item['children']] == 0:
+            if item_id<dummy_item_id and item[FC.item['children']] == 0:
                 self.add_item_assembly(item_id, dummy_item_id)
 
     def add_material(self, m: int, features: MaterialFeatures):
@@ -306,26 +340,26 @@ class GraphInstance():
         return self.graph['material'].x
 
     def operation(self, id: int, feature: str):
-        return self.graph['operation'].x[id][self.features.operation[feature]].item()
+        return self.graph['operation'].x[id][FC.operation[feature]].item()
 
     def material(self, id: int, feature: str):
-        return self.graph['material'].x[id][self.features.material[feature]].item()
+        return self.graph['material'].x[id][FC.material[feature]].item()
     
     def resource(self, id: int, feature: str):
-        return self.graph['resource'].x[id][self.features.resource[feature]].item()
+        return self.graph['resource'].x[id][FC.resource[feature]].item()
     
     def need_for_material(self, operation_id: int, material_id: int, feature: str):
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
-        return self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]].item()
+        return self.graph[key].edge_attr[idx, FC.need_for_materials[feature]].item()
     
     def need_for_resource(self, operation_id: int, resource_id: int, feature: str):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
-        return self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]].item()
+        return self.graph[key].edge_attr[idx, FC.need_for_resources[feature]].item()
 
     def item(self, id: int, feature: str):
-        return self.graph['item'].x[id][self.features.item[feature]].item()
+        return self.graph['item'].x[id][FC.item[feature]].item()
     
     def del_edge(self, edge_type: str, id_1: int, id_2: int):
         edges_idx = self.graph[edge_type].edge_index
@@ -341,59 +375,59 @@ class GraphInstance():
 
     def update_operation(self, id: int, updates: list[(str, int)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['operation'].x[id][self.features.operation[feature]] = value if not maxx else max(value, self.operation(id, feature))
+            self.graph['operation'].x[id][FC.operation[feature]] = value if not maxx else max(value, self.operation(id, feature))
         
     def update_resource(self, id: int, updates: list[(str, int)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['resource'].x[id][self.features.resource[feature]] = value if not maxx else max(value, self.resource(id, feature))
+            self.graph['resource'].x[id][FC.resource[feature]] = value if not maxx else max(value, self.resource(id, feature))
 
     def inc_resource(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
-            self.graph['resource'].x[id][self.features.resource[feature]] += value
+            self.graph['resource'].x[id][FC.resource[feature]] += value
     
     def update_material(self, id: int, updates: list[(str, int)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['material'].x[id][self.features.material[feature]] = value if not maxx else max(value, self.material(id, feature))
+            self.graph['material'].x[id][FC.material[feature]] = value if not maxx else max(value, self.material(id, feature))
 
     def inc_material(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
-            self.graph['material'].x[id][self.features.material[feature]] += value
+            self.graph['material'].x[id][FC.material[feature]] += value
     
     def update_item(self, id: int, updates: list[(str, int)], maxx: bool = False, minn: bool = False):
         for feature, value in updates:
-            self.graph['item'].x[id][self.features.item[feature]] = value if not maxx else max(value, self.item(id, feature)) if not minn else min(value, self.item(id, feature))
+            self.graph['item'].x[id][FC.item[feature]] = value if not maxx else max(value, self.item(id, feature)) if not minn else min(value, self.item(id, feature))
 
     def inc_item(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
-            self.graph['item'].x[id][self.features.item[feature]] += value
+            self.graph['item'].x[id][FC.item[feature]] += value
     
     def inc_operation(self, id: int, updates: list[(str, int)]):
         for feature, value in updates:
-            self.graph['operation'].x[id][self.features.operation[feature]] += value
+            self.graph['operation'].x[id][FC.operation[feature]] += value
 
     def update_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, int)], maxx: bool = False):
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
         for feature, value in updates:
-            self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]] = value if not maxx else max(value, self.need_for_material(operation_id, material_id, feature))
+            self.graph[key].edge_attr[idx, FC.need_for_materials[feature]] = value if not maxx else max(value, self.need_for_material(operation_id, material_id, feature))
 
     def update_need_for_resource(self, operation_id: int, resource_id: int, updates: list[(str, int)], maxx: bool = False):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
         for feature, value in updates:
-            self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]] = value if not maxx else max(value, self.need_for_resource(operation_id, resource_id, feature))
+            self.graph[key].edge_attr[idx, FC.need_for_resources[feature]] = value if not maxx else max(value, self.need_for_resource(operation_id, resource_id, feature))
 
     def inc_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, int)]):
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
         for feature, value in updates:
-            self.graph[key].edge_attr[idx, self.features.need_for_materials[feature]] += value
+            self.graph[key].edge_attr[idx, FC.need_for_materials[feature]] += value
 
     def inc_need_for_resource(self, operation_id: int, resource_id: int, updates: list[(str, int)]):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
         for feature, value in updates:
-            self.graph[key].edge_attr[idx, self.features.need_for_resources[feature]] += value
+            self.graph[key].edge_attr[idx, FC.need_for_resources[feature]] += value
 
     def is_item_complete(self, item_id: int):
         if self.item(item_id, 'remaining_physical_time')>0 \
