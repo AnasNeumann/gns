@@ -82,42 +82,24 @@ class State:
         self.precedences: EdgeStorage = precedences
         self.same_types: EdgeStorage = same_types
         if should_std:
-            self.standardize(self.need_for_materials.edge_attr, FC.need_for_materials['execution_time'])
-            self.standardize(self.need_for_materials.edge_attr, FC.need_for_materials['quantity_needed'])
-            self.standardize(self.need_for_resources.edge_attr, FC.need_for_resources['current_processing_time'])
-            self.standardize(self.need_for_resources.edge_attr, FC.need_for_resources['start_time'])
-            self.standardize(self.need_for_resources.edge_attr, FC.need_for_resources['end_time'])
-            self.standardize(self.items, FC.item['start_time'])
-            self.standardize(self.items, FC.item['end_time'])
-            self.standardize(self.items, FC.item['outsourcing_cost'])
-            self.standardize(self.items, FC.item['outsourcing_time'])
-            self.standardize(self.items, FC.item['remaining_time'])
-            self.standardize(self.items, FC.item['parents'])
-            self.standardize(self.items, FC.item['children'])
-            self.standardize(self.items, FC.item['parents_physical_time'])
-            self.standardize(self.items, FC.item['children_time'])
-            self.standardize(self.operations, FC.operation['successors'])
-            self.standardize(self.operations, FC.operation['remaining_time'])
-            self.standardize(self.operations, FC.operation['remaining_resources'])
-            self.standardize(self.operations, FC.operation['remaining_materials'])
-            self.standardize(self.operations, FC.operation['available_time'])
-            self.standardize(self.operations, FC.operation['end_time'])
-            self.standardize(self.materials, FC.material['remaining_init_quantity'])
-            self.standardize(self.materials, FC.material['arrival_time'])
-            self.standardize(self.materials, FC.material['remaining_demand'])
-            self.standardize(self.resources, FC.resource['available_time'])
-            self.standardize(self.resources, FC.resource['remaining_operations'])
-            self.standardize(self.resources, FC.resource['similar_resources'])
+            self.standardize(self.need_for_materials.edge_attr, FC.need_for_materials, ['execution_time', 'quantity_needed'])
+            self.standardize(self.need_for_resources.edge_attr, FC.need_for_resources, ['current_processing_time', 'start_time', 'end_time'])
+            self.standardize(self.items, FC.item, ['start_time', 'end_time', 'outsourcing_cost', 'outsourcing_time', 'remaining_time', 'parents', 'children', 'parents_physical_time', 'children_time'])
+            self.standardize(self.operations, FC.operation, ['successors', 'remaining_time', 'remaining_resources', 'remaining_materials', 'available_time', 'end_time'])
+            self.standardize(self.materials, FC.material, ['remaining_init_quantity', 'arrival_time', 'remaining_demand'])
+            self.standardize(self.resources, FC.resource, ['available_time', 'remaining_operations', 'similar_resources'])
 
-    def standardize(self, tensor: Tensor, pos: int):
+    def standardize(self, tensor: Tensor, conf: dict, features: list[str]):
         """
             Standardize a feature
         """
-        data = tensor[:, pos]
-        min_val = data.min()
-        max_val = data.max()
-        _d = max_val - min_val
-        tensor[:, pos] = (data - min_val) / _d
+        for feature in features:
+            pos: int = conf[feature]
+            data = tensor[:, pos]
+            min_val = data.min()
+            max_val = data.max()
+            _d = max_val - min_val
+            tensor[:, pos] = (data - min_val) / _d
 
 class OperationFeatures:
     def __init__(self, sync: num_feature, large_timescale: num_feature, successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, is_possible: num_feature):
