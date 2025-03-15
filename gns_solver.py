@@ -195,7 +195,7 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id: int, t: in
         end_date = max(end_date, child_time)
     return graph, end_date, cost
 
-def apply_outsourcing_to_direct_parent(instance: Instance, graph: GraphInstance, previous_operations: list, item_id: int, p: int, e: int, end_date: int):
+def apply_outsourcing_to_direct_parent(instance: Instance, graph: GraphInstance, previous_operations: list, p: int, e: int, end_date: int):
     """
         Apply an outsourcing decision to the direct parent
     """
@@ -498,9 +498,10 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 item_id, outsourcing_choice = poss_actions[idx]
                 p, e = graph.items_g2i[item_id]
                 if outsourcing_choice == YES:
-                    graph, _end_date, _local_price = outsource_item(graph, instance, item_id, t, enforce_time=False)
-                    graph = apply_outsourcing_to_direct_parent(instance, graph, previous_operations, item_id, p, e, _end_date, _local_price)
+                    graph, _end_date, _price = outsource_item(graph, instance, item_id, t, enforce_time=False)
+                    graph = apply_outsourcing_to_direct_parent(instance, graph, previous_operations, p, e, _end_date)
                     current_cmax = max(current_cmax, _end_date)
+                    current_cost = current_cost + _price 
                     DEBUG_PRINT(f"Outsourcing item {item_id} -> ({p},{e})...")
                 else:
                     graph.update_item(item_id, [('outsourced', NO)])
@@ -523,7 +524,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 graph, utilization, required_types_of_resources, _operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, utilization, t)
                 if instance.simultaneous[p][o]:
                     DEBUG_PRINT("\t >> Simulatenous...")
-                    graph, utilization, required_types_of_resources, required_types_of_materials, _operation_end = schedule_other_resources_if_simultaneous(instance, graph, required_types_of_resources, required_types_of_materials, utilization, operation_id, resource_id, p, o, t, _max_ancestors_end, _operation_end)
+                    graph, utilization, required_types_of_resources, required_types_of_materials, _operation_end = schedule_other_resources_if_simultaneous(instance, graph, required_types_of_resources, required_types_of_materials, utilization, operation_id, resource_id, p, o, t, _operation_end)
                 graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, _operation_end)
                 DEBUG_PRINT(f"End of scheduling at time {_operation_end}...")
                 current_cmax = max(current_cmax, _operation_end)
@@ -629,7 +630,7 @@ def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, 
     print("Fine-tuning models with MAPPO (on target instance)...")
     multi_stage_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, id=id, size=size, interactive=interactive, debug_mode=debug_mode)
 
-def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mode: bool, path: str, repetitions: int=1):
+def solve_only_target(id: str, size: str, run_number: int, device: str, path: str, repetitions: int=1):
     """
         Solve the target instance (size, id) only using inference
     """
@@ -646,7 +647,7 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mo
     shared_critic = shared_critic.to(device)
     for rep in range(repetitions):
         print(f"SOLVING INSTANCE {size}_{id} (repetition {rep+1}/{repetitions})...")
-        graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, trainable=[False for _ in agents], device=device, debug_mode=debug_mode, greedy=(rep==0))
+        graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, trainable=[False for _ in agents], device=device, greedy=(rep==0))
         _obj = objective_value(current_cmax, current_cost, target_instance.w_makespan)/100
         if best_obj < 0 or _obj < best_obj:
             best_obj = _obj
@@ -669,14 +670,14 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, debug_mo
     with open(directory.solutions+'/'+size+'/gns_'+str(run_number)+'_solution_'+id+'.pkl', 'wb') as f:
             pickle.dump(solution, f)
 
-def solve_all_instances(run_number: int, device: str, debug_mode: bool, path: str):
+def solve_all_instances(run_number: int, device: str, path: str):
     """
         Solve all instances only in inference mode
     """
-    instances: list[Instance] = load_training_dataset(path=path, train=False, debug_mode=debug_mode)
+    instances: list[Instance] = load_training_dataset(path=path, train=False)
     for i in instances:
         if (i.size, i.id) not in [('s', 172)]:
-            solve_only_target(id=str(i.id), size=str(i.size), run_number=run_number, device=device, debug_mode=debug_mode, path=path, repetitions=SOLVING_REPETITIONS)
+            solve_only_target(id=str(i.id), size=str(i.size), run_number=run_number, device=device, path=path, repetitions=SOLVING_REPETITIONS)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 GNS solver")
@@ -709,8 +710,8 @@ if __name__ == '__main__':
         if to_bool(args.target):
             # SOLVE ACTUAL INSTANCE: python gns_solver.py --target=true --size=s --id=151 --train=false --mode=test --path=./ --number=1
             # TRY ON DEBUG INSTANCE: python gns_solver.py --target=true --size=d --id=debug --train=false --mode=test --path=./ --number=1
-            solve_only_target(id=args.id, size=args.size, run_number=args.number, device=_device, debug_mode=_debug_mode, path=args.path)
+            solve_only_target(id=args.id, size=args.size, run_number=args.number, device=_device, path=args.path)
         else:
             # python gns_solver.py --train=false --target=false --mode=test --path=./ --number=1
-            solve_all_instances(run_number=args.number, device=_device, debug_mode=_debug_mode, path=args.path)
+            solve_all_instances(run_number=args.number, device=_device, path=args.path)
     print("===* END OF FILE *===")
