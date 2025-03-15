@@ -5,7 +5,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-w_final: float = 0.8
+w_final: float = 0.3
 standardization: float = 1.0
 
 class Decision:
@@ -34,7 +34,7 @@ class Decision:
         """
         d: Decision
         return d.type==self.type and d.target==self.target and d.value==self.value
-    
+
     def compute_reward(self, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1) -> float:
         """
             Compute the final reward

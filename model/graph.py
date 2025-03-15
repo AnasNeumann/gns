@@ -205,11 +205,6 @@ class GraphInstance():
         self.current_operation_type = []
         self.current_design_value = []
         self.project_heads = []
-        self.oustourcable_items: int = 0
-        self.oustourced_items: int = 0
-        self.nb_operations: int = 0
-        self.executed_operations: int = 0
-        self.mean_levels: float = 0.0
 
         self.features = FeatureConfiguration()
         self.graph = HeteroData()

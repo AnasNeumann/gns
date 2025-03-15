@@ -40,11 +40,9 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
         children = len(childrens),
         parents_physical_time = parents_physical_time,
         children_time = children_time,
-        start_time = estimated_start,
-        end_time = -1,
+        start_time = NOT_YET,
+        end_time = NOT_YET,
         is_possible = YES if head else NOT_YET))
-    if i.external[p][e]:
-        graph.oustourcable_items += 1
     start, end = i.get_operations_idx(p,e)
     physical_ops_ids: list = []
     pr_ids: list = []
@@ -68,7 +66,6 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
                     required_mat += 1
             else:
                 must_be_outsourced = True
-        _end_time = op_start+operation_mean_time
         op_id = graph.add_operation(p, o, OperationFeatures(
             sync = i.simultaneous[p][o],
             large_timescale = i.in_days[p][o],
@@ -76,28 +73,27 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
             remaining_time = operation_load,
             remaining_resources = required_res,
             remaining_materials = required_mat,
-            available_time = op_start,
-            end_time = _end_time,
+            available_time = NOT_YET,
+            end_time = NOT_YET,
             is_possible = YES if (head and (o == start)) else NOT_YET))
         if not i.is_design[p][o]:
             physical_ops_ids.append(op_id)
         graph.add_operation_assembly(item_id, op_id)
         for rt in i.required_rt(p,o):
-            graph.nb_operations += 1
             for r in i.resources_by_type(rt):
                 if i.finite_capacity[r]:
                     _ext =  i.execution_time[r][p][o]
                     graph.add_need_for_resources(op_id, graph.resources_i2g[r], NeedForResourceFeatures(
                         status = NOT_YET,
                         current_processing_time = _ext,
-                        start_time = op_start,
-                        end_time = op_start+_ext))
+                        start_time = NOT_YET,
+                        end_time = NOT_YET))
                     if not i.is_design[p][o]:
                         pr_ids.append((op_id, graph.resources_i2g[r]))
                 else:
                     graph.add_need_for_materials(op_id, graph.materials_i2g[r], NeedForMaterialFeatures(
                         status = NOT_YET,
-                        execution_time = op_start,
+                        execution_time = NOT_YET,
                         quantity_needed = i.quantity_needed[r][p][o]))
                     if not i.is_design[p][o]:
                         pm_ids.append((op_id, graph.materials_i2g[r]))
@@ -110,18 +106,9 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
         graph.add_item_assembly(item_id, child_id)
         estimated_childrend_end = max(estimated_childrend_end, estimated_end_child)
         estimated_children_cost += child_cost
-    if estimated_childrend_end > _base_design_end:
-        _shift = estimated_childrend_end - _base_design_end
-        for op_id in physical_ops_ids:
-            graph.inc_operation(op_id, [('available_time', _shift), ('end_time', _shift)])
-        for op_id, r_id in pr_ids:
-            graph.inc_need_for_resource(op_id, r_id, [('start_time', _shift), ('end_time', _shift)])
-        for op_id, m_id in pm_ids:
-            graph.inc_need_for_material(op_id, m_id, [('execution_time', _shift)])
     external_end = estimated_start + i.outsourcing_time[p][e]
     internal_end = estimated_childrend_end + physical_mean_time
     estimated_end = external_end if must_be_outsourced else min(external_end, internal_end) if i.external[p][e] else internal_end
-    graph.update_item(item_id, [('end_time', estimated_end)])
     mandatory_cost = estimated_children_cost + (i.external_cost[p][e] if must_be_outsourced else 0)
     return graph, item_id, estimated_end, mandatory_cost
 
@@ -150,21 +137,6 @@ def build_precedence(i: Instance, graph: GraphInstance):
                         succ_id = graph.operations_i2g[p][pfp]
                         graph.add_precedence(o_id, succ_id)
     return graph
-
-def discover_levels(i: Instance, p: int, e: int):
-    children: list[int] = i.get_children(p, e, direct=True)
-    max_sub_levels = 0
-    if children:   
-        for child in children:
-            max_sub_levels = max(max_sub_levels, discover_levels(i, p, child))
-    return 1 + max_sub_levels
-
-def discover_mean_levels(i: Instance):
-    sum_levels = 0
-    nb_projects = len(i.E_size)
-    for p in i.loop_projects():
-        sum_levels += discover_levels(i, p, i.project_head(p))
-    return sum_levels / nb_projects
 
 def translate(i: Instance, device: str):
     graph = GraphInstance(device=device)
@@ -205,5 +177,4 @@ def translate(i: Instance, device: str):
     previous_operations, next_operations = i.build_next_and_previous_operations()
     related_items: Tensor = graph.flatten_related_items(device)
     parent_items: Tensor = graph.flatten_parents(device)
-    graph.mean_levels = discover_mean_levels(i)
     return graph, Cmax_lower_bound, cost_lower_bound, previous_operations, next_operations, related_items, parent_items
