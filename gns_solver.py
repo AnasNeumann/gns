@@ -207,16 +207,16 @@ def apply_outsourcing_to_direct_parent(instance: Instance, graph: GraphInstance,
     _parent = instance.get_direct_parent(p, e)
     for o in instance.first_physical_operations(p, _parent):
         next_good_to_go: bool = True
+        _t = next_possible_time(instance, end_date, p, o)
+        graph.update_operation(graph.operations_i2g[p][o], [('available_time', _t)], maxx=True)
         for previous in previous_operations[p][o]:
             if not graph.is_operation_complete(graph.operations_i2g[p][previous]):
-                DEBUG_PRINT(f"\t >> Cannot open parent' first physical operation ({p},{o}) due to ({p},{previous}) not finished!")
+                DEBUG_PRINT(f"\t >> Cannot open parent' first physical operation ({p},{o}) due to ({p},{previous}) not finished! BUT IT WILL BE MOVED TO AT LEAST {_t}")
                 next_good_to_go = False
                 break
         if next_good_to_go:
-            _t = next_possible_time(instance, end_date, p, o)
             DEBUG_PRINT(f"\t >> Opening first physical operation ({p},{o}) of parent {_parent} at {_t}!")
             graph.update_operation(graph.operations_i2g[p][o], [('is_possible', True)])
-            graph.update_operation(graph.operations_i2g[p][o], [('available_time', _t)], maxx=True)
     return graph
 
 def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: int, material_id: int, required_types_of_materials:list[list[list[int]]], current_time: int):
@@ -391,7 +391,7 @@ def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
     else:
         return ((current_time // scale) + 1) * scale
 
-def manage_current_time(graph: GraphInstance, utilization: list, t: int):
+def manage_current_time(graph: GraphInstance, instance: Instance, utilization: list, t: int):
     """
         Manage the queue of possible actions
     """
@@ -409,9 +409,16 @@ def manage_current_time(graph: GraphInstance, utilization: list, t: int):
     for operation_id in graph.loop_operations():
         if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
             available_time = graph.operation(operation_id, 'available_time')
-            DEBUG_PRINT(f"\t --> operation {operation_id} can be scheduled since {available_time} [t={t}]")
-            if available_time>t and (available_time<next_date or next_date<0):
-                next_date = available_time
+            if available_time>t:
+                DEBUG_PRINT(f"\t --> operation {operation_id} could be scheduled at {available_time} [t={t}]")
+                if (available_time<next_date or next_date<0):
+                    next_date = available_time
+            else:
+                p, o = graph.operations_g2i[operation_id]
+                _next_possible_date = next_possible_time(instance, t, p, o)
+                DEBUG_PRINT(f"\t --> operation {operation_id} can be scheduled since {available_time}, next possible date is {_next_possible_date} [t={t}]")
+                if _next_possible_date>t and (_next_possible_date<next_date or next_date<0):
+                    next_date = _next_possible_date
     if next_date>=0:
         t = next_date
         if t > 0:
@@ -556,13 +563,14 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             old_cost = current_cost
             old_cmax = current_cmax
         else: # No more possible action at time t
-            graph, utilization, t, terminate = manage_current_time(graph, utilization, t)
+            graph, utilization, t, terminate = manage_current_time(graph, instance, utilization, t)
             if terminate:
                 break
     if train:
-        reward_MEMORY.add_or_update_decision(_local_decisions[0], a=alpha, final_cost=current_cost, final_makespan=current_cmax, init_cmax=lb_cmax, init_cost=lb_cost)
-        for decision in _local_decisions:
-            training_results.add_reward(agent_name=decision.agent_name, reward=decision.reward)  
+        if _local_decisions:
+            reward_MEMORY.add_or_update_decision(_local_decisions[0], a=alpha, final_cost=current_cost, final_makespan=current_cmax, init_cmax=lb_cmax, init_cost=lb_cost)
+            for decision in _local_decisions:
+                training_results.add_reward(agent_name=decision.agent_name, reward=decision.reward)  
         return training_results, reward_MEMORY, graph, current_cmax, current_cost
     else:
         return graph, current_cmax, current_cost

@@ -99,7 +99,8 @@ class State:
             min_val = data.min()
             max_val = data.max()
             _d = max_val - min_val
-            tensor[:, pos] = (data - min_val) / _d
+            if _d > 0:
+                tensor[:, pos] = (data - min_val) / _d
 
 class OperationFeatures:
     def __init__(self, sync: num_feature, large_timescale: num_feature, successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, is_possible: num_feature):
