@@ -1,7 +1,7 @@
 import pickle
 import os
 from model.instance import Instance
-from tools.common import directory, freeze, unfreeze, unfreeze_all, freeze_several
+from tools.common import directory, freeze, unfreeze, unfreeze_all, freeze_several_and_unfreeze_others
 import torch
 torch.autograd.set_detect_anomaly(True)
 import random
@@ -263,7 +263,7 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
     
     if run_number ==1:
         print("I. TRAINING STAGE 1: scheduling agent")
-        freeze_several(agents, [AGENTS[OUTSOURCING], AGENTS[MATERIAL_USE]])
+        freeze_several_and_unfreeze_others(agents, [AGENTS[OUTSOURCING], AGENTS[MATERIAL_USE]])
         agents = scheduling_stage(train_data=train_data,
                                   val_data=val_data,
                                   agents=agents, 
@@ -282,8 +282,7 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
     
     elif run_number ==2:
         print("II. TRAINING STAGE 2: material use agent with freezed embedding and critic layers")
-        unfreeze_all(agents)
-        freeze_several(agents, [AGENTS[SCHEDULING], AGENTS[OUTSOURCING]])
+        freeze_several_and_unfreeze_others(agents, [AGENTS[SCHEDULING], AGENTS[OUTSOURCING]])
         freeze(embedding_stack)
         freeze(shared_critic)
         agents = material_use_stage(train_data=train_data,
@@ -304,8 +303,7 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
     
     elif run_number ==3:
         print("III. TRAINING STAGE 3.1: outsourcing agent with freezed embedding and critic layers")
-        unfreeze_all(agents)
-        freeze_several(agents, [AGENTS[SCHEDULING], AGENTS[MATERIAL_USE]])
+        freeze_several_and_unfreeze_others(agents, [AGENTS[SCHEDULING], AGENTS[MATERIAL_USE]])
         freeze(embedding_stack)
         freeze(shared_critic)
         agents = outsourcing_stage(train_data=train_data,
@@ -327,6 +325,7 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
     elif run_number ==4:
         print("III. TRAINING STAGE 3.2: outsourcing agent and all layers")
         unfreeze(embedding_stack)
+        unfreeze(shared_critic)
         agents = outsourcing_stage(train_data=train_data,
                                    val_data=val_data,
                                    agents=agents,
@@ -346,8 +345,6 @@ def multi_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, 
     elif run_number ==5:
         print("IV. TRAINING STAGE 4: multi-agent with all layers")
         unfreeze_all(agents)
-        unfreeze(embedding_stack)
-        unfreeze(shared_critic)
         agents = multi_agent_stage(train_data=train_data,
                                    val_data=val_data,
                                    agents=agents, 

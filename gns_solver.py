@@ -83,13 +83,13 @@ def get_outourcing_actions(instance: Instance, graph: GraphInstance):
         actions.extend(reccursive_outourcing_actions(instance, graph, project_head))
     return actions
 
-def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInstance, operations: list[int], required_types_of_resources: list[list[list[int]]], required_types_of_materials: list[list[list[int]]], res_by_types: list[list[int]], current_time: int):
+def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInstance, operations: list[int], remaining_operations: list[int], required_types_of_resources: list[list[list[int]]], required_types_of_materials: list[list[list[int]]], res_by_types: list[list[int]], current_time: int):
     """
         Search possible material use and scheduling actions
     """
     scheduling_actions = []
     material_use_actions = []
-    ops_to_test = operations if operations else graph.loop_operations()
+    ops_to_test = operations if operations else remaining_operations
     for operation_id in ops_to_test:
         p, o = graph.operations_g2i[operation_id]
         e = instance.get_item_of_operation(p, o)
@@ -137,14 +137,14 @@ def get_scheduling_and_material_use_actions(instance: Instance, graph: GraphInst
                             material_use_actions.append((operation_id, mat_id))
     return scheduling_actions, material_use_actions
 
-def get_feasible_actions(instance: Instance, graph: GraphInstance, operations: list[int], required_types_of_resources: list[list[list[int]]], required_types_of_materials: list[list[list[int]]], res_by_types: list[list[int]], current_time: int):
+def get_feasible_actions(instance: Instance, graph: GraphInstance, remaining_outsourcable_items: list[int], operations: list[int], remaining_operations: list[int], required_types_of_resources: list[list[list[int]]], required_types_of_materials: list[list[list[int]]], res_by_types: list[list[int]], current_time: int):
     """
         Search next possible actions with priority between decision spaces (outsourcing >> scheduling >> material use)
     """
-    actions = get_outourcing_actions(instance, graph)
+    actions = [] if not remaining_outsourcable_items else get_outourcing_actions(instance, graph)
     type = OUTSOURCING
     if not actions:
-        scheduling_actions, material_use_actions = get_scheduling_and_material_use_actions(instance, graph, operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
+        scheduling_actions, material_use_actions = get_scheduling_and_material_use_actions(instance, graph, operations, remaining_operations, required_types_of_resources, required_types_of_materials, res_by_types, current_time)
         if scheduling_actions:
             actions = scheduling_actions
             type = SCHEDULING
@@ -157,7 +157,7 @@ def get_feasible_actions(instance: Instance, graph: GraphInstance, operations: l
 # =*= II. APPLY A DECISION MADE =*=
 # =====================================================
 
-def outsource_item(graph: GraphInstance, instance: Instance, item_id: int, t: int, enforce_time: bool=False):
+def outsource_item(graph: GraphInstance, instance: Instance, remaining_operations: list[int], item_id: int, t: int, enforce_time: bool=False):
     """
         Outsource item and children (reccursive down to the leaves)
     """
@@ -174,6 +174,7 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id: int, t: in
         ('end_time', end_date)])
     for o in instance.loop_item_operations(p,e):
         op_id = graph.operations_i2g[p][o]
+        remaining_operations.remove(op_id)
         graph.update_operation(op_id, [
             ('remaining_resources', 0),
             ('remaining_materials', 0),
@@ -190,10 +191,10 @@ def outsource_item(graph: GraphInstance, instance: Instance, item_id: int, t: in
                     graph.del_need_for_material(op_id, mat_id)
                     graph.inc_material(mat_id, [('remaining_demand', -1 * quantity_needed)])
     for child in instance.get_children(p, e, direct=True):
-        graph, child_time, child_cost = outsource_item(graph, instance, graph.items_i2g[p][child], outsourcing_start_time, enforce_time=True)
+        graph, remaining_operations, child_time, child_cost = outsource_item(graph, instance, remaining_operations, graph.items_i2g[p][child], outsourcing_start_time, enforce_time=True)
         cost += child_cost
         end_date = max(end_date, child_time)
-    return graph, end_date, cost
+    return graph,remaining_operations, end_date, cost
 
 def apply_outsourcing_to_direct_parent(instance: Instance, graph: GraphInstance, previous_operations: list, p: int, e: int, end_date: int):
     """
@@ -239,7 +240,7 @@ def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: i
     required_types_of_materials[p][o].remove(rt)
     return graph, required_types_of_materials
 
-def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: int, resource_id: int, required_types_of_resources: list[list[list[int]]], utilization: list[float], current_time: int):
+def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: int, resource_id: int, required_types_of_resources: list[list[list[int]]], current_time: int):
     """
         Schedule an operation on a resource
     """
@@ -257,7 +258,6 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
         ('status', YES),
         ('start_time', current_time),
         ('end_time', operation_end)])
-    utilization[resource_id] += current_processing_time
     graph.current_operation_type[resource_id] = instance.get_operation_type(p, o)
     for d in range(instance.nb_settings):
         graph.current_design_value[resource_id][d] == instance.design_value[p][o][d]
@@ -278,9 +278,9 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     if not instance.is_design[p][o]:
         for child in instance.get_children(p, e, direct=False):
             graph.inc_item(graph.items_i2g[p][child], [('parents_physical_time', -estimated_processing_time)])
-    return graph, utilization, required_types_of_resources, operation_end
+    return graph, required_types_of_resources, operation_end
 
-def schedule_other_resources_if_simultaneous(instance: Instance, graph: GraphInstance, required_types_of_resources: int, required_types_of_materials: int, utilization: list, operation_id: int, resource_id: int, p: int, o: int, t: int, operation_end: int):
+def schedule_other_resources_if_simultaneous(instance: Instance, graph: GraphInstance, required_types_of_resources: int, required_types_of_materials: int, operation_id: int, resource_id: int, p: int, o: int, t: int, operation_end: int):
     """
         Also schedule other resources if the operation is simultaneous
     """
@@ -293,7 +293,7 @@ def schedule_other_resources_if_simultaneous(instance: Instance, graph: GraphIns
                     if instance.finite_capacity[r]:
                         other_resource_id = graph.resources_i2g[r]
                         if graph.resource(other_resource_id, 'available_time') <= t:
-                            graph, utilization, required_types_of_resources, op_end = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, utilization, t)
+                            graph, required_types_of_resources, op_end = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, t)
                             operation_end = max(operation_end, op_end)
                             found = True
                             break
@@ -301,39 +301,38 @@ def schedule_other_resources_if_simultaneous(instance: Instance, graph: GraphIns
                         graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, graph.materials_i2g[r], required_types_of_materials, t)
                         found = True
                         break
-    return graph, utilization, required_types_of_resources, required_types_of_materials, operation_end
+    return graph, required_types_of_resources, required_types_of_materials, operation_end
 
 def try_to_open_next_operations(graph: GraphInstance, instance: Instance, previous_operations: list[list[list[int]]], next_operations: list[list[list[int]]], operation_id: int, available_time: int): 
     """
         Try to open next operations after finishing using a resource or material
     """
-    if graph.is_operation_complete(operation_id):
-        p, o = graph.operations_g2i[operation_id]
-        e = instance.get_item_of_operation(p, o)
-        for next in next_operations[p][o]:
-            next_good_to_go = True
-            next_id = graph.operations_i2g[p][next]
-            for previous in previous_operations[p][next]:
-                if previous != operation_id and not graph.is_operation_complete(graph.operations_i2g[p][previous]):
-                    next_good_to_go = False
-                    break
-            next_time = next_possible_time(instance, available_time, p, next)
-            graph.update_operation(next_id, [('available_time', next_time)], maxx=True)
-            if next_good_to_go:
-                DEBUG_PRINT(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time} in its own timescale...')
-                graph.update_operation(next_id, [('is_possible', YES)])
-        if instance.is_last_design(p, e, o):
-            for child in instance.get_children(p, e, direct=True):
-                child_id = graph.items_i2g[p][child]
-                if instance.external[p][child]:
-                    DEBUG_PRINT(f'Enabling item {child_id} -> ({p},{child}) for outsourcing (decision yet to make)...')
-                graph.update_item(child_id, [('is_possible', YES)])
-                graph.update_item(child_id, [('start_time', available_time)], maxx=True)
+    p, o = graph.operations_g2i[operation_id]
+    e = instance.get_item_of_operation(p, o)
+    for next in next_operations[p][o]:
+        next_good_to_go = True
+        next_id = graph.operations_i2g[p][next]
+        for previous in previous_operations[p][next]:
+            if previous != operation_id and not graph.is_operation_complete(graph.operations_i2g[p][previous]):
+                next_good_to_go = False
+                break
+        next_time = next_possible_time(instance, available_time, p, next)
+        graph.update_operation(next_id, [('available_time', next_time)], maxx=True)
+        if next_good_to_go:
+            DEBUG_PRINT(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time} in its own timescale...')
+            graph.update_operation(next_id, [('is_possible', YES)])
+    if instance.is_last_design(p, e, o):
+        for child in instance.get_children(p, e, direct=True):
+            child_id = graph.items_i2g[p][child]
+            if instance.external[p][child]:
+                DEBUG_PRINT(f'Enabling item {child_id} -> ({p},{child}) for outsourcing (decision yet to make)...')
+            graph.update_item(child_id, [('is_possible', YES)])
+            graph.update_item(child_id, [('start_time', available_time)], maxx=True)
     return graph
 
-# ================================
-# =*= III. AUXILIARY FUNCTIONS =*=
-# ================================
+# ====================================================
+# =*= III. AUXILIARY FUNCTIONS: BUILD INIT OBJECTS =*=
+# ====================================================
 
 def build_required_resources(i: Instance):
     """
@@ -354,6 +353,47 @@ def build_required_resources(i: Instance):
                     else:
                         required_types_of_materials[p][o].append(rt)
     return required_types_of_resources, required_types_of_materials, res_by_types
+
+def build_remaining_operations(graph: GraphInstance) -> list[int]:
+    """
+        Build all the remaining operations to execute
+    """
+    remaining_operations: list[int] = []
+    for op_id in graph.loop_operations():
+        remaining_operations.append(op_id)
+    return remaining_operations
+
+def build_remaning_outsourcable_items(graph: GraphInstance) -> list[int]:
+    """
+        Build all the remaining outsourcable items to test
+    """
+    remaining_oustourcable_items: list[int] = []
+    for item_id in graph.loop_items():
+        if graph.item(item_id, 'outsourced') == NOT_YET:
+            remaining_oustourcable_items.append(item_id)
+    return remaining_oustourcable_items
+
+def build_remaining_materials(graph: GraphInstance) -> list[int]:
+    """
+        Build all the remaining consumable/renewable materials to test
+    """
+    remaining_materials: list[int] = []
+    for mat_id in graph.loop_materials():
+        remaining_materials.append(mat_id)
+    return remaining_materials
+
+def build_remaining_resource(graph: GraphInstance) -> list[int]:
+    """
+        Build all the remaining finite-capacity resources to test
+    """
+    remaining_resource: list[int] = []
+    for res_id in graph.loop_resources():
+        remaining_resource.append(res_id)
+    return remaining_resource
+
+# =====================================================
+# =*= IV. EXECUTE ONE INSTANCE =*=
+# =====================================================
 
 def objective_value(cmax: int, cost: int, cmax_weight: float):
     """
@@ -391,22 +431,26 @@ def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
     else:
         return ((current_time // scale) + 1) * scale
 
-def manage_current_time(graph: GraphInstance, instance: Instance, utilization: list, t: int):
+def manage_current_time(graph: GraphInstance, instance: Instance, remaining_resources: list[int], remaining_materials: list[int], remaining_operations: list[int], t: int):
     """
         Manage the queue of possible actions
     """
     next_date = -1
-    for material_id in graph.loop_materials():
+    for material_id in remaining_materials:
         arrival_time = graph.material(material_id, 'arrival_time')
+        if arrival_time<t:
+            remaining_materials.remove(material_id)
         if arrival_time>t and (arrival_time<next_date or next_date<0):
             DEBUG_PRINT(f"\t --> New quantity of material {material_id} is available at time {arrival_time} [t={t}]")
             next_date = arrival_time
-    for resource_id in graph.loop_resources():
+    for resource_id in remaining_resources:
+        if graph.resource(resource_id, 'remaining_operations') <= 0:
+            remaining_resources.remove(resource_id)
         available_time = graph.resource(resource_id, 'available_time')
         DEBUG_PRINT(f"\t --> Machine {resource_id} is available at time {available_time} [t={t}]")
         if available_time>t and (available_time<next_date or next_date<0):
             next_date = available_time
-    for operation_id in graph.loop_operations():
+    for operation_id in remaining_operations:
         if graph.operation(operation_id, 'is_possible') == YES and (graph.operation(operation_id, 'remaining_resources')>0 or graph.operation(operation_id, 'remaining_materials')>0):
             available_time = graph.operation(operation_id, 'available_time')
             if available_time>t:
@@ -421,22 +465,18 @@ def manage_current_time(graph: GraphInstance, instance: Instance, utilization: l
                     next_date = _next_possible_date
     if next_date>=0:
         t = next_date
-        if t > 0:
-            for res_id in graph.loop_resources():
-                graph.update_resource(res_id, [('utilization_ratio', utilization[res_id] / t)])
         DEBUG_PRINT(f"New current time t={t}...")
-        return graph, utilization, t, False
+        return graph, remaining_resources, remaining_materials, t, False
     else:
-        return graph, utilization, t, True
-        
-# =====================================================
-# =*= IV. EXECUTE ONE INSTANCE =*=
-# =====================================================
-
+        return graph, remaining_resources, remaining_materials, t, True
+    
 def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, greedy: bool = False, fixed_alpha: float = -1, reward_MEMORY: Memory = None):
     graph, lb_cmax, lb_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
-    utilization: list = [0 for _ in graph.loop_resources()]
     required_types_of_resources, required_types_of_materials, res_by_types = build_required_resources(instance)
+    remaining_operations = build_remaining_operations(graph)
+    remaining_outsourcable_items = build_remaning_outsourcable_items(graph)
+    remaining_materials = build_remaining_materials(graph)
+    remaining_resources = build_remaining_resource(graph)
     t: int = 0
     _agents_names: list[str] = []
     outsourcing_training_stage: bool = False
@@ -470,7 +510,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
     operations_to_test = []
     DEBUG_PRINT(f"Init Cmax: {lb_cmax} - Init cost: {lb_cost}$")
     while not terminate:
-        poss_actions, actions_type = get_feasible_actions(instance, graph, operations_to_test, required_types_of_resources, required_types_of_materials, res_by_types, t)
+        poss_actions, actions_type = get_feasible_actions(instance, graph, remaining_outsourcable_items, operations_to_test, remaining_operations, required_types_of_resources, required_types_of_materials, res_by_types, t)
         DEBUG_PRINT(f"Current possible {ACTIONS_NAMES[actions_type]} actions: {poss_actions}")
         if poss_actions:
             if actions_type == SCHEDULING:
@@ -505,10 +545,11 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 item_id, outsourcing_choice = poss_actions[idx]
                 p, e = graph.items_g2i[item_id]
                 if outsourcing_choice == YES:
-                    graph, _end_date, _price = outsource_item(graph, instance, item_id, t, enforce_time=False)
+                    graph, remaining_operations, _end_date, _price = outsource_item(graph, instance, remaining_operations, item_id, t, enforce_time=False)
                     graph = apply_outsourcing_to_direct_parent(instance, graph, previous_operations, p, e, _end_date)
                     current_cmax = max(current_cmax, _end_date)
                     current_cost = current_cost + _price 
+                    remaining_outsourcable_items.remove(item_id)
                     DEBUG_PRINT(f"Outsourcing item {item_id} -> ({p},{e})...")
                 else:
                     graph.update_item(item_id, [('outsourced', NO)])
@@ -525,14 +566,16 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                                                     parent=_local_decisions[-1] if _local_decisions else None, 
                                                     use_cost=True))
             elif actions_type == SCHEDULING: # scheduling action
-                operation_id, resource_id = poss_actions[idx]    
+                operation_id, resource_id = poss_actions[idx]
                 p, o = graph.operations_g2i[operation_id]
                 DEBUG_PRINT(f"Scheduling: operation {operation_id} -> ({p},{o}) on resource {graph.resources_g2i[resource_id]} at time {t}...")     
-                graph, utilization, required_types_of_resources, _operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, utilization, t)
+                graph, required_types_of_resources, _operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, t)
                 if instance.simultaneous[p][o]:
                     DEBUG_PRINT("\t >> Simulatenous...")
-                    graph, utilization, required_types_of_resources, required_types_of_materials, _operation_end = schedule_other_resources_if_simultaneous(instance, graph, required_types_of_resources, required_types_of_materials, utilization, operation_id, resource_id, p, o, t, _operation_end)
-                graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, _operation_end)
+                    graph, required_types_of_resources, required_types_of_materials, _operation_end = schedule_other_resources_if_simultaneous(instance, graph, required_types_of_resources, required_types_of_materials, operation_id, resource_id, p, o, t, _operation_end)
+                if graph.is_operation_complete(operation_id):
+                    remaining_operations.remove(operation_id)
+                    graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, _operation_end)
                 DEBUG_PRINT(f"End of scheduling at time {_operation_end}...")
                 current_cmax = max(current_cmax, _operation_end)
                 if scheduling_training_stage:
@@ -549,7 +592,9 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 p, o = graph.operations_g2i[operation_id]
                 DEBUG_PRINT(f"Material use: operation {operation_id} -> ({p},{o}) on material {graph.materials_g2i[material_id]}...")  
                 graph, required_types_of_materials = apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, t)
-                graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t)
+                if graph.is_operation_complete(operation_id):
+                    remaining_operations.remove(operation_id)
+                    graph = try_to_open_next_operations(graph, instance, previous_operations, next_operations, operation_id, t)
                 current_cmax = max(current_cmax, t)
                 if material_use_training_stage and need_reward:
                     _local_decisions.append(Decision(type=actions_type,
@@ -563,7 +608,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             old_cost = current_cost
             old_cmax = current_cmax
         else: # No more possible action at time t
-            graph, utilization, t, terminate = manage_current_time(graph, instance, utilization, t)
+            graph, remaining_resources, remaining_materials, t, terminate = manage_current_time(graph, instance, remaining_resources, remaining_materials, remaining_operations, t)
             if terminate:
                 break
     if train:

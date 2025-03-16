@@ -87,10 +87,13 @@ def unfreeze(agent: Module):
     for param in agent.parameters():
         param.requires_grad = True
 
-def freeze_several(agents: list[(Module, str)], to_freeze: list[str]):
+def freeze_several_and_unfreeze_others(agents: list[(Module, str)], to_freeze: list[str]):
     for agent, name in agents:
         if name in to_freeze:
             freeze(agent)
+    for agent, name in agents:
+        if name not in to_freeze:
+            unfreeze(agent) 
 
 def unfreeze_all(agents: list[(Module, str)]):
     for agent, _ in agents:

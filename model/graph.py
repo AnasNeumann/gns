@@ -32,10 +32,9 @@ class FeatureConfiguration:
             'is_possible': 8
         }
         self.resource = {
-            'utilization_ratio': 0,
-            'available_time': 1,
-            'remaining_operations': 2,
-            'similar_resources': 3
+            'available_time': 0,
+            'remaining_operations': 1,
+            'similar_resources': 2
         }
         self.material = {
             'remaining_init_quantity': 0,
@@ -70,7 +69,7 @@ class FeatureConfiguration:
 FC: FeatureConfiguration = FeatureConfiguration()
 
 class State:
-    def __init__(self, items: Tensor, operations: Tensor, resources: Tensor, materials: Tensor, need_for_materials: EdgeStorage, need_for_resources: EdgeStorage, operation_assembly: EdgeStorage, item_assembly: EdgeStorage, precedences: EdgeStorage, same_types: EdgeStorage, device: str="", should_std: bool=True):
+    def __init__(self, items: Tensor, operations: Tensor, resources: Tensor, materials: Tensor, need_for_materials: EdgeStorage, need_for_resources: EdgeStorage, operation_assembly: EdgeStorage, item_assembly: EdgeStorage, precedences: EdgeStorage, same_types: EdgeStorage, device: str="", should_std: bool=False):
         self.items: Tensor = items.clone().to(device)
         self.operations: Tensor = operations.clone().to(device)
         self.resources: Tensor = resources.clone().to(device)
@@ -118,14 +117,13 @@ class OperationFeatures:
         return features2tensor([self.sync, self.large_timescale, self.successors, self.remaining_time, self.remaining_resources, self.remaining_materials, self.available_time, self.end_time, self.is_possible], device)
     
 class ResourceFeatures:
-    def __init__(self, utilization_ratio: num_feature, available_time: num_feature, remaining_operations: num_feature, similar_resources: num_feature):
-        self.utilization_ratio = utilization_ratio
+    def __init__(self, available_time: num_feature, remaining_operations: num_feature, similar_resources: num_feature):
         self.available_time = available_time
         self.remaining_operations = remaining_operations
         self.similar_resources = similar_resources
     
     def to_tensor_features(self, device: str):
-        return features2tensor([self.utilization_ratio, self.available_time, self.remaining_operations, self.similar_resources], device)
+        return features2tensor([self.available_time, self.remaining_operations, self.similar_resources], device)
     
 class MaterialFeatures:
     def __init__(self, remaining_init_quantity: num_feature, arrival_time: num_feature, remaining_demand: num_feature):

@@ -10,7 +10,7 @@ from torch.optim import Optimizer
 from typing import Callable
 from model.agent import MultiAgents_Batch, MAPPO_Loss, MAPPO_Losses, MultiAgent_OneInstance
 import time as systime
-from tools.common import load_instance, objective_value, freeze, unfreeze, unfreeze_all, freeze_several
+from tools.common import load_instance, objective_value, freeze, unfreeze, unfreeze_all, freeze_several_and_unfreeze_others
 from translators.graph2solution_translator import translate_solution
 from debug.loss_tracker import LossTracker
 import math
@@ -34,7 +34,7 @@ PPO_CONF = {
     "discount_factor": 1.0,
     "bias_variance_tradeoff": 1.0
 }
-LEARNING_RATE = 2e-4
+LEARNING_RATE = 5e-4
 AGENTS = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
 OUTSOURCING = 0
@@ -266,31 +266,28 @@ def multi_stage_fine_tuning(agents: list[(Module, str)], embedding_stack: Module
         agent.train()
     
     print("I. FINE TUNING STAGE 1: scheduling agent")
-    freeze_several(agents, [AGENTS[OUTSOURCING], AGENTS[MATERIAL_USE]])
+    freeze_several_and_unfreeze_others(agents, [AGENTS[OUTSOURCING], AGENTS[MATERIAL_USE]])
     agents = scheduling_stage(_instance, agents, solve_function, path, _epochs, _itrs[0], _batch_size, device, id, size, interactive)
     
     print("II. FINE TUNING STAGE 2: material use agent with freezed embedding and critic layers")
-    unfreeze_all(agents)
-    freeze_several(agents, [AGENTS[SCHEDULING], AGENTS[OUTSOURCING]])
+    freeze_several_and_unfreeze_others(agents, [AGENTS[SCHEDULING], AGENTS[OUTSOURCING]])
     freeze(embedding_stack)
     freeze(shared_critic)
     agents = material_use_stage(_instance, agents, solve_function, path, _epochs, _itrs[1], _batch_size, device, id, size, interactive)
     
     print("III. FINE TUNING STAGE 3.1: outsourcing agent with freezed embedding and critic layers")
-    unfreeze_all(agents)
-    freeze_several(agents, [AGENTS[SCHEDULING], AGENTS[MATERIAL_USE]])
+    freeze_several_and_unfreeze_others(agents, [AGENTS[SCHEDULING], AGENTS[MATERIAL_USE]])
     freeze(embedding_stack)
     freeze(shared_critic)
     agents = outsourcing_stage(_instance, agents, solve_function, path, _epochs, _itrs[2], _batch_size, device, id, size, 1, interactive)
     
     print("III. FINE TUNING STAGE 3.2: outsourcing agent and all layers")
     unfreeze(embedding_stack)
+    unfreeze(shared_critic)
     agents = outsourcing_stage(_instance, agents, solve_function, path, _epochs, _itrs[3], _batch_size, device, id, size, 2, interactive)
 
     print("IV. FINE TUNING STAGE 4: multi-agent with all layers")
     unfreeze_all(agents)
-    unfreeze(embedding_stack)
-    unfreeze(shared_critic)
     _best_obj, _best_episode, _time_to_best = multi_agent_stage(_instance, agents, solve_function, path, _epochs, _itrs[4], _batch_size, device, id, size, _start_time, interactive)
     final_metrics = pd.DataFrame({
         'index': [_instance.id],

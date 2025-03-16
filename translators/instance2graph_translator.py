@@ -147,7 +147,6 @@ def translate(i: Instance, device: str):
         for r in resources:
             if i.finite_capacity[r]:
                 res_id = graph.add_resource(r, i.nb_settings, ResourceFeatures(
-                    utilization_ratio = 0,
                     available_time = 0,
                     remaining_operations = len(operations),
                     similar_resources = len(resources)))
