@@ -33,7 +33,7 @@ class Decision:
             Check if two decisions are the same
         """
         d: Decision
-        return d.type==self.type and d.target==self.target and d.value==self.value
+        return d.parent == self.parent and d.type==self.type and d.target==self.target and d.value==self.value
 
     def compute_reward(self, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1) -> float:
         """
