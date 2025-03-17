@@ -37,7 +37,7 @@ PPO_CONF = {
     "discount_factor": 1.0,
     "bias_variance_tradeoff": 1.0
 }
-LEARNING_RATE = 2e-4
+LEARNING_RATE = 1e-3
 AGENTS = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
 OUTSOURCING = 0
