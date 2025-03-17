@@ -28,7 +28,7 @@ PPO_CONF = {
     "opt_epochs": 3,
     "clip_ratio": 0.1,
     "policy_loss": 1.0,
-    "batch": 3,
+    "batch": 16,
     "value_loss": 0.5,
     "entropy": 0.02,
     "discount_factor": 1.0,

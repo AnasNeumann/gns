@@ -103,7 +103,7 @@ class Memory:
                                                     final_makespan=final_makespan, 
                                                     init_cmax=init_cmax, 
                                                     init_cost=init_cost,
-                                                    need_rewards=False))
+                                                    need_rewards=False)
                     return next
             if not _found:
                 decision.parent.next_decisions.append(decision)
