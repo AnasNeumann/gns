@@ -5,7 +5,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-w_final: float = 0.2
+w_final: float = 0.65
 standardization: float = 1.0
 
 class Decision:
@@ -40,12 +40,12 @@ class Decision:
             Compute the final reward
         """
         _d: float = standardization*(a*init_cmax + (1-a)*init_cost)
-        makespan_part: float =  (1.0-w_final) * (self.end_old - self.end_new) + w_final * final_makespan
+        makespan_part: float =  (1.0-w_final) * (self.end_new - self.end_old) + w_final * final_makespan
         if self.use_cost:
-            cost_part: float = (1.0-w_final) * (self.cost_old - self.cost_new) + w_final * final_cost
-            self.reward = (a*makespan_part + (1-a)*cost_part)/_d
+            cost_part: float = (1.0-w_final) * (self.cost_new - self.cost_old) + w_final * final_cost
+            self.reward = -1.0 * (a*makespan_part + (1-a)*cost_part)/_d
         else:
-            self.reward = (a*makespan_part)/_d
+            self.reward = -(a*makespan_part)/_d
         return self.reward
 
 class Memory:
@@ -56,11 +56,20 @@ class Memory:
         self.instance_id: int = instance_id
         self.decisions: list[Decision] = []
 
-    def add_or_update_decision(self, decision: Decision, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1) -> Decision:
+    def compute_all_rewards(self, decision: Decision, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1) -> None:
+        """
+            Compute all rewards
+        """
+        decision.compute_reward(a=a, final_cost=final_cost, final_makespan=final_makespan, init_cmax=init_cmax, init_cost=init_cost)
+        for _next in decision.next_decisions:
+            self.compute_all_rewards(decision=_next, a=a, final_cost=final_cost, final_makespan=final_makespan, init_cmax=init_cmax, init_cost=init_cost)
+
+    def add_or_update_decision(self, decision: Decision, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1, need_rewards: bool=True) -> Decision:
         """
             Add decision in the memory or update reward if already exist
         """
-        decision.compute_reward(a=a, final_cost=final_cost, final_makespan=final_makespan, init_cmax=init_cmax, init_cost=init_cost)
+        if need_rewards:
+            self.compute_all_rewards(decision=decision, a=a, final_cost=final_cost, final_makespan=final_makespan, init_cmax=init_cmax, init_cost=init_cost)
         if decision.parent is None:
             _found: bool = False
             for _other_first in self.decisions:
@@ -74,7 +83,8 @@ class Memory:
                                                     final_cost=final_cost, 
                                                     final_makespan=final_makespan, 
                                                     init_cmax=init_cmax, 
-                                                    init_cost=init_cost)
+                                                    init_cost=init_cost,
+                                                    need_rewards=False)
                     return _other_first
             if not _found:
                 self.decisions.append(decision)
@@ -92,7 +102,8 @@ class Memory:
                                                     final_cost=final_cost, 
                                                     final_makespan=final_makespan, 
                                                     init_cmax=init_cmax, 
-                                                    init_cost=init_cost)
+                                                    init_cost=init_cost,
+                                                    need_rewards=False))
                     return next
             if not _found:
                 decision.parent.next_decisions.append(decision)
