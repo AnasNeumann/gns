@@ -5,8 +5,8 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-w_final: float = 0.65
-standardization: float = 1.0
+w_final: float = 0.7
+standardization: float = 0.1
 
 class Decision:
     """
@@ -40,9 +40,9 @@ class Decision:
             Compute the final reward
         """
         _d: float = standardization*(a*init_cmax + (1-a)*init_cost)
-        makespan_part: float =  (1.0-w_final) * (self.end_new - self.end_old) + w_final * final_makespan
+        makespan_part: float =  (1.0-w_final) * (self.end_new - self.end_old) + w_final * (final_makespan - init_cmax)
         if self.use_cost:
-            cost_part: float = (1.0-w_final) * (self.cost_new - self.cost_old) + w_final * final_cost
+            cost_part: float = (1.0-w_final) * (self.cost_new - self.cost_old) + w_final * (final_cost - init_cost)
             self.reward = -1.0 * (a*makespan_part + (1-a)*cost_part)/_d
         else:
             self.reward = -(a*makespan_part)/_d

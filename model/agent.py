@@ -150,7 +150,6 @@ class Agent_OneInstance:
         log_old_probs: Tensor = None
         entropies: Tensor = None
         for step, state in enumerate(self.states):
-            # temp_state: State = state.clone(self.device)
             new_probabilities,_ = agent(state, self.possibles_actions[step], self.related_items, self.parent_items, self.w_makespan)
             old_action_id: int = self.actions_idx[step]
             entropy = torch.sum(-new_probabilities*torch.log(new_probabilities+1e-8), dim=-1)
@@ -199,7 +198,7 @@ class Value_Batch:
     # Value loss over batch (max version) = - w2*SUM_i[value_loss]
     # Value loss over batch (min version) = w2*SUM_i[value_loss]
     def compute_value_loss_over_batch(self, value_losses: Tensor):
-        total_value_loss: Tensor = torch.sum(value_losses)
+        total_value_loss: Tensor = torch.mean(value_losses)
         print(f"\t\t value loss (over batch): {total_value_loss}")
         print("\t\t -----------------")
         return self.weight_value_loss*total_value_loss
@@ -214,8 +213,8 @@ class Agent_Batch:
     # Loss for one agent over batch (max version) = w1*SUM_i[policy_loss] + w3*SUM_i[entropy_bonus]
     # Loss for one agent over batch (min version) = -w1*SUM_i[policy_loss] - w3*SUM_i[entropy_bonus]
     def compute_PPO_loss_over_batch(self, policy_losses: Tensor, entropy_bonuses: Tensor):
-        total_policy_loss: Tensor = torch.sum(policy_losses)
-        total_entropy_bonus: Tensor = torch.sum(entropy_bonuses)
+        total_policy_loss: Tensor = torch.mean(policy_losses)
+        total_entropy_bonus: Tensor = torch.mean(entropy_bonuses)
         print(f"\t\t Computing losses for agent (over batch): {self.name}") 
         print(f"\t\t policy loss: {total_policy_loss}") 
         print(f"\t\t entropy bonus: {total_entropy_bonus}")
