@@ -19,13 +19,16 @@ class Queue:
         self.item_queue: list[int] = []
 
     def done(self) -> bool:
-        return len(self.time_queue) == 0 or (len(self.operation_queue) == 0 and len(self.item_queue) == 0)
+        if len(self.operation_queue) == 0 and len(self.item_queue) == 0:
+            print("DONE: Queue is empty!")
+            return True
+        return False
     
     def get_next_time(self, pop: bool=True) -> int:
         if pop:
             self.pop_time()
         if self.time_queue:
-            self.time_queue[0]
+            return self.time_queue[0]
         return -1
     
     def pop_time(self):

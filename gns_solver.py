@@ -127,7 +127,7 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
                         mat_id = graph.materials_i2g[m]
                         if instance.purchase_time[m] <= execution_time or graph.material(mat_id, 'remaining_init_quantity') >= instance.quantity_needed[m][p][o]: 
                             material_use_actions.append((operation_id, mat_id))
-                            execution_times.append(execution_times)
+                            execution_times.append(execution_time)
     return scheduling_actions, material_use_actions, execution_times
 
 def get_feasible_actions(Q: Queue, instance: Instance, graph: GraphInstance, required_types_of_resources: list[list[list[int]]], required_types_of_materials: list[list[list[int]]], current_time: int):
@@ -171,6 +171,7 @@ def outsource_item(Q: Queue, graph: GraphInstance, instance: Instance, item_id: 
         if op_id in Q.operation_queue:
             Q.remove_operation(op_id)
         graph.update_operation(op_id, [
+            ('is_possible', YES),
             ('remaining_resources', 0),
             ('remaining_materials', 0),
             ('remaining_time', 0)]) 
@@ -212,7 +213,8 @@ def apply_outsourcing_to_direct_parent(Q: Queue, instance: Instance, graph: Grap
                 break
         if next_good_to_go:
             DEBUG_PRINT(f"\t >> Opening first physical operation ({p},{o}) of parent {_parent} at {_t}!")
-            graph.update_operation(graph.operations_i2g[p][o], [('is_possible', True)])
+            graph.update_operation(graph.operations_i2g[p][o], [('is_possible', YES)])
+            Q.add_operation(graph.operations_i2g[p][o])
 
 def apply_use_material(graph: GraphInstance, operation_id: int, material_id: int, required_types_of_materials:list[list[list[int]]], current_time: int):
     """
@@ -435,8 +437,8 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
     Q = init_queue(instance, graph)
     while not Q.done():
         poss_actions, actions_type, execution_times = get_feasible_actions(Q, instance, graph, required_types_of_resources, required_types_of_materials, t)
-        DEBUG_PRINT(f"Current possible {ACTIONS_NAMES[actions_type]} actions: {poss_actions}")
         if poss_actions:
+            DEBUG_PRINT(f"Current possible {ACTIONS_NAMES[actions_type]} actions: {poss_actions} at times: {execution_times}...")
             if actions_type == SCHEDULING:
                 for op_id, res_id in poss_actions:
                     graph.update_need_for_resource(op_id, res_id, [('current_processing_time', update_processing_time(instance, graph, op_id, res_id))])
@@ -475,7 +477,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                     current_cost = current_cost + _price
                     Q.remove_item(item_id)
                     Q.add_time(_end_date)
-                    DEBUG_PRINT(f"Outsourcing item {item_id} -> ({p},{e})...")
+                    DEBUG_PRINT(f"Outsourcing item {item_id} -> ({p},{e}) [start={t}, end={_end_date}]...")
                 else:
                     Q.remove_item(item_id)
                     graph.update_item(item_id, [('outsourced', NO)])
@@ -530,9 +532,12 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
             old_cost = current_cost
             old_cmax = current_cmax
         else:
+            DEBUG_PRINT(f"No possible action at time {t}, next time to test: {Q.time_queue}")
             t = Q.get_next_time(pop=True)
             if t == -1:
+                DEBUG_PRINT("DONE: No more time to test!")
                 break
+            DEBUG_PRINT(f"New current time: {t}...")
     if train:
         if _local_decisions:
             reward_MEMORY.add_or_update_decision(_local_decisions[0], a=alpha, final_cost=current_cost, final_makespan=current_cmax, init_cmax=lb_cmax, init_cost=lb_cost)
