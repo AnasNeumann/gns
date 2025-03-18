@@ -54,7 +54,7 @@ class Transition:
             cost_part: float = (1.0-w_final) * (self.cost_new - self.cost_old) + w_final * (final_cost - init_cost)
             self.reward = -1.0 * (a*makespan_part + (1-a)*cost_part)/_d
         else:
-            self.reward = -(a*makespan_part)/_d
+            self.reward = -1.0 * (a*makespan_part)/_d
         return self.reward
 
 class Memory:
