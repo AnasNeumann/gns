@@ -23,7 +23,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-PROBLEM_SIZES = [['s'], ['s', 'm'], ['s', 'm', 'l'], ['s', 'm', 'l', 'xl', 'xxl']] # ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
+PROBLEM_SIZES = [['s'], ['s', 'm'], ['s', 'm', 'l'], ['s', 'm', 'l', 'xl'], ['s', 'm', 'l', 'xl', 'xxl']] # ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 PPO_CONF = {
     "validation_rate": 20,
     "switch_batch": 10,
