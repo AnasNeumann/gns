@@ -238,11 +238,10 @@ class L1_EmbbedingGNN(Module):
             r_embbedings = self.resource_layers[l](r_embbedings, o_embbedings, state.need_for_resources, state.same_types)
             i_embbedings = self.item_layers[l](i_embbedings, parents, o_embbedings, state.item_assembly, state.operation_assembly)
             o_embbedings = self.operation_layers[l](o_embbedings, i_embbedings, related_items, m_embeddings, r_embbedings, state.need_for_resources, state.need_for_materials, state.precedences)     
-        pooled_materials = torch.mean(m_embeddings, dim=0, keepdim=True)
         pooled_resources = torch.mean(r_embbedings, dim=0, keepdim=True)
         pooled_items = torch.mean(i_embbedings, dim=0, keepdim=True)
         pooled_operations = torch.mean(o_embbedings, dim=0, keepdim=True)
-        state_embedding = torch.cat([pooled_items, pooled_operations, pooled_materials, pooled_resources], dim=-1)[0]
+        state_embedding = torch.cat([pooled_items, pooled_operations, pooled_resources], dim=-1)[0]
         return torch.cat([state_embedding, alpha], dim=0), m_embeddings, r_embbedings, i_embbedings, o_embbedings
 
 class L1_CommonCritic(Module):
@@ -250,7 +249,7 @@ class L1_CommonCritic(Module):
         super(L1_CommonCritic, self).__init__()
         first_dimension = critic_hidden_channels
         second_dimenstion = int(critic_hidden_channels / 2)
-        state_vector_size = 2*resource_and_material_embedding_size + 2*operation_and_item_embedding_size + 1
+        state_vector_size = resource_and_material_embedding_size + 2*operation_and_item_embedding_size + 1
         self.critic_mlp = Sequential(
             Linear(state_vector_size, first_dimension), ReLU(),
             Linear(first_dimension, second_dimenstion), ReLU(), 
@@ -265,7 +264,7 @@ class L1_OutousrcingActor(Module):
         super(L1_OutousrcingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
-        self.actor_input_size = 2*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 2
+        self.actor_input_size = resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 2
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
@@ -290,7 +289,7 @@ class L1_SchedulingActor(Module):
         super(L1_SchedulingActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
-        self.actor_input_size = 3*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 1
+        self.actor_input_size = 2*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 1
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(
@@ -303,7 +302,7 @@ class L1_SchedulingActor(Module):
         state_embedding, _, r_embbedings, _, o_embbedings = self.shared_embedding_layers(state, related_items, parents, alpha)
         operations_ids, resources_ids = zip(*actions)
         state_embedding_expanded = state_embedding.unsqueeze(0).expand(len(actions), -1)
-        inputs = torch.cat([o_embbedings[list(operations_ids)], r_embbedings[list(resources_ids)], state_embedding_expanded], dim=1)
+        inputs = torch.cat([o_embbedings[list(operations_ids)], r_embbedings[list(resources_ids)], state_embedding_expanded], dim=1) # shape = [possible decision, concat embedding]
         action_logits = self.actor(inputs)
         action_probs = F.softmax(action_logits, dim=0)
         state_value = self.critic_mlp(state_embedding)
@@ -314,7 +313,7 @@ class L1_MaterialActor(Module):
         super(L1_MaterialActor, self).__init__()
         self.shared_embedding_layers = shared_embedding_layers
         self.critic_mlp = shared_critic_mlp
-        self.actor_input_size = 3*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 1
+        self.actor_input_size = 2*resource_and_material_embedding_size + 3*operation_and_item_embedding_size + 1
         first_dimension = actor_hidden_channels
         second_dimenstion = int(actor_hidden_channels / 2)
         self.actor = Sequential(

@@ -23,7 +23,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-PROBLEM_SIZES = [['s'], ['s']] # ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
+PROBLEM_SIZES = [['s'], ['s', 'm'], ['s', 'm', 'l'], ['s', 'm', 'l', 'xl', 'xxl']] # ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 PPO_CONF = {
     "validation_rate": 20,
     "switch_batch": 10,
@@ -34,7 +34,7 @@ PPO_CONF = {
     "policy_loss": 1.0,
     'validation': 10,
     "value_loss": 0.1,
-    "entropy": 0.02,
+    "entropy": 0.1,
     "discount_factor": 1.0,
     "bias_variance_tradeoff": 1.0
 }
@@ -58,10 +58,10 @@ def search_instance(instances: list[Instance], id: int) -> Instance:
             return instance
     return None
 
-def load_training_dataset(debug_mode: bool, path: str, train: bool = True):
+def load_training_dataset(run_time: int, path: str, train: bool = True):
     type: str = '/train/' if train else '/test/'
     instances = []
-    for size in PROBLEM_SIZES[0 if debug_mode else 1]:
+    for size in PROBLEM_SIZES[run_time]:
         complete_path = path+directory.instances+type+size+'/'
         for i in os.listdir(complete_path):
             if i.endswith('.pkl'):
@@ -114,6 +114,7 @@ def multi_agent_stage(train_data: list[Instance], val_data: list[Instance], agen
         if iteration % switch_batch == 0:
             print(f"\t New training batch of size {batch_size}...")
             current_batch: list[Instance] = random.sample(train_data, batch_size)
+        random.shuffle(current_batch)
         train_or_validate_batch(reward_MEMORIES=reward_MEMORIES, agents=agents, batch=current_batch, train=True, epochs=epochs, optimizer=optimizer, agent_names=[name for _,name in agents], solve_function=solve_function, device=device)
         if iteration % validation_rate == 0:
             print("\t Validation stage...")
@@ -129,13 +130,13 @@ def multi_agent_stage(train_data: list[Instance], val_data: list[Instance], agen
         pickle.dump(vlosses, f)
     save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=optimizer, run_number=run_number, complete_path=complete_path)
 
-def uni_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Adam, path: str, solve_function: Callable, device: str, run_number:int, debug_mode: bool=False):
+def uni_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Adam, path: str, solve_function: Callable, device: str, run_number:int):
     """
         Multi-stage PPO function to pre-train agents on several instances
     """
     _start_time = systime.time()
     print("Loading dataset....")
-    instances: list[Instance] = load_training_dataset(path=path, train=True, debug_mode=debug_mode)
+    instances: list[Instance] = load_training_dataset(path=path, train=True, run_time=run_number-1)
     print(f"Dataset loaded after {(systime.time()-_start_time)} seconds!")
     random.shuffle(instances)
     _num_val = PPO_CONF['validation']

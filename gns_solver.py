@@ -593,7 +593,7 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mo
     agents, shared_embbeding_stack, shared_critic, optimizer = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
     print("Pre-training models with MAPPO (on several instances)...")
     # multi_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, run_number=run_number, interactive=interactive, debug_mode=debug_mode)
-    uni_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
+    uni_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number)
 
 def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, debug_mode: bool, device: str, use_pre_train: bool = False, interactive: bool = True):
     """
