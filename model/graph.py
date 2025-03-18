@@ -221,6 +221,18 @@ class GraphInstance():
         self.current_operation_type = []
         self.current_design_value = []
         self.project_heads = []
+        self.res_by_types: list[list[int]] = []
+        self.ancesors: list[list[list[int]]] = []
+        self.direct_children: list[list[list[int]]] = []
+        self.descendants: list[list[list[int]]] = []
+        self.direct_parent: list[list[int]] = []
+        self.last_design_operations: list[list[list[int]]] = []
+        self.first_physical_operations: list[list[list[int]]] = []
+        self.item_of_operations: list[list[int]] = []
+        self.resource_family: list[int] = []
+        self.operation_resource_time: list[list[list[int]]] = []
+        self.approximate_design_load: list[list[int]] = []
+        self.approximate_physical_load: list[list[int]] = []
 
         self.graph: HeteroData = HeteroData()
         self.device: str = device

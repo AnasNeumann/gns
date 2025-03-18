@@ -11,14 +11,14 @@ __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
 def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, estimated_start: int, must_be_outsourced: bool=False):
-    design_load, physical_load = i.item_processing_time(p, e, total_load=True)
     design_mean_time, physical_mean_time = i.item_processing_time(p, e, total_load=False)
-    childrens = i.get_children(p, e, direct=False)
+    childrens = graph.descendants[p][e]
     children_time = 0
     childrens_physical_operations = 0
     childrens_design_operations = 0
     for children in childrens:
-        cdt, cpt = i.item_processing_time(p, e=children, total_load=True)
+        cdt = graph.approximate_design_load[p][children]
+        cpt = graph.approximate_physical_load[p][children]
         children_time += (cdt+cpt)
         for child_op in i.loop_item_operations(p, e=children):
             if not i.is_design[p][child_op]:
@@ -26,17 +26,16 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
             else:
                 childrens_design_operations +=1
     parents_physical_time = 0
-    ancestors = i.get_ancestors(p, e)
-    for ancestor in ancestors:
-        _, apt = i.item_processing_time(p, e=ancestor, total_load=True)
+    for ancestor in graph.ancesors[p][e]:
+        apt = graph.approximate_physical_load[p][ancestor]
         parents_physical_time += apt
     item_id = graph.add_item(p, e, ItemFeatures(
         head = head,
         outsourced = NOT_YET if i.external[p][e] else NO,
         outsourcing_cost = i.external_cost[p][e],
         outsourcing_time = i.outsourcing_time[p][e],
-        remaining_time = physical_load + design_load,
-        parents = len(ancestors),
+        remaining_time = graph.approximate_physical_load[p][e] + graph.approximate_design_load[p][e] ,
+        parents = len(graph.ancesors[p][e]),
         children = len(childrens),
         parents_physical_time = parents_physical_time,
         children_time = children_time,
@@ -79,7 +78,7 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
         if not i.is_design[p][o]:
             physical_ops_ids.append(op_id)
         graph.add_operation_assembly(item_id, op_id)
-        for rt in i.required_rt(p,o):
+        for rt in i.required_rt(p, o):
             for r in i.resources_by_type(rt):
                 if i.finite_capacity[r]:
                     _ext =  i.execution_time[r][p][o]
@@ -101,7 +100,7 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
     estimated_start_child = estimated_start if i.external[p][e] else _base_design_end
     estimated_childrend_end = _base_design_end
     estimated_children_cost = 0
-    for children in i.get_children(p, e, direct=True):
+    for children in graph.direct_children[p][e]:
         graph, child_id, estimated_end_child, child_cost = build_item(i, graph, p, e=children, head=False, estimated_start=estimated_start_child, must_be_outsourced=must_be_outsourced)
         graph.add_item_assembly(item_id, child_id)
         estimated_childrend_end = max(estimated_childrend_end, estimated_end_child)
@@ -118,10 +117,10 @@ def build_precedence(i: Instance, graph: GraphInstance):
             start, end = i.get_operations_idx(p, e)
             parent_last_design = []
             parent_first_physical = []
-            parent = i.get_direct_parent(p, e)
+            parent = graph.direct_parent[p][e]
             if parent > -1:
-                parent_last_design = i.last_design_operations(p, parent)
-                parent_first_physical = i.first_physical_operations(p, parent)
+                parent_last_design = graph.last_design_operations[p][parent]
+                parent_first_physical = graph.first_physical_operations[p][parent]
             for o in range(start, end):
                 o_id = graph.operations_i2g[p][o]
                 preds = i.preds_or_succs(p, e, start, end, o, design_only=False, physical_only=False, preds=True)
@@ -138,8 +137,40 @@ def build_precedence(i: Instance, graph: GraphInstance):
                         graph.add_precedence(o_id, succ_id)
     return graph
 
+def build_direct_access_objects(i: Instance, graph: GraphInstance):
+    for p in i.loop_projects():
+        graph.direct_parent.append([])
+        graph.direct_children.append([])
+        graph.ancesors.append([])
+        graph.descendants.append([])
+        graph.last_design_operations.append([])
+        graph.first_physical_operations.append([])
+        graph.approximate_design_load.append([])
+        graph.approximate_physical_load.append([])  
+        graph.operation_resource_time.append([])
+        graph.item_of_operations.append([])
+        for e in i.loop_items(p):
+            adl, apl = i.item_processing_time(p, e, total_load=True)
+            graph.approximate_design_load[p].append(adl)
+            graph.approximate_physical_load[p].append(apl)
+            graph.direct_parent[p].append(i.get_direct_parent(p, e))
+            graph.ancesors[p].append(i.get_ancestors(p, e))
+            graph.direct_children[p].append(i.get_children(p, e, direct=True))
+            graph.descendants[p].append(i.get_children(p, e, direct=False))
+            graph.last_design_operations[p].append(i.last_design_operations(p, e))
+            graph.first_physical_operations[p].append(i.first_physical_operations(p, e))
+        for o in i.loop_operations(p):
+            graph.item_of_operations[p].append(i.get_item_of_operation(p, o))
+            graph.operation_resource_time[p].append([])
+            for rt in i.loop_rts():
+                graph.operation_resource_time[p][o].append(i.operation_resource_time(p, o, rt, max_load=True))
+    for r in i.loop_resources():
+        graph.resource_family.append(i.get_resource_familly(r))
+    return graph
+
 def translate(i: Instance, device: str):
     graph = GraphInstance(device=device)
+    graph = build_direct_access_objects(i, graph)
     for rt in range(i.nb_resource_types):
         resources = i.resources_by_type(rt)
         operations = i.operations_by_resource_type(rt)
