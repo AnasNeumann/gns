@@ -29,7 +29,7 @@ class FeatureConfiguration:
             'remaining_materials': 5,
             'available_time': 6,
             'end_time': 7,
-            'is_possible': 8
+            'lb': 8
         }
         self.resource = {
             'available_time': 0,
@@ -42,18 +42,16 @@ class FeatureConfiguration:
             'remaining_demand': 2
         }
         self.item = {
-            'head': 0,
-            'outsourced': 1,
-            'outsourcing_cost': 2,
-            'outsourcing_time': 3,
-            'remaining_time': 4,
-            'parents': 5,
-            'children': 6,
-            'parents_physical_time': 7,
-            'children_time': 8,
-            'start_time': 9,
-            'end_time': 10,
-            'is_possible': 11
+            'outsourced': 0,
+            'outsourcing_cost': 1,
+            'outsourcing_time': 2,
+            'remaining_time': 3,
+            'parents': 4,
+            'children': 5,
+            'parents_physical_time': 6,
+            'children_time': 7,
+            'start_time': 8,
+            'end_time': 9
         }
         self.need_for_resources = {
             'status': 0,
@@ -102,7 +100,7 @@ class State:
                 tensor[:, pos] = (data - min_val) / _d
 
 class OperationFeatures:
-    def __init__(self, sync: num_feature, large_timescale: num_feature, successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, is_possible: num_feature):
+    def __init__(self, sync: num_feature, large_timescale: num_feature, successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, lb: num_feature):
         self.sync = sync
         self.large_timescale = large_timescale
         self.successors = successors
@@ -111,10 +109,10 @@ class OperationFeatures:
         self.remaining_materials = remaining_materials
         self.available_time = available_time
         self.end_time = end_time
-        self.is_possible = is_possible
+        self.lb = lb
     
     def to_tensor_features(self, device: str):
-        return features2tensor([self.sync, self.large_timescale, self.successors, self.remaining_time, self.remaining_resources, self.remaining_materials, self.available_time, self.end_time, self.is_possible], device)
+        return features2tensor([self.sync, self.large_timescale, self.successors, self.remaining_time, self.remaining_resources, self.remaining_materials, self.available_time, self.end_time, self.lb], device)
     
 class ResourceFeatures:
     def __init__(self, available_time: num_feature, remaining_operations: num_feature, similar_resources: num_feature):
@@ -135,8 +133,7 @@ class MaterialFeatures:
         return features2tensor([self.remaining_init_quantity, self.arrival_time, self.remaining_demand], device)
     
 class ItemFeatures:
-    def __init__(self, head: num_feature, outsourced: num_feature, outsourcing_cost: num_feature, outsourcing_time: num_feature, remaining_time: num_feature, parents: num_feature, children: num_feature, parents_physical_time: num_feature, children_time: num_feature, start_time: num_feature, end_time: num_feature, is_possible: num_feature):
-        self.head = head
+    def __init__(self, outsourced: num_feature, outsourcing_cost: num_feature, outsourcing_time: num_feature, remaining_time: num_feature, parents: num_feature, children: num_feature, parents_physical_time: num_feature, children_time: num_feature, start_time: num_feature, end_time: num_feature):
         self.outsourced = outsourced
         self.outsourcing_cost = outsourcing_cost
         self.outsourcing_time = outsourcing_time
@@ -147,16 +144,14 @@ class ItemFeatures:
         self.children_time = children_time
         self.start_time = start_time
         self.end_time = end_time
-        self.is_possible = is_possible
 
     def to_tensor_features(self, device: str):
-        return features2tensor([self.head, self.outsourced, self.outsourcing_cost, self.outsourcing_time, self.remaining_time, self.parents, self.children, self.parents_physical_time, self.children_time, self.start_time, self.end_time, self.is_possible], device)
+        return features2tensor([self.outsourced, self.outsourcing_cost, self.outsourcing_time, self.remaining_time, self.parents, self.children, self.parents_physical_time, self.children_time, self.start_time, self.end_time], device)
 
     @staticmethod
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
         f = conf.item
         return ItemFeatures(
-            head=tensor[f['head']].item(), 
             outsourced=tensor[f['outsourced']].item(),
             outsourcing_cost=tensor[f['outsourcing_cost']].item(),
             outsourcing_time=tensor[f['outsourcing_time']].item(),
@@ -166,10 +161,8 @@ class ItemFeatures:
             start_time=tensor[f['start_time']].item(),
             parents_physical_time=tensor[f['parents_physical_time']].item(),
             children_time=tensor[f['children_time']].item(),
-            end_time=tensor[f['end_time']].item(),
-            is_possible=tensor[f['is_possible']].item())
+            end_time=tensor[f['end_time']].item())
     
-
 class NeedForResourceFeatures:
     def __init__(self, status: num_feature, current_processing_time: num_feature, start_time: num_feature, end_time: num_feature):
         self.status = status
@@ -184,7 +177,7 @@ class NeedForResourceFeatures:
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
         f = conf.need_for_resources
         return NeedForResourceFeatures(
-            status=tensor[f['status']].item(), 
+            status=tensor[f['status']].item(),
             current_processing_time=tensor[f['current_processing_time']].item(),
             start_time=tensor[f['start_time']].item(),
             end_time=tensor[f['end_time']].item())
@@ -202,7 +195,7 @@ class NeedForMaterialFeatures:
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
         f = conf.need_for_materials
         return NeedForMaterialFeatures(
-            status=tensor[f['status']].item(), 
+            status=tensor[f['status']].item(),
             execution_time=tensor[f['execution_time']].item(),
             quantity_needed=tensor[f['quantity_needed']].item())
 
@@ -233,6 +226,9 @@ class GraphInstance():
         self.operation_resource_time: list[list[list[int]]] = []
         self.approximate_design_load: list[list[int]] = []
         self.approximate_physical_load: list[list[int]] = []
+        
+        self.item_possible = []
+        self.operation_possible = []
 
         self.graph: HeteroData = HeteroData()
         self.device: str = device
@@ -246,11 +242,11 @@ class GraphInstance():
         self.add_node('operation', features.to_tensor_features(self.device))
         return len(self.operations_g2i)-1
 
-    def add_item(self, p: int, i: int, features: ItemFeatures):
+    def add_item(self, p: int, i: int, features: ItemFeatures, head: bool=False):
         self.items_g2i.append((p, i))
         self.add_node('item', features.to_tensor_features(self.device))
         id = len(self.items_g2i)-1
-        if features.head == YES:
+        if head == YES:
             self.project_heads.append(id)
         return id
     
@@ -431,8 +427,7 @@ class GraphInstance():
         return True
 
     def is_operation_complete(self, operation_id: int):
-        if self.operation(operation_id, 'is_possible')==NOT_YET \
-            or self.operation(operation_id, 'remaining_resources')>0 \
+        if self.operation(operation_id, 'remaining_resources')>0 \
             or self.operation(operation_id, 'remaining_materials')>0 \
             or self.operation(operation_id, 'remaining_time')>0:
             return False

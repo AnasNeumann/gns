@@ -36,8 +36,8 @@ ACTIONS_NAMES = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
 SOLVING_REPETITIONS = 10
 GNN_CONF = {
-    'resource_and_material_embedding_size': 12,
-    'operation_and_item_embedding_size': 16,
+    'resource_and_material_embedding_size': 8,
+    'operation_and_item_embedding_size': 12,
     'nb_layers': 2,
     'embedding_hidden_channels': 64,
     'value_hidden_channels': 128,
@@ -161,7 +161,6 @@ def outsource_item(Q: Queue, graph: GraphInstance, instance: Instance, item_id: 
     end_date = outsourcing_start_time + instance.outsourcing_time[p][e]
     graph.update_item(item_id, [
         ('outsourced', YES),
-        ('is_possible', YES),
         ('remaining_time', 0),
         ('children_time', 0),
         ('start_time', outsourcing_start_time),
@@ -171,7 +170,6 @@ def outsource_item(Q: Queue, graph: GraphInstance, instance: Instance, item_id: 
         if op_id in Q.operation_queue:
             Q.remove_operation(op_id)
         graph.update_operation(op_id, [
-            ('is_possible', YES),
             ('remaining_resources', 0),
             ('remaining_materials', 0),
             ('remaining_time', 0)]) 
@@ -213,7 +211,6 @@ def apply_outsourcing_to_direct_parent(Q: Queue, instance: Instance, graph: Grap
                 break
         if next_good_to_go:
             DEBUG_PRINT(f"\t >> Opening first physical operation ({p},{o}) of parent {_parent} at {_t}!")
-            graph.update_operation(graph.operations_i2g[p][o], [('is_possible', YES)])
             Q.add_operation(graph.operations_i2g[p][o])
 
 def apply_use_material(graph: GraphInstance, operation_id: int, material_id: int, required_types_of_materials:list[list[list[int]]], current_time: int):
@@ -313,7 +310,6 @@ def try_to_open_next_operations(Q: Queue, graph: GraphInstance, instance: Instan
         graph.update_operation(next_id, [('available_time', next_time)], maxx=True)
         if next_good_to_go:
             DEBUG_PRINT(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time} in its own timescale...')
-            graph.update_operation(next_id, [('is_possible', YES)])
             Q.add_operation(next_id)
     if o in graph.last_design_operations[p][e]:
         for child in graph.direct_children[p][e]:
@@ -321,7 +317,6 @@ def try_to_open_next_operations(Q: Queue, graph: GraphInstance, instance: Instan
             if instance.external[p][child]:
                 DEBUG_PRINT(f'Enabling item {child_id} -> ({p},{child}) for outsourcing (decision yet to make)...')
                 Q.add_item(child_id)
-            graph.update_item(child_id, [('is_possible', YES)])
             graph.update_item(child_id, [('start_time', available_time)], maxx=True)
 
 # ====================================================

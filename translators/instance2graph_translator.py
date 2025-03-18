@@ -30,7 +30,6 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
         apt = graph.approximate_physical_load[p][ancestor]
         parents_physical_time += apt
     item_id = graph.add_item(p, e, ItemFeatures(
-        head = head,
         outsourced = NOT_YET if i.external[p][e] else NO,
         outsourcing_cost = i.external_cost[p][e],
         outsourcing_time = i.outsourcing_time[p][e],
@@ -40,8 +39,7 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
         parents_physical_time = parents_physical_time,
         children_time = children_time,
         start_time = NOT_YET,
-        end_time = NOT_YET,
-        is_possible = YES if head else NOT_YET))
+        end_time = NOT_YET), head = head)
     start, end = i.get_operations_idx(p,e)
     physical_ops_ids: list = []
     pr_ids: list = []
@@ -73,8 +71,8 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
             remaining_resources = required_res,
             remaining_materials = required_mat,
             available_time = NOT_YET,
-            end_time = NOT_YET,
-            is_possible = YES if (head and (o == start)) else NOT_YET))
+            lb = 0,
+            end_time = NOT_YET))
         if not i.is_design[p][o]:
             physical_ops_ids.append(op_id)
         graph.add_operation_assembly(item_id, op_id)
