@@ -14,11 +14,13 @@ from translators.instance2graph_translator import translate
 from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import debug_printer
 from multi_stage_pre_training import multi_stage_pre_train, load_training_dataset
+from unistage_pre_training import uni_stage_pre_train
 from model.agent import MultiAgent_OneInstance
 import pickle
 from multi_stage_ppo_tuning import multi_stage_fine_tuning
 from model.reward_memory import Memory, Transition, Action
 from model.queue import Queue
+from torch.optim import Adam
 
 # =====================================================
 # =*= 1st MAIN FILE OF THE PROJECT: GNS SOLVER =*=
@@ -28,7 +30,7 @@ __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
 DEBUG_PRINT: callable = None
-LEARNING_RATE = 1e-4
+LEARNING_RATE = 1e-3
 OUTSOURCING = 0
 SCHEDULING = 1
 MATERIAL_USE = 2
@@ -564,6 +566,8 @@ def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: 
     outsourcing_actor.load_state_dict(torch.load(model_path+'/'+base_name+'outsourcing_weights_'+index+'.pth', map_location=torch.device(device)))
     scheduling_actor.load_state_dict(torch.load(model_path+'/'+base_name+'scheduling_weights_'+index+'.pth', map_location=torch.device(device)))
     material_actor.load_state_dict(torch.load(model_path+'/'+base_name+'material_use_weights_'+index+'.pth', map_location=torch.device(device)))
+    optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
+    optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'.pth', map_location=torch.device(device)))
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
 
 def init_new_models():
@@ -577,7 +581,8 @@ def init_new_models():
     outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
-    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
+    optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer
 
 def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mode: bool, interactive: bool = True):
     """
@@ -585,19 +590,16 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mo
     """
     first = (_run_number<=1)
     previous_run = run_number - 1
-    agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
-    shared_embbeding_stack = shared_embbeding_stack.to(device)
-    shared_critic = shared_critic.to(device)
-    for agent,_ in agents:
-        agent = agent.to(device)
+    agents, shared_embbeding_stack, shared_critic, optimizer = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
     print("Pre-training models with MAPPO (on several instances)...")
-    multi_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, run_number=run_number, interactive=interactive, debug_mode=debug_mode)
+    # multi_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, run_number=run_number, interactive=interactive, debug_mode=debug_mode)
+    uni_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number, debug_mode=debug_mode)
 
 def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, debug_mode: bool, device: str, use_pre_train: bool = False, interactive: bool = True):
     """
         Fine-tune on target instance (size, id)
     """
-    agents, shared_embbeding_stack, shared_critic = init_new_models() if not use_pre_train else load_trained_models(model_path=path+directory.models, run_number=pre_trained_number, device=device)
+    agents, shared_embbeding_stack, shared_critic, _ = init_new_models() if not use_pre_train else load_trained_models(model_path=path+directory.models, run_number=pre_trained_number, device=device)
     shared_embbeding_stack = shared_embbeding_stack.to(device)
     shared_critic = shared_critic.to(device)
     for agent,_ in agents:
@@ -615,7 +617,7 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, path: st
     best_cost = -1.0
     best_obj = -1.0
     first = (_run_number<=1)
-    agents, shared_embbeding_stack, shared_critic = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
+    agents, shared_embbeding_stack, shared_critic, _ = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
     for agent,_ in agents:
         agent = agent.to(device)
     shared_embbeding_stack = shared_embbeding_stack.to(device)
