@@ -8,22 +8,31 @@ __license__ = "Apache 2.0 License"
 w_final: float = 0.7
 standardization: float = 0.1
 
-class Decision:
+class Action: 
+    def __init__(self, type, target, value):
+        self.type = type
+        self.target = target
+        self.value = value
+
+    def same(self, a) -> bool:
+        a: Action
+        return self.type == a.type and self.target == a.target and self.value == a.value
+
+class Transition:
     """
         One decision
     """
-    def __init__(self, type: int, agent_name: str, target: int, value: int, end_old: int, end_new: int, cost_old: int=-1, cost_new: int=-1, parent=None, use_cost: bool=False):
+    def __init__(self, agent_name: str, action: Action, end_old: int, end_new: int, cost_old: int=-1, cost_new: int=-1, parent=None, use_cost: bool=False):
         self.type: int = type
-        self.target: int = target
-        self.value: int = value
+        self.action: Action = action
         self.end_old: int = end_old
         self.end_new: int = end_new
         self.cost_old: int = cost_old
         self.agent_name: str = agent_name
         self.cost_new: int = cost_new
         self.use_cost: int = use_cost
-        self.next_decisions: list[Decision] = []
-        self.parent: Decision = parent
+        self.next_decisions: list[Transition] = []
+        self.parent: Transition = parent
         self.reward: float = -1
         if parent is not None:
             self.parent.next_decisions.append(self)
@@ -32,8 +41,8 @@ class Decision:
         """
             Check if two decisions are the same
         """
-        d: Decision
-        return d.parent == self.parent and d.type==self.type and d.target==self.target and d.value==self.value
+        d: Transition
+        return d.parent == self.parent and d.action.same(self.action)
 
     def compute_reward(self, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1) -> float:
         """
@@ -54,9 +63,9 @@ class Memory:
     """
     def __init__(self, instance_id: int):
         self.instance_id: int = instance_id
-        self.decisions: list[Decision] = []
+        self.decisions: list[Transition] = []
 
-    def compute_all_rewards(self, decision: Decision, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1) -> None:
+    def compute_all_rewards(self, decision: Transition, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1) -> None:
         """
             Compute all rewards
         """
@@ -64,7 +73,7 @@ class Memory:
         for _next in decision.next_decisions:
             self.compute_all_rewards(decision=_next, a=a, final_cost=final_cost, final_makespan=final_makespan, init_cmax=init_cmax, init_cost=init_cost)
 
-    def add_or_update_decision(self, decision: Decision, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1, need_rewards: bool=True) -> Decision:
+    def add_or_update_decision(self, decision: Transition, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1, need_rewards: bool=True) -> Transition:
         """
             Add decision in the memory or update reward if already exist
         """
