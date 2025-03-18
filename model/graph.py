@@ -226,9 +226,6 @@ class GraphInstance():
         self.operation_resource_time: list[list[list[int]]] = []
         self.approximate_design_load: list[list[int]] = []
         self.approximate_physical_load: list[list[int]] = []
-        
-        self.item_possible = []
-        self.operation_possible = []
 
         self.graph: HeteroData = HeteroData()
         self.device: str = device
