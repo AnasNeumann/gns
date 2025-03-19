@@ -61,8 +61,8 @@ class Memory:
     """
         The memory of one specific instance (both pre-training and fine-tuning)
     """
-    def __init__(self, instance_id: int):
-        self.instance_id: int = instance_id
+    def __init__(self, instance_id: str):
+        self.instance_id: str = instance_id
         self.decisions: list[Transition] = []
 
     def compute_all_rewards(self, decision: Transition, a: float, init_cmax: int, init_cost: int, final_makespan: int, final_cost: int=-1) -> None:
@@ -125,7 +125,7 @@ class Memories:
     def __init__(self):
         self.instances: list[Memory] = []
     
-    def add_instance_if_new(self, instance_id: int) -> Memory:
+    def add_instance_if_new(self, instance_id: str) -> Memory:
         """
             Add a new instance if ID is not present yet
         """

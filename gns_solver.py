@@ -18,7 +18,7 @@ from unistage_pre_training import uni_stage_pre_train
 from model.agent import MultiAgent_OneInstance
 import pickle
 from multi_stage_ppo_tuning import multi_stage_fine_tuning
-from model.reward_memory import Memory, Transition, Action
+from model.reward_memory import Memory, Transition, Action, Memories
 from model.queue import Queue
 from torch.optim import Adam
 
@@ -568,7 +568,9 @@ def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: 
     material_actor.load_state_dict(torch.load(model_path+'/'+base_name+'material_use_weights_'+index+'.pth', map_location=torch.device(device)))
     optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
     optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'.pth', map_location=torch.device(device)))
-    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic
+    with open(model_path+'/'+base_name+'memory_'+index+'.pth', 'rb') as file:
+       memory: Memories = pickle.load(file)
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
 
 def init_new_models():
     _rm_size = GNN_CONF['resource_and_material_embedding_size']
@@ -582,24 +584,25 @@ def init_new_models():
     scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
-    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer
+    memory: Memories = Memories()
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
 
-def pre_train_on_all_instances(run_number: int, device: str, path: str, debug_mode: bool, interactive: bool = True):
+def pre_train_on_all_instances(run_number: int, device: str, path: str):
     """
         Pre-train networks on all instances
     """
     first = (_run_number<=1)
     previous_run = run_number - 1
-    agents, shared_embbeding_stack, shared_critic, optimizer = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
+    agents, shared_embbeding_stack, shared_critic, optimizer, memory = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
     print("Pre-training models with MAPPO (on several instances)...")
     # multi_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, run_number=run_number, interactive=interactive, debug_mode=debug_mode)
-    uni_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, path=path, solve_function=solve_one, device=device, run_number=run_number)
+    uni_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, memory=memory, path=path, solve_function=solve_one, device=device, run_number=run_number)
 
 def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, debug_mode: bool, device: str, use_pre_train: bool = False, interactive: bool = True):
     """
         Fine-tune on target instance (size, id)
     """
-    agents, shared_embbeding_stack, shared_critic, _ = init_new_models() if not use_pre_train else load_trained_models(model_path=path+directory.models, run_number=pre_trained_number, device=device)
+    agents, shared_embbeding_stack, shared_critic, _, _ = init_new_models() if not use_pre_train else load_trained_models(model_path=path+directory.models, run_number=pre_trained_number, device=device)
     shared_embbeding_stack = shared_embbeding_stack.to(device)
     shared_critic = shared_critic.to(device)
     for agent,_ in agents:
@@ -617,7 +620,7 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, path: st
     best_cost = -1.0
     best_obj = -1.0
     first = (_run_number<=1)
-    agents, shared_embbeding_stack, shared_critic, _ = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
+    agents, shared_embbeding_stack, shared_critic, _, _ = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
     for agent,_ in agents:
         agent = agent.to(device)
     shared_embbeding_stack = shared_embbeding_stack.to(device)
@@ -682,7 +685,7 @@ if __name__ == '__main__':
             fine_tune_on_target(id=args.id, size=args.size, pre_trained_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device, use_pre_train=to_bool(args.use_pretrain), interactive=to_bool(args.interactive))
         else:
             # python gns_solver.py --train=true --target=false --mode=prod --number=1 --interactive=true --path=./
-            pre_train_on_all_instances(run_number=_run_number, path=args.path, debug_mode=_debug_mode, device=_device, interactive=to_bool(args.interactive))
+            pre_train_on_all_instances(run_number=_run_number, path=args.path, device=_device)
     else:
         if to_bool(args.target):
             # SOLVE ACTUAL INSTANCE: python gns_solver.py --target=true --size=xxl --id=151 --train=false --mode=test --path=./ --number=1

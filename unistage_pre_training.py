@@ -44,13 +44,15 @@ OUTSOURCING = 0
 SCHEDULING = 1
 MATERIAL_USE = 2
 
-def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Optimizer, run_number:int, complete_path: str):
+def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Optimizer, memory: Memories, run_number:int, complete_path: str):
     index = str(run_number)
     torch.save(embedding_stack.state_dict(), complete_path+'/gnn_weights_'+index+'.pth')
     torch.save(shared_critic.state_dict(), complete_path+'/critic_weights_'+index+'.pth')
-    torch.save(optimizer.state_dict(), complete_path+'/adam_'+index+'.pth')
+    torch.save(optimizer.state_dict(), complete_path+'/adam_weights_'+index+'.pth')
     for agent, name in agents:
         torch.save(agent.state_dict(), complete_path+'/'+name+'_weights_'+index+'.pth')
+    with open(complete_path+'/memory_'+index+'.pth', 'wb') as f:
+            pickle.dump(memory, f)
 
 def search_instance(instances: list[Instance], id: int) -> Instance:
     for instance in instances:
@@ -77,7 +79,7 @@ def train_or_validate_batch(reward_MEMORIES: Memories, agents: list[(Module, str
     """
     _batch_replay_memory: list[MultiAgent_OneInstance] = []
     for instance in batch:
-        reward_MEMORY: Memory = reward_MEMORIES.add_instance_if_new(instance_id=instance.id)
+        reward_MEMORY: Memory = reward_MEMORIES.add_instance_if_new(instance_id=instance.size + "_" + str(instance.id))
         print(f"\t start solving instance: {instance.id}...")
         transitions,_,_,_,_ = solve_function(instance=instance, agents=agents, device=device, train=True, trainable=[1,1,1], reward_MEMORY=reward_MEMORY)
         _batch_replay_memory.append(transitions)
@@ -103,12 +105,11 @@ def train_or_validate_batch(reward_MEMORIES: Memories, agents: list[(Module, str
         print(f'\t Multi-agent batch loss: {current_vloss:.4f}')
         return current_details
 
-def multi_agent_stage(train_data: list[Instance], val_data: list[Instance], agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Adam, solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, switch_batch: int, validation_rate: int, device: str, run_number: int):
+def multi_agent_stage(train_data: list[Instance], val_data: list[Instance], agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Adam, reward_MEMORIES: Memories, solve_function: Callable, path: str, epochs: int, iterations:int, batch_size: int, switch_batch: int, validation_rate: int, device: str, run_number: int):
     """
         Last (4th) optimization stage: all three agents together
     """
     vlosses = MAPPO_Losses(agent_names=[name for _,name in agents])
-    reward_MEMORIES: Memories = Memories()
     for iteration in range(iterations):
         print(f"PPO iteration: {iteration+1}/{iterations}:")
         if iteration % switch_batch == 0:
@@ -128,9 +129,9 @@ def multi_agent_stage(train_data: list[Instance], val_data: list[Instance], agen
     complete_path = path + directory.models
     with open(complete_path+'/validation_'+str(run_number)+'.pkl', 'wb') as f:
         pickle.dump(vlosses, f)
-    save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=optimizer, run_number=run_number, complete_path=complete_path)
+    save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=optimizer, memory=reward_MEMORIES, run_number=run_number, complete_path=complete_path)
 
-def uni_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Adam, path: str, solve_function: Callable, device: str, run_number:int):
+def uni_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Adam, memory: Memories, path: str, solve_function: Callable, device: str, run_number:int):
     """
         Multi-stage PPO function to pre-train agents on several instances
     """
@@ -152,6 +153,7 @@ def uni_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, sh
             embedding_stack=embedding_stack,
             shared_critic=shared_critic,
             optimizer=optimizer,
+            reward_MEMORIES=memory,
             solve_function=solve_function, 
             path=path, 
             epochs=PPO_CONF['opt_epochs'], 

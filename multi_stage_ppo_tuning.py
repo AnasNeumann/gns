@@ -60,7 +60,7 @@ def scheduling_stage(target_instance : Instance, agents: list[(Module, str)], so
     _scheduling_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per batch of episodes)", ylabel="Scheduling loss (policy)", title="Scheduling loss (policy)", color="green", show=interactive)
     _Cmax_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Makespan", title="Final Makespan by episode", color="red", show=interactive)
     _batch_replay_memory: list[MultiAgent_OneInstance] = []
-    reward_MEMORY: Memory = Memory(target_instance.id)
+    reward_MEMORY: Memory = Memory(target_instance.size + "_" + str(target_instance.id))
     for episode in range(iterations):
         print(f"PPO solving episode: {episode+1}/{iterations}...")
         transitions, reward_MEMORY, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,1,0], device=device, fixed_alpha=1.0, reward_MEMORY=reward_MEMORY)
@@ -105,7 +105,7 @@ def material_use_stage(target_instance : Instance, agents: list[(Module, str)], 
     _material_loss_TRACKER: LossTracker = LossTracker(xlabel="Training epochs (3 per batch of episodes)", ylabel="Material use loss (policy)", title="Material use loss (policy)", color="green", show=interactive)
     _Cmax_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Makespan", title="Final Makespan by episode", color="red", show=interactive)
     _batch_replay_memory: list[MultiAgent_OneInstance] = []
-    reward_MEMORY: Memory = Memory(target_instance.id)
+    reward_MEMORY: Memory = Memory(target_instance.size + "_" + str(target_instance.id))
     for episode in range(iterations):
         print(f"PPO solving episode: {episode+1}/{iterations}...")
         transitions, reward_MEMORY, _, cmax, _ = solve_function(instance=target_instance, agents=agents, train=True, trainable=[0,0,1], device=device, fixed_alpha=1.0, reward_MEMORY=reward_MEMORY)
@@ -150,7 +150,7 @@ def outsourcing_stage(target_instance : Instance, agents: list[(Module, str)], s
     _Cmax_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Makespan", title="Final Makespan by episode", color="red", show=interactive)
     _cost_TRACKER: LossTracker = LossTracker(xlabel="Solving episode", ylabel="Cost", title="Final Cost by episode", color="orange", show=interactive)
     _batch_replay_memory: list[MultiAgent_OneInstance] = []
-    reward_MEMORY: Memory = Memory(target_instance.id)
+    reward_MEMORY: Memory = Memory(target_instance.size + "_" + str(target_instance.id))
     for episode in range(iterations):
         print(f"PPO solving episode: {episode+1}/{iterations}...")
         transitions, reward_MEMORY, _, cmax, cost = solve_function(instance=target_instance, agents=agents, train=True, trainable=[1,0,0], device=device, reward_MEMORY=reward_MEMORY)
@@ -201,7 +201,7 @@ def multi_agent_stage(target_instance : Instance, agents: list[(Module, str)], s
     _best_episode: int = 0
     _time_to_best: float = 0
     _batch_replay_memory: list[MultiAgent_OneInstance] = []
-    reward_MEMORY: Memory = Memory(target_instance.id)
+    reward_MEMORY: Memory = Memory(target_instance.size + "_" + str(target_instance.id))
     for episode in range(iterations):
         print(f"PPO solving episode: {episode+1}/{iterations}...")
         transitions, reward_MEMORY, graph, cmax, cost = solve_function(instance=target_instance, agents=agents, train=True, trainable=[1,1,1], device=device, reward_MEMORY=reward_MEMORY)
