@@ -570,6 +570,9 @@ def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: 
     optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'.pth', map_location=torch.device(device)))
     with open(model_path+'/'+base_name+'memory_'+index+'.pth', 'rb') as file:
        memory: Memories = pickle.load(file)
+    torch.compile(outsourcing_actor)
+    torch.compile(scheduling_actor)
+    torch.compile(material_actor)
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
 
 def init_new_models():
@@ -585,6 +588,9 @@ def init_new_models():
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
     memory: Memories = Memories()
+    torch.compile(outsourcing_actor)
+    torch.compile(scheduling_actor)
+    torch.compile(material_actor)
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
 
 def pre_train_on_all_instances(run_number: int, device: str, path: str):
