@@ -569,7 +569,7 @@ def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: 
     optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
     optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'.pth', map_location=torch.device(device)))
     with open(model_path+'/'+base_name+'memory_'+index+'.pth', 'rb') as file:
-       memory: Memories = torch.load(file, map_location=torch.device(device))
+       memory: Memories = pickle.load(file)
     torch.compile(outsourcing_actor)
     torch.compile(scheduling_actor)
     torch.compile(material_actor)
