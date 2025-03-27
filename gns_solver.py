@@ -558,26 +558,33 @@ def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: 
     _ac_size = GNN_CONF['actor_hidden_channels']
     _value_size= GNN_CONF['value_hidden_channels']
     shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(_rm_size, _io_size, _hidden_size, GNN_CONF['nb_layers'])
-    shared_GNN.load_state_dict(torch.load(model_path+'/'+base_name+'gnn_weights_'+index+'.pth', map_location=torch.device(device)))
+    shared_GNN.load_state_dict(torch.load(model_path+'/'+base_name+'gnn_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
     shared_critic: L1_CommonCritic = L1_CommonCritic(_rm_size, _io_size, _value_size)
-    shared_critic.load_state_dict(torch.load(model_path+'/'+base_name+'critic_weights_'+index+'.pth', map_location=torch.device(device)))
+    shared_critic.load_state_dict(torch.load(model_path+'/'+base_name+'critic_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
     outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
-    outsourcing_actor.load_state_dict(torch.load(model_path+'/'+base_name+'outsourcing_weights_'+index+'.pth', map_location=torch.device(device)))
-    scheduling_actor.load_state_dict(torch.load(model_path+'/'+base_name+'scheduling_weights_'+index+'.pth', map_location=torch.device(device)))
-    material_actor.load_state_dict(torch.load(model_path+'/'+base_name+'material_use_weights_'+index+'.pth', map_location=torch.device(device)))
-    optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
-    optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'.pth', map_location=torch.device(device)))
-    with open(model_path+'/'+base_name+'memory_'+index+'.pth', 'rb') as file:
-        memory: Memories = pickle.load(file)
-    move_tensors(memory, device=torch.device(device))
+    outsourcing_actor.load_state_dict(torch.load(model_path+'/'+base_name+'outsourcing_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
+    scheduling_actor.load_state_dict(torch.load(model_path+'/'+base_name+'scheduling_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
+    material_actor.load_state_dict(torch.load(model_path+'/'+base_name+'material_use_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
+    shared_GNN = shared_GNN.to(device)
+    shared_critic = shared_critic.to(device)
+    outsourcing_actor = outsourcing_actor.to(device)
+    material_actor = material_actor.to(device)
+    scheduling_actor = scheduling_actor.to(device)
+    outsourcing_actor.train()
+    scheduling_actor.train()
+    material_actor.train()
     torch.compile(outsourcing_actor)
     torch.compile(scheduling_actor)
     torch.compile(material_actor)
+    optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
+    optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
+    with open(model_path+'/'+base_name+'memory_'+index+'.pth', 'rb') as file:
+        memory: Memories = pickle.load(file)
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
 
-def init_new_models():
+def init_new_models(device: str):
     _rm_size = GNN_CONF['resource_and_material_embedding_size']
     _io_size = GNN_CONF['operation_and_item_embedding_size']
     _hidden_size = GNN_CONF['embedding_hidden_channels']
@@ -588,11 +595,19 @@ def init_new_models():
     outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     scheduling_actor: L1_SchedulingActor= L1_SchedulingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
-    optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
-    memory: Memories = Memories()
+    shared_GNN = shared_GNN.to(device)
+    shared_critic = shared_critic.to(device)
+    outsourcing_actor = outsourcing_actor.to(device)
+    material_actor = material_actor.to(device)
+    scheduling_actor = scheduling_actor.to(device)
+    outsourcing_actor.train()
+    scheduling_actor.train()
+    material_actor.train()
     torch.compile(outsourcing_actor)
     torch.compile(scheduling_actor)
     torch.compile(material_actor)
+    optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
+    memory: Memories = Memories()
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
 
 def pre_train_on_all_instances(run_number: int, device: str, path: str):
@@ -601,7 +616,7 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str):
     """
     first = (_run_number<=1)
     previous_run = run_number - 1
-    agents, shared_embbeding_stack, shared_critic, optimizer, memory = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
+    agents, shared_embbeding_stack, shared_critic, optimizer, memory = init_new_models(device=device) if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
     print("Pre-training models with MAPPO (on several instances)...")
     # multi_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, run_number=run_number, interactive=interactive, debug_mode=debug_mode)
     uni_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, memory=memory, path=path, solve_function=solve_one, device=device, run_number=run_number)
@@ -610,7 +625,7 @@ def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, 
     """
         Fine-tune on target instance (size, id)
     """
-    agents, shared_embbeding_stack, shared_critic, _, _ = init_new_models() if not use_pre_train else load_trained_models(model_path=path+directory.models, run_number=pre_trained_number, device=device)
+    agents, shared_embbeding_stack, shared_critic, _, _ = init_new_models(device=device) if not use_pre_train else load_trained_models(model_path=path+directory.models, run_number=pre_trained_number, device=device)
     shared_embbeding_stack = shared_embbeding_stack.to(device)
     shared_critic = shared_critic.to(device)
     for agent,_ in agents:
@@ -628,7 +643,7 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, path: st
     best_cost = -1.0
     best_obj = -1.0
     first = (_run_number<=1)
-    agents, shared_embbeding_stack, shared_critic, _, _ = init_new_models() if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
+    agents, shared_embbeding_stack, shared_critic, _, _ = init_new_models(device=device) if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
     for agent,_ in agents:
         agent = agent.to(device)
     shared_embbeding_stack = shared_embbeding_stack.to(device)

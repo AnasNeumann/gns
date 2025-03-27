@@ -142,11 +142,6 @@ def uni_stage_pre_train(agents: list[(Module, str)], embedding_stack: Module, sh
     random.shuffle(instances)
     _num_val = PPO_CONF['validation']
     train_data, val_data = instances[_num_val:], instances[:_num_val]
-    embedding_stack = embedding_stack.to(device)
-    shared_critic = shared_critic.to(device)
-    for agent,_ in agents:
-        agent = agent.to(device)
-        agent.train()
     multi_agent_stage(train_data=train_data,
             val_data=val_data,
             agents=agents, 
