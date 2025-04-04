@@ -51,7 +51,7 @@ def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_cri
     torch.save(optimizer.state_dict(), complete_path+'/adam_weights_'+index+'.pth')
     for agent, name in agents:
         torch.save(agent.state_dict(), complete_path+'/'+name+'_weights_'+index+'.pth')
-    with open(complete_path+'/memory_'+index+'.pth', 'wb') as f:
+    with open(complete_path+'/memory_'+index+'.pkl', 'wb') as f:
             pickle.dump(memory, f)
 
 def search_instance(instances: list[Instance], id: int) -> Instance:
