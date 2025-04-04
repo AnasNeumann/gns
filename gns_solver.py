@@ -580,7 +580,7 @@ def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: 
     torch.compile(material_actor)
     optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
     optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
-    with open(model_path+'/'+base_name+'memory_'+index+'.pkl', 'rb') as file:
+    with open(model_path+'/'+base_name+'memory_'+index+'.pth', 'rb') as file:
         memory: Memories = pickle.load(file)
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
 
