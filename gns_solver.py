@@ -549,7 +549,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
 # =*= V. MAIN CODE =*=
 # ====================
 
-def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: bool = False, size: str = "", id: str = ""):
+def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: bool = False, size: str = "", id: str = "", training_stage: bool=True):
     index = str(run_number)
     base_name = f"{size}_{id}_" if fine_tuned else ""
     _rm_size = GNN_CONF['resource_and_material_embedding_size']
@@ -578,13 +578,15 @@ def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: 
     torch.compile(outsourcing_actor)
     torch.compile(scheduling_actor)
     torch.compile(material_actor)
-    optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
-    optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
-    with open(model_path+'/'+base_name+'memory_'+index+'.pth', 'rb') as file:
-        memory: Memories = pickle.load(file)
-    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
+    if training_stage:
+        optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
+        optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
+        with open(model_path+'/'+base_name+'memory_'+index+'.pth', 'rb') as file:
+            memory: Memories = pickle.load(file)
+        return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])]
 
-def init_new_models(device: str):
+def init_new_models(device: str, training_stage: bool=True):
     _rm_size = GNN_CONF['resource_and_material_embedding_size']
     _io_size = GNN_CONF['operation_and_item_embedding_size']
     _hidden_size = GNN_CONF['embedding_hidden_channels']
@@ -606,9 +608,11 @@ def init_new_models(device: str):
     torch.compile(outsourcing_actor)
     torch.compile(scheduling_actor)
     torch.compile(material_actor)
-    optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
-    memory: Memories = Memories()
-    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
+    if training_stage:
+        optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
+        memory: Memories = Memories()
+        return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
+    return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])]
 
 def pre_train_on_all_instances(run_number: int, device: str, path: str):
     """
@@ -633,7 +637,7 @@ def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, 
     print("Fine-tuning models with MAPPO (on target instance)...")
     multi_stage_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, id=id, size=size, interactive=interactive, debug_mode=debug_mode)
 
-def solve_only_target(id: str, size: str, run_number: int, device: str, path: str, repetitions: int=1):
+def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_number: int, device: str, path: str, repetitions: int=1):
     """
         Solve the target instance (size, id) only using inference
     """
@@ -642,12 +646,6 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, path: st
     best_cmax = -1.0
     best_cost = -1.0
     best_obj = -1.0
-    first = (_run_number<=1)
-    agents, shared_embbeding_stack, shared_critic, _, _ = init_new_models(device=device) if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device)
-    for agent,_ in agents:
-        agent = agent.to(device)
-    shared_embbeding_stack = shared_embbeding_stack.to(device)
-    shared_critic = shared_critic.to(device)
     for rep in range(repetitions):
         print(f"SOLVING INSTANCE {size}_{id} (repetition {rep+1}/{repetitions})...")
         graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, trainable=[False for _ in agents], device=device, greedy=(rep==0))
@@ -673,14 +671,21 @@ def solve_only_target(id: str, size: str, run_number: int, device: str, path: st
     with open(directory.solutions+'/'+size+'/gns_'+str(run_number)+'_solution_'+id+'.pkl', 'wb') as f:
             pickle.dump(solution, f)
 
-def solve_all_instances(run_number: int, device: str, path: str):
+def solve_all_instances(agents: list[(str, Module)], run_number: int, device: str, path: str):
     """
         Solve all instances only in inference mode
     """
-    instances: list[Instance] = load_training_dataset(path=path, train=False)
+    instances: list[Instance] = load_training_dataset(debug_mode=False, path=path, train=False)
     for i in instances:
         if (i.size, i.id) not in [('s', 172)]:
-            solve_only_target(id=str(i.id), size=str(i.size), run_number=run_number, device=device, path=path, repetitions=SOLVING_REPETITIONS)
+            solve_only_target(id=str(i.id), size=str(i.size), agents=agents, run_number=run_number, device=device, path=path, repetitions=SOLVING_REPETITIONS)
+
+def agents_ready(device: str, run_number: int, path: str):
+    first = (run_number<=1)
+    agents = init_new_models(device=device, training_stage=False) if first else load_trained_models(model_path=path+directory.models, run_number=run_number, device=device, training_stage=False)
+    for agent,_ in agents:
+        agent = agent.to(device)
+    return agents
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description="EPSIII/L1 GNS solver")
@@ -710,11 +715,12 @@ if __name__ == '__main__':
             # python gns_solver.py --train=true --target=false --mode=prod --number=1 --interactive=true --path=./
             pre_train_on_all_instances(run_number=_run_number, path=args.path, device=_device)
     else:
+        agents: list[(str, Module)] = agents_ready(device=_device, run_number=_run_number, path=args.path)
         if to_bool(args.target):
             # SOLVE ACTUAL INSTANCE: python gns_solver.py --target=true --size=xxl --id=151 --train=false --mode=test --path=./ --number=1
             # TRY ON DEBUG INSTANCE: python gns_solver.py --target=true --size=d --id=debug --train=false --mode=test --path=./ --number=1
-            solve_only_target(id=args.id, size=args.size, run_number=args.number, device=_device, path=args.path)
+            solve_only_target(id=args.id, size=args.size,agents=agents, run_number=args.number, device=_device, path=args.path)
         else:
             # python gns_solver.py --train=false --target=false --mode=test --path=./ --number=1
-            solve_all_instances(run_number=args.number, device=_device, path=args.path)
+            solve_all_instances(run_number=args.number, agents=agents, device=_device, path=args.path)
     print("===* END OF FILE *===")

@@ -35,6 +35,7 @@ if __name__ == '__main__':
     f.write("#SBATCH --mail-type=FAIL\n")
     f.write(f"#SBATCH --output={BASIC_PATH}data/out/train_gns.out\n")  
     f.write("module load python/3.12\n")
+    f.write("module load cuda/10.2\n")
     f.write("virtualenv --no-download $SLURM_TMPDIR/env\n")
     f.write("source $SLURM_TMPDIR/env/bin/activate\n")
     f.write("pip install --upgrade pip --no-index\n")

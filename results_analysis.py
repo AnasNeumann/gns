@@ -66,7 +66,7 @@ def display_one(losses: list[Tensor], loss_name: str, path: str):
     plt.title('Training Convergence: '+loss_name)
     plt.legend()
     plt.grid(True)
-    for x in range(8, len(losses) + 1, 8):
+    for x in range(25, len(losses) + 1, 25):
         plt.axvline(x=x, color='black', linestyle='--', linewidth=1)
     plt.savefig(path+"/"+loss_name+".png")
     plt.show()
@@ -108,5 +108,5 @@ if __name__ == '__main__':
     _model_path = args.path+directory.models
     _result_path = args.path+directory.results
     _solution_types = ['exact', 'gns']
-    combine_all_results(basic_path=_instances_path, solution_types=_solution_types, result_path=_result_path)
+    # combine_all_results(basic_path=_instances_path, solution_types=_solution_types, result_path=_result_path)
     display_losses(model_path=_model_path, result_path=_result_path, last=int(args.last))
