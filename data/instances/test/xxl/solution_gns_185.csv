@@ -1,2 +1,2 @@
-index,value,computing_time,device_used
-185,8455.83,15.020632028579712,mps
+index,value,cmax,cost,repetitions,computing_time,device_used
+185,6956.4,7306.0,5786.0,10,42.056965827941895,mps
