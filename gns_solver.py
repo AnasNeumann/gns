@@ -22,6 +22,7 @@ from multi_stage_ppo_tuning import multi_stage_fine_tuning
 from model.reward_memory import Memory, Transition, Action, Memories
 from model.queue import Queue
 from torch.optim import Adam
+from exact_solver import solve_one as exact_solver
 
 # =====================================================
 # =*= 1st MAIN FILE OF THE PROJECT: GNS SOLVER =*=
@@ -670,6 +671,7 @@ def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_numbe
             pickle.dump(graph, f)
     with open(directory.solutions+'/'+size+'/gns_'+str(run_number)+'_solution_'+id+'.pkl', 'wb') as f:
             pickle.dump(solution, f)
+    return target_instance, solution
 
 def solve_all_instances(agents: list[(str, Module)], run_number: int, device: str, path: str):
     """
@@ -719,7 +721,8 @@ if __name__ == '__main__':
         if to_bool(args.target):
             # SOLVE ACTUAL INSTANCE: python gns_solver.py --target=true --size=xxl --id=151 --train=false --mode=test --path=./ --number=1
             # TRY ON DEBUG INSTANCE: python gns_solver.py --target=true --size=d --id=debug --train=false --mode=test --path=./ --number=1
-            solve_only_target(id=args.id, size=args.size,agents=agents, run_number=args.number, device=_device, path=args.path)
+            i, s = solve_only_target(id=args.id, size=args.size,agents=agents, run_number=args.number, device=_device, path=args.path)
+            exact_solver(instance=i, cpus=8, memory=10, time=30, solution_path=args.path+"/debug/debug.csv", GNN_solution=s)
         else:
             # python gns_solver.py --train=false --target=false --mode=test --path=./ --number=1
             solve_all_instances(run_number=args.number, agents=agents, device=_device, path=args.path)

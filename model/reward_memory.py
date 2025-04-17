@@ -84,7 +84,7 @@ class Memory:
             for _other_first in self.decisions:
                 if _other_first.same(decision):
                     _found = True
-                    _other_first.reward = min(_other_first.reward, decision.reward)
+                    _other_first.reward = max(_other_first.reward, decision.reward)
                     for _next_decision in decision.next_decisions:
                         _next_decision.parent = _other_first
                         self.add_or_update_decision(decision=_next_decision, 
@@ -103,7 +103,7 @@ class Memory:
             for _next in decision.parent.next_decisions:
                 if _next.same(decision):
                     _found = True
-                    _next.reward = min(_next.reward, decision.reward)
+                    _next.reward = max(_next.reward, decision.reward)
                     for _next_decision in decision.next_decisions:
                         _next_decision.parent = _next
                         self.add_or_update_decision(decision=_next_decision, 

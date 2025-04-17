@@ -103,7 +103,7 @@ class Project():
         self.id: int = 0
         self.head: Item = None
         self.flat_items: list[Item] = []
-        self.flat_operations: list[Item] = []
+        self.flat_operations: list[Operation] = []
     
     def json_display(self):
         return {

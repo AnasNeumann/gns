@@ -74,22 +74,6 @@ class ResourceEmbeddingLayer(Module):
         res_by_need_edges = self_resources_upscaled[need_for_resources.edge_index[1]]
         operations_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res_by_need_edges, ops_by_need_edges], dim=-1), self.att_operation_coef))
         
-        #if same_types:
-        #    res1_by_same_edges = self.resource_upscale(resources[same_types.edge_index[0]])
-        #    res2_by_same_edges = self_resources_upscaled[same_types.edge_index[1]]
-        #    resources_cross_attention = self.leaky_relu(torch.matmul(torch.cat([res2_by_same_edges, res1_by_same_edges], dim=-1), self.att_resource_coef))
-
-        #    normalizer = F.softmax(torch.cat([self_attention, operations_cross_attention, resources_cross_attention], dim=0), dim=0)
-        #    norm_operations_cross_attention = normalizer[self_attention.size(0):self_attention.size(0)+operations_cross_attention.size(0)]
-        #    norm_resources_cross_attention = normalizer[self_attention.size(0)+operations_cross_attention.size(0):]
-
-        #   weighted_res_by_edges = norm_resources_cross_attention * res1_by_same_edges
-        #    sum_res_by_edges = scatter(weighted_res_by_edges, same_types.edge_index[1], dim=0, dim_size=self_resources_upscaled.size(0))
-
-        #    weighted_ops_by_edges = norm_operations_cross_attention * ops_by_need_edges
-        #    sum_ops_by_edges = scatter(weighted_ops_by_edges, need_for_resources.edge_index[1], dim=0, dim_size=self_resources_upscaled.size(0))
-        #    embedding = F.elu(normalizer[:self_attention.size(0)] * self_resources_upscaled + sum_ops_by_edges + sum_res_by_edges)
-        #else:
         normalizer = F.softmax(torch.cat([self_attention, operations_cross_attention], dim=0), dim=0)
         norm_operations_cross_attention = normalizer[self_attention.size(0):]
 
