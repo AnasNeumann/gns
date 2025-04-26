@@ -158,9 +158,9 @@ def outsource_item(Q: Queue, graph: GraphInstance, instance: Instance, item_id: 
     """
         Outsource item and children (reccursive down to the leaves)
     """
+    p, e = graph.items_g2i[item_id]
     cost = graph.item(item_id, 'outsourcing_cost')
     outsourcing_start_time = t if enforce_time else max(graph.item(item_id, 'start_time'), t) 
-    p, e = graph.items_g2i[item_id]
     for child in graph.direct_children[p][e]:
         child_end_time, child_cost = outsource_item(Q, graph, instance, graph.items_i2g[p][child], outsourcing_start_time, required_types_of_resources, required_types_of_materials, enforce_time=True)
         cost += child_cost
@@ -549,7 +549,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
 # =*= V. MAIN CODE =*=
 # ====================
 
-SOLVING_SIZES: list[str] = ['s', 'm']
+SOLVING_SIZES: list[str] = ['s']
 def load_dataset(path: str, train: bool = True):
     type: str = '/train/' if train else '/test/'
     instances = []
@@ -656,7 +656,6 @@ def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_numbe
         Solve the target instance (size, id) only using inference
     """
     target_instance: Instance = load_instance(path+directory.instances+'/test/'+size+'/instance_'+id+'.pkl')
-    print(target_instance.display())
     start_time = systime.time()
     best_cmax = -1.0
     best_cost = -1.0
@@ -679,7 +678,6 @@ def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_numbe
         'device_used': [device]
     })
     solution: HeuristicSolution = translate_solution(graph, target_instance)
-    print(solution.json_display())
     print(final_metrics)
     final_metrics.to_csv(path+directory.instances+'/test/'+size+'/solution_gns_'+id+'.csv', index=False)
     with open(directory.solutions+'/'+size+'/gns_'+str(run_number)+'_graph_'+id+'.pkl', 'wb') as f:

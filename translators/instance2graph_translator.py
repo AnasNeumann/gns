@@ -31,8 +31,8 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
         parents_physical_time += apt
     item_id = graph.add_item(p, e, ItemFeatures(
         outsourced = NOT_YET if i.external[p][e] else NO,
-        outsourcing_cost = i.external_cost[p][e],
-        outsourcing_time = i.outsourcing_time[p][e],
+        outsourcing_cost = i.external_cost[p][e] if i.external[p][e] else 0,
+        outsourcing_time = i.outsourcing_time[p][e] if i.external[p][e] else 0,
         remaining_time = graph.approximate_physical_load[p][e] + graph.approximate_design_load[p][e] ,
         parents = len(graph.ancesors[p][e]),
         children = len(childrens),
