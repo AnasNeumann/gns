@@ -162,6 +162,10 @@ def outsource_item(Q: Queue, graph: GraphInstance, instance: Instance, item_id: 
     cost = graph.item(item_id, 'outsourcing_cost')
     outsourcing_start_time = t if enforce_time else max(graph.item(item_id, 'start_time'), t) 
     p, e = graph.items_g2i[item_id]
+    for child in graph.direct_children[p][e]:
+        child_end_time, child_cost = outsource_item(Q, graph, instance, graph.items_i2g[p][child], outsourcing_start_time, required_types_of_resources, required_types_of_materials, enforce_time=True)
+        cost += child_cost
+        outsourcing_start_time = max(outsourcing_start_time, child_end_time)
     end_date = outsourcing_start_time + instance.outsourcing_time[p][e]
     graph.update_item(item_id, [
         ('outsourced', YES),
@@ -188,10 +192,6 @@ def outsource_item(Q: Queue, graph: GraphInstance, instance: Instance, item_id: 
                     quantity_needed = graph.need_for_material(op_id, mat_id, 'quantity_needed')
                     graph.del_need_for_material(op_id, mat_id)
                     graph.inc_material(mat_id, [('remaining_demand', -1 * quantity_needed)])
-    for child in graph.direct_children[p][e]:
-        child_time, child_cost = outsource_item(Q, graph, instance, graph.items_i2g[p][child], outsourcing_start_time, required_types_of_resources, required_types_of_materials, enforce_time=True)
-        cost += child_cost
-        end_date = max(end_date, child_time)
     return end_date, cost
 
 def apply_outsourcing_to_direct_parent(Q: Queue, instance: Instance, graph: GraphInstance, previous_operations: list, p: int, e: int, end_date: int):

@@ -176,6 +176,7 @@ def c12(model: cp_model.CpModel, i: Instance, s: Solution):
     return model, s
 
 # Start time of parent' production (first physical operations or outsourcing time) is right after the end of its children 
+# This is also true for outsourced items!
 def c13(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e1 in i.loop_items(p):
