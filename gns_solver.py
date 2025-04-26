@@ -1,10 +1,10 @@
 import argparse
+import os
 from model.instance import Instance
 from model.graph import GraphInstance, State, NO, NOT_YET, YES
 from model.gnn import L1_EmbbedingGNN, L1_MaterialActor, L1_OutousrcingActor, L1_SchedulingActor, L1_CommonCritic
 from model.solution import HeuristicSolution
 from tools.common import load_instance, to_bool, directory
-from tools.tensors import move_tensors
 import torch
 torch.autograd.set_detect_anomaly(True)
 import pandas as pd
@@ -14,8 +14,7 @@ from torch.nn import Module
 from translators.instance2graph_translator import translate
 from translators.graph2solution_translator import translate_solution
 from debug.debug_gns import debug_printer
-from multi_stage_pre_training import multi_stage_pre_train, load_training_dataset
-from unistage_pre_training import uni_stage_pre_train
+from unistage_pre_training import uni_stage_pre_train as pre_train
 from model.agent import MultiAgent_OneInstance
 import pickle
 from multi_stage_ppo_tuning import multi_stage_fine_tuning
@@ -550,6 +549,20 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
 # =*= V. MAIN CODE =*=
 # ====================
 
+SOLVING_SIZES: list[str] = ['s', 'm']
+def load_dataset(path: str, train: bool = True):
+    type: str = '/train/' if train else '/test/'
+    instances = []
+    for size in SOLVING_SIZES:
+        complete_path = path+directory.instances+type+size+'/'
+        for i in os.listdir(complete_path):
+            if i.endswith('.pkl'):
+                file_path = os.path.join(complete_path, i)
+                with open(file_path, 'rb') as file:
+                    instances.append(pickle.load(file))
+    print(f"End of loading {len(instances)} instances!")
+    return instances
+
 def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: bool = False, size: str = "", id: str = "", training_stage: bool=True):
     index = str(run_number)
     base_name = f"{size}_{id}_" if fine_tuned else ""
@@ -624,7 +637,7 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str):
     agents, shared_embbeding_stack, shared_critic, optimizer, memory = init_new_models(device=device) if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
     print("Pre-training models with MAPPO (on several instances)...")
     # multi_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, run_number=run_number, interactive=interactive, debug_mode=debug_mode)
-    uni_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, memory=memory, path=path, solve_function=solve_one, device=device, run_number=run_number)
+    pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, memory=memory, path=path, solve_function=solve_one, device=device, run_number=run_number)
 
 def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, debug_mode: bool, device: str, use_pre_train: bool = False, interactive: bool = True):
     """
@@ -679,7 +692,7 @@ def solve_all_instances(agents: list[(str, Module)], run_number: int, device: st
     """
         Solve all instances only in inference mode
     """
-    instances: list[Instance] = load_training_dataset(debug_mode=False, path=path, train=False)
+    instances: list[Instance] = load_dataset(path=path, train=False)
     for i in instances:
         if (i.size, i.id) not in [('s', 172)]:
             solve_only_target(id=str(i.id), size=str(i.size), agents=agents, run_number=run_number, device=device, path=path, repetitions=SOLVING_REPETITIONS)
