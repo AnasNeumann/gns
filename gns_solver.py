@@ -737,8 +737,7 @@ if __name__ == '__main__':
             # SOLVE ACTUAL INSTANCE: python gns_solver.py --target=true --size=xxl --id=151 --train=false --mode=test --path=./ --number=1
             # TRY ON DEBUG INSTANCE: python gns_solver.py --target=true --size=d --id=debug --train=false --mode=test --path=./ --number=1
             i, s = solve_only_target(id=args.id, size=args.size,agents=agents, run_number=args.number, device=_device, path=args.path)
-            exact_solver(instance=i, cpus=8, memory=10, time=30, solution_path=args.path+"/debug/debug.csv", GNN_solution=s)
         else:
-            # python gns_solver.py --train=false --target=false --mode=test --path=./ --number=1
+            # python gns_solver.py --train=false --target=false --mode=prod --path=./ --number=1
             solve_all_instances(run_number=args.number, agents=agents, device=_device, path=args.path)
     print("===* END OF FILE *===")
