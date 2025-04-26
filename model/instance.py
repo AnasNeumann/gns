@@ -77,6 +77,12 @@ class Instance:
             if self.direct_assembly[p][e2][e]:
                 return e2
         return -1
+    
+    def get_finie_capacity_resources(self):
+        return [r for r in range(self.nb_resources) if self.finite_capacity[r]]
+    
+    def get_consumable_materials(self):
+        return [r for r in range(self.nb_resources) if not self.finite_capacity[r]]
 
     def get_ancestors(self, p: int, e: int):
         ancestors = []
@@ -156,6 +162,9 @@ class Instance:
 
     def get_nb_projects(self):
         return len(self.E_size)
+    
+    def operations_by_resource(self, r: int):
+        return self.operations_by_resource_type(self.get_resource_familly(r))
     
     def operations_by_resource_type(self, rt: int):
         operations = []

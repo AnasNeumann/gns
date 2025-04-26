@@ -16,37 +16,36 @@ __license__ = "Apache 2.0 License"
 BASIC_PATH = './'
 
 def init_vars(model: cp_model.CpModel, i: Instance):
-    s = Solution()
-    nb_projects = i.get_nb_projects()
+    s                = Solution()
+    nb_projects      = i.get_nb_projects()
     elts_per_project = i.E_size[0]
-    s.E_start = [[model.NewIntVar(0, i.M, f'E_start_{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
-    s.E_outsourced = [[model.NewBoolVar(f'E_outsource{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
-    s.E_prod_start = [[model.NewIntVar(0, i.M, f'E_prod_start{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
-    s.E_end = [[model.NewIntVar(0, i.M, f'E_end{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
-    s.E_validated = [[model.NewIntVar(0, i.M, f'E_validated{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
+    s.Cmax           = model.NewIntVar(0, i.M, 'Cmax')
+    s.E_start        = [[model.NewIntVar(0, i.M, f'E_start_{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
+    s.E_outsourced   = [[model.NewBoolVar(f'E_outsource{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
+    s.E_prod_start   = [[model.NewIntVar(0, i.M, f'E_prod_start{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
+    s.E_end          = [[model.NewIntVar(0, i.M, f'E_end{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
+    s.E_validated    = [[model.NewIntVar(0, i.M, f'E_validated{p}_{e}') for e in range(elts_per_project)] for p in range(nb_projects)]
+    s.precedes       = init_2D(nb_projects, nb_projects, None)
     s.O_uses_init_quantity, s.O_start, s.O_setup, s.O_end, s.O_executed, s.D_setup = init_several_1D(nb_projects, None, 6)
-    s.precedes = init_2D(nb_projects, nb_projects, None)
-    s.Cmax = model.NewIntVar(0, i.M, 'Cmax')
     for p in range(nb_projects):
-        nb_ops = i.O_size[p]
-        s.O_uses_init_quantity[p], s.O_start[p], s.O_setup[p], s.O_end[p], s.O_executed[p] = init_several_2D(nb_ops, i.nb_resources, None, 5)
+        nb_ops       = i.O_size[p]
         s.D_setup[p] = init_3D(nb_ops, i.nb_resources, i.nb_settings, None)
+        s.O_uses_init_quantity[p], s.O_start[p], s.O_setup[p], s.O_end[p], s.O_executed[p] = init_several_2D(nb_ops, i.nb_resources, None, 5)
         for o in range(nb_ops):
-            for r in range(i.nb_resources):
-                if i.require(p, o, r):
-                    s.O_uses_init_quantity[p][o][r] = model.NewBoolVar(f'O_uses_init_quantity{p}_{o}_{r}')
-                    s.O_start[p][o][r] = model.NewIntVar(0, i.M, f'O_start{p}_{o}_{r}')
-                    s.O_setup[p][o][r] = model.NewBoolVar(f'O_setup{p}_{o}_{r}')
-                    s.O_end[p][o][r] = model.NewIntVar(0, i.M, f'O_end{p}_{o}_{r}')
-                    s.O_executed[p][o][r] = model.NewBoolVar(f'O_executed{p}_{o}_{r}')
-                    s.D_setup[p][o][r] = [model.NewBoolVar(f'D_setup{p}_{o}_{r}_{c}') for c in range(i.nb_settings)]
+            for r in i.required_resources(p, o):
+                s.O_uses_init_quantity[p][o][r] = model.NewBoolVar(f'O_uses_init_quantity{p}_{o}_{r}')
+                s.O_start[p][o][r]              = model.NewIntVar(0, i.M, f'O_start{p}_{o}_{r}')
+                s.O_setup[p][o][r]              = model.NewBoolVar(f'O_setup{p}_{o}_{r}')
+                s.O_end[p][o][r]                = model.NewIntVar(0, i.M, f'O_end{p}_{o}_{r}')
+                s.O_executed[p][o][r]           = model.NewBoolVar(f'O_executed{p}_{o}_{r}')
+                s.D_setup[p][o][r]              = [model.NewBoolVar(f'D_setup{p}_{o}_{r}_{c}') for c in range(i.nb_settings)]
         for p2 in range(nb_projects):
             nb_ops2 = i.O_size[p2]
             s.precedes[p][p2] = init_3D(nb_ops, nb_ops2, i.nb_resources, None)
             for o in range(nb_ops):
                 for o2 in range(nb_ops2):
-                    for r in range(i.nb_resources):
-                        if i.require(p, o, r) and i.require(p2, o2, r):
+                    for r in i.required_resources(p, o):
+                        if i.require(p2, o2, r):
                             s.precedes[p][p2][o][o2][r] = model.NewBoolVar(f'precedes{p}_{p2}_{o}_{o2}_{r}')
     return model, s
 
@@ -60,13 +59,13 @@ def init_objective_function(model: cp_model.CpModel, i: Instance, s: Solution):
     model.Minimize(sum(s.obj))
     return model, s
 
-# Cmax computation
+# Cmax computation: after the end of the head item of all projects
 def c1(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         model.Add(s.Cmax >= s.E_end[p][i.project_head(p)])
     return model, s
 
-# End of non-outsourced item
+# End of non-outsourced item (after the end of the last operation)
 def c2(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e in i.loop_items(p):
@@ -75,14 +74,15 @@ def c2(model: cp_model.CpModel, i: Instance, s: Solution):
                     model.Add(s.E_end[p][e] + (-i.M)*s.O_executed[p][o][r] + (-i.real_time_scale(p,o))*s.O_end[p][o][r] >= -1 * i.M)
     return model, s
 
-# End of outsourced item
+# End of outsourced item (based on start and outsourcing_time)
 def c3(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e in i.loop_items(p):
-            model.Add(s.E_end[p][e] + (-1)*s.E_prod_start[p][e] + (-i.M)*s.E_outsourced[p][e] >= i.outsourcing_time[p][e] + (-i.M))
+            model.Add(s.E_end[p][e] + (-1)*s.E_prod_start[p][e] + (-i.M)*s.E_outsourced[p][e] >= i.outsourcing_time[p][e] + -1 * i.M)
     return model, s
 
-# Physical start of non-outsourced item
+# Physical start of non-outsourced item (before start of first physical operation. 
+# The start time is multiplied by the right timescale (for example: design is in days; assembly in hours; and minutes in minutes)
 def c4(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e in i.loop_items(p):
@@ -101,52 +101,47 @@ def c5(model: cp_model.CpModel, i: Instance, s: Solution):
                 model.Add(s.E_outsourced[p][e] <= 0)
     return model, s
 
-# Subcontract a whole branch of elements
+# Subcontract a whole branch of elements: if a prent item is outsourced, its children too!
 def c6(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e in i.loop_items(p):
-            for e2 in i.loop_items(p):
-                if e2 != e and i.direct_assembly[p][e][e2]:
-                    model.Add(s.E_outsourced[p][e2] + (-1)*s.E_outsourced[p][e] >= 0)
+            for e2 in i.get_children(p, e, True):
+                model.Add(s.E_outsourced[p][e2] + (-1)*s.E_outsourced[p][e] >= 0)
     return model, s
 
-# Available quantity of raw material before purchase
+# Available quantity of raw material (resource with finite-capacity = False) before purchase: we can't schedule more operations that possible!
 def c7(model: cp_model.CpModel, i: Instance, s: Solution):
-    for r in range(i.nb_resources):
-        if not i.finite_capacity[r]:
-            terms = []
-            for p in i.loop_projects():
-                for o in i.loop_operations(p):
-                    if i.require(p, o, r):
-                        terms.append(i.quantity_needed[r][p][o]*s.O_uses_init_quantity[p][o][r])
-            if len(terms)>0:
-                model.Add(sum(terms) <= i.init_quantity[r])
+    for r in i.get_consumable_materials():
+        terms = []
+        for p, o in i.operations_by_resource(r):
+            terms.append(i.quantity_needed[r][p][o]*s.O_uses_init_quantity[p][o][r])
+        if len(terms)>0:
+            model.Add(sum(terms) <= i.init_quantity[r])
     return model, s
 
-# Is an operation executed with the init quantity (before purchase)?
+# Answer to the question: is an operation executed with the initial quantity (hence, before the purchase) or needs to wait for purchase_time?
 def c8(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for o in i.loop_operations(p):
             for r in i.required_resources(p, o):
                 if not i.finite_capacity[r]:
-                    model.Add(i.M*s.O_uses_init_quantity[p][o][r] + (-1)*s.O_executed[p][o][r] + i.real_time_scale(p,o)*s.O_start[p][o][r] >= i.purchase_time[r] + (-1))
+                    model.Add(i.M*s.O_uses_init_quantity[p][o][r] + (-i.M)*s.O_executed[p][o][r] + i.real_time_scale(p,o)*s.O_start[p][o][r] >= i.purchase_time[r] + (-1)*i.M)
     return model, s
 
-# Complete execution of an operation on all required types of resources
+# Complete execution of an operation on all required types of resources (if the related item not outsourced): one selected by required type of resource!
 def c9(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e in i.loop_items(p):
             start, end = i.get_operations_idx(p, e)
             for o in range(start, end):
-                for rt in range(i.nb_resource_types):
-                    if i.resource_type_needed[p][o][rt]:
-                        terms = []
-                        for r in i.resources_by_type(rt):
-                            terms.append(s.O_executed[p][o][r])
-                        model.Add(s.E_outsourced[p][e] + sum(terms) == 1)
+                for rt in i.required_rt(p, o):
+                    terms = []
+                    for r in i.resources_by_type(rt):
+                        terms.append(s.O_executed[p][o][r])
+                    model.Add(s.E_outsourced[p][e] + sum(terms) == 1)
     return model, s
 
-# Simultaneous operations (sync of resources mandatory)
+# Simultaneous operations (sync of resources mandatory) : only execute when all needed resources are available!
 def c10(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for o in i.loop_operations(p):
@@ -157,7 +152,7 @@ def c10(model: cp_model.CpModel, i: Instance, s: Solution):
                             model.Add(s.O_start[p][o][r] + (-1)*s.O_start[p][o][v] + i.M*s.O_executed[p][o][r] + i.M*s.O_executed[p][o][v] <= 2*i.M)
     return model, s
 
-# End of an operation according to the execution time and start time
+# End of an operation according to the execution time and possible start time (start time is measured in the right timescale and multiplied to obtain the value in minutes)
 def c11(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for o in i.loop_operations(p):
@@ -166,7 +161,8 @@ def c11(model: cp_model.CpModel, i: Instance, s: Solution):
                     model.Add(i.real_time_scale(p,o)*s.O_end[p][o][r] + (-i.real_time_scale(p,o))*s.O_start[p][o][r] + (-i.M)*s.O_executed[p][o][r] >= i.execution_time[r][p][o] + (-i.M))
     return model, s
 
-# Precedence relations between operations of one element
+# Precedence relations between operations of one same element and execution time on choosen resources (executed)
+# o2 must start after the end of o1 since its his successor (start time is measured in the right timescale and multiplied to obtain the value in minutes)
 def c12(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e in i.loop_items(p):
@@ -179,182 +175,144 @@ def c12(model: cp_model.CpModel, i: Instance, s: Solution):
                                 model.Add(i.real_time_scale(p,o1)*s.O_start[p][o1][r] + (-i.real_time_scale(p,o2))*s.O_end[p][o2][v] + (-i.M)*s.O_executed[p][o1][r] + (-i.M)*s.O_executed[p][o2][v] >= (-2)*i.M)
     return model, s
 
-# Start time of parent' production
+# Start time of parent' production (first physical operations or outsourcing time) is right after the end of its children 
 def c13(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e1 in i.loop_items(p):
-            for e2 in i.loop_items(p):
-                if e1 != e2 and i.direct_assembly[p][e1][e2]:
-                    model.Add(s.E_prod_start[p][e1] + (-1)*s.E_end[p][e2] >= 0)
+            for e2 in i.get_children(p, e1, direct=True):
+                model.Add(s.E_prod_start[p][e1] + (-1)*s.E_end[p][e2] >= 0)
     return model, s
 
-# Start time after design validation
+# Production start time (before outsourcing or first physical operation) must be after design validation (end of its last design operation)
 def c14(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e in i.loop_items(p):
             model.Add(s.E_prod_start[p][e] + (-1)*s.E_validated[p][e] >= 0)
     return model, s
 
-# Design validation only after parent' validation
+# Design validation must be after parent' validation (end of its last design operation)
 def c15(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e1 in i.loop_items(p):
-            for e2 in i.loop_items(p):
-                if e1 != e2 and i.direct_assembly[p][e1][e2]:
-                    model.Add(s.E_validated[p][e2] + (-s.E_validated[p][e1]) >= 0)
+            for e2 in i.get_children(p, e1, direct=True):
+                model.Add(s.E_validated[p][e2] + (-s.E_validated[p][e1]) >= 0)
     return model, s
 
-# Start of any operation only after parent' validation
+# Start of any operation (design or physical: assembly or production) only after parent' validation (end of its last design operation)
 def c16(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e1 in i.loop_items(p):
-            for e2 in i.loop_items(p):
-                if e1 != e2 and i.direct_assembly[p][e1][e2]:
-                    start, end = i.get_operations_idx(p, e2)
-                    for o in range(start, end):
-                        for r in i.required_resources(p, o):
-                            model.Add(i.real_time_scale(p,o)*s.O_start[p][o][r] + (-1)*s.E_validated[p][e1] + (-i.M)*s.O_executed[p][o][r] >= (-1)*i.M)
+            for e2 in i.get_children(p, e1, direct=True):
+                start, end = i.get_operations_idx(p, e2)
+                for o in range(start, end):
+                    for r in i.required_resources(p, o):
+                        model.Add(i.real_time_scale(p,o)*s.O_start[p][o][r] + (-1)*s.E_validated[p][e1] + (-i.M)*s.O_executed[p][o][r] >= (-1)*i.M)
     return model, s
 
-# No more than one direct predecessor (by resource)
+# No more than one direct successor (by required finite-capacity resource)
 def c17(model: cp_model.CpModel, i: Instance, s: Solution):
     for p1 in i.loop_projects():
         for o1 in i.loop_operations(p1):
             for r in i.required_resources(p1,o1):
                 if i.finite_capacity[r]:
                     terms = []
-                    for p2 in i.loop_projects():
-                        for o2 in i.loop_operations(p2):
-                            if not i.is_same(p1,p2,o1,o2) and i.require(p2,o2,r):
-                                terms.append(s.precedes[p1][p2][o1][o2][r])
+                    for p2, o2 in i.operations_by_resource(r):
+                        if not i.is_same(p1,p2,o1,o2):
+                            terms.append(s.precedes[p1][p2][o1][o2][r])
                     if len(terms)>0:
                         model.Add(sum(terms) <= 1)
     return model, s
 
-# No more than one direct successor (by resource)
+# No more than one direct predecessor (by required finite-capacity resource)
 def c18(model: cp_model.CpModel, i: Instance, s: Solution):
     for p1 in i.loop_projects():
         for o1 in i.loop_operations(p1):
             for r in i.required_resources(p1,o1):
                 if i.finite_capacity[r]:
                     terms = []
-                    for p2 in i.loop_projects():
-                        for o2 in i.loop_operations(p2):
-                            if i.require(p2,o2,r):
-                                terms.append(s.precedes[p2][p1][o2][o1][r])
+                    for p2, o2 in i.operations_by_resource(r):
+                        if not i.is_same(p1,p2,o1,o2):
+                            terms.append(s.precedes[p2][p1][o2][o1][r])
                     if len(terms)>0:
                         model.Add(sum(terms) <= 1)
     return model, s
 
-# No operation can be its own successor or predecessor
+# No operation can be its own successor or predecessor on finite-capacity resources!
 def c19(model: cp_model.CpModel, i: Instance, s: Solution):
-    for r in range(i.nb_resources):
-        if i.finite_capacity[r]:
-            terms = []
-            for p in i.loop_projects():
-                for o in i.loop_operations(p): 
-                    if i.require(p,o,r):
-                        terms.append(s.precedes[p][p][o][o][r])
-            if len(terms)>0:
-                model.Add(sum(terms) == 0)
+    for r in i.get_finie_capacity_resources():
+        terms = []
+        for p, o in i.operations_by_resource(r):
+            terms.append(s.precedes[p][p][o][o][r])
+        if len(terms)>0:
+            model.Add(sum(terms) == 0)
     return model, s
 
-# Total number of operations in a resource (capacity)
+# Total number of operations in a finite-capacity resource: as much executed operation as there is precedence relations
 def c20(model: cp_model.CpModel, i: Instance, s: Solution):
-    for r in range(i.nb_resources):
-        if i.finite_capacity[r]:
-            terms_pos = []
-            terms_neg = []
-            for p1 in i.loop_projects():
-                for o1 in i.loop_operations(p1): 
-                    if i.require(p1,o1,r):
-                        for p2 in i.loop_projects():
-                            for o2 in i.loop_operations(p2): 
-                                if i.require(p2,o2,r) and not i.is_same(p1,p2,o1,o2):
-                                    terms_pos.append(s.precedes[p1][p2][o1][o2][r])
-            for p in i.loop_projects():
-                for o in i.loop_operations(p): 
-                    if i.require(p,o,r):
-                        terms_neg.append(s.O_executed[p][o][r])
-            if len(terms_pos)>0 or len(terms_neg)>0:
-                model.Add(sum(terms_pos) + (-1)*sum(terms_neg)>= -1)
+    for r in i.get_finie_capacity_resources():
+        terms_pos = []
+        terms_neg = []
+        for p1, o1 in i.operations_by_resource(r):
+            for p2, o2 in i.operations_by_resource(r):
+                if not i.is_same(p1,p2,o1,o2):
+                    terms_pos.append(s.precedes[p1][p2][o1][o2][r])
+        for p, o in i.operations_by_resource(r):
+            terms_neg.append(s.O_executed[p][o][r])
+        if len(terms_pos)>0 or len(terms_neg)>0:
+            model.Add(sum(terms_pos) + (-1)*sum(terms_neg)>= -1)
     return model, s
 
-# Precedence only for operations executed by the resource
+# Precedence only for operations executed by the resource (especially if several similar resources with same RT are available)
 def c21(model: cp_model.CpModel, i: Instance, s: Solution):
-    for r in range(i.nb_resources):
-        if i.finite_capacity[r]:
-            for p1 in i.loop_projects():
-                for o1 in i.loop_operations(p1): 
-                    if i.require(p1,o1,r):
-                        for p2 in i.loop_projects():
-                            for o2 in i.loop_operations(p2): 
-                                if i.require(p2,o2,r) and not i.is_same(p1,p2,o1,o2):
-                                    model.Add(s.O_executed[p1][o1][r] + (-1)*s.precedes[p1][p2][o1][o2][r] >= 0)                     
+    for r in i.get_finie_capacity_resources():
+        for p1, o1 in i.operations_by_resource(r):
+            for p2, o2 in i.operations_by_resource(r):
+                if not i.is_same(p1,p2,o1,o2):
+                    model.Add(s.O_executed[p1][o1][r] + (-1)*s.precedes[p1][p2][o1][o2][r] >= 0)                     
     return model, s
 
-# Precedence only for operations executed by the resource (other way)
+# Precedence only for operations executed by the resource (same constraint as c21 but the other way)
 def c22(model: cp_model.CpModel, i: Instance, s: Solution):
-    for r in range(i.nb_resources):
-        if i.finite_capacity[r]:
-            for p1 in i.loop_projects():
-                for o1 in i.loop_operations(p1): 
-                    if i.require(p1,o1,r):
-                        for p2 in i.loop_projects():
-                            for o2 in i.loop_operations(p2): 
-                                if i.require(p2,o2,r) and not i.is_same(p1,p2,o1,o2):
-                                    model.Add(s.O_executed[p2][o2][r] + (-1)*s.precedes[p1][p2][o1][o2][r] >= 0) 
+    for r in i.get_finie_capacity_resources():
+        for p1, o1 in i.operations_by_resource(r):
+            for p2, o2 in i.operations_by_resource(r):
+                if not i.is_same(p1,p2,o1,o2):
+                    model.Add(s.O_executed[p2][o2][r] + (-1)*s.precedes[p1][p2][o1][o2][r] >= 0) 
     return model, s
 
-# Start operation only after the end of its predecessor (by resource)
+# Start operation only after the end of its predecessor (by resource) considering operation_setups, all possible design_setup, predecessor end time, and right timescale
 def c23(model: cp_model.CpModel, i: Instance, s: Solution):
-    for r in range(i.nb_resources):
-        if i.finite_capacity[r]:
-            for p1 in i.loop_projects():
-                for o1 in i.loop_operations(p1): 
-                    if i.require(p1,o1,r):
-                        for p2 in i.loop_projects():
-                            for o2 in i.loop_operations(p2): 
-                                if i.require(p2,o2,r) and not i.is_same(p1,p2,o1,o2):
-                                    terms = []
-                                    for c in range(i.nb_settings):
-                                        terms.append(i.design_setup[r][c] * s.D_setup[p1][o1][r][c])
-                                    model.Add(i.real_time_scale(p1,o1)*s.O_start[p1][o1][r] + (-1)*sum(terms) + (-i.real_time_scale(p2,o2))*s.O_end[p2][o2][r] + (-i.operation_setup[r])*s.O_setup[p1][o1][r] + (-i.M)*s.precedes[p1][p2][o1][o2][r]>= (-1) * i.M)
+    for r in i.get_finie_capacity_resources():
+        for p1, o1 in i.operations_by_resource(r):
+            for p2, o2 in i.operations_by_resource(r):
+                if not i.is_same(p1,p2,o1,o2):
+                    terms = []
+                    for c in range(i.nb_settings):
+                        terms.append(i.design_setup[r][c] * s.D_setup[p1][o1][r][c])
+                    model.Add(i.real_time_scale(p1,o1)*s.O_start[p1][o1][r] + (-1)*sum(terms) + (-i.real_time_scale(p2,o2))*s.O_end[p2][o2][r] + (-i.operation_setup[r])*s.O_setup[p1][o1][r] + (-i.M)*s.precedes[p2][p1][o2][o1][r]>= (-1) * i.M)
     return model, s
 
-# Operation setups
+# Operation setups: with two consecutive operations on the same resources don't share the same type (OT)  
 def c24(model: cp_model.CpModel, i: Instance, s: Solution):
-    for r in range(i.nb_resources):
-        if i.finite_capacity[r]:
-            for p1 in i.loop_projects():
-                for o1 in i.loop_operations(p1): 
-                    if i.require(p1,o1,r):
-                        for p2 in i.loop_projects():
-                            for o2 in i.loop_operations(p2): 
-                                if i.require(p2,o2,r) and not i.is_same(p1,p2,o1,o2):
-                                    weight = 0
-                                    for ot in range(i.nb_ops_types):
-                                        weight += 1 if i.operation_family[p1][o1][ot] != i.operation_family[p2][o2][ot] else 0
-                                    model.Add(weight*s.precedes[p1][p2][o1][o2][r] + (-2)*s.O_setup[p1][o1][r] <= 0)
+    for r in i.get_finie_capacity_resources():
+        for p1, o1 in i.operations_by_resource(r):
+            for p2, o2 in i.operations_by_resource(r):
+                if not i.is_same(p1,p2,o1,o2) and i.get_operation_type(p1,o1) != i.get_operation_type(p2, o2):
+                    model.Add(s.precedes[p2][p1][o2][o1][r] + (-1)*s.O_setup[p1][o1][r] <= 0)
     return model, s
 
-# Setups for design parameters
+# Setups for design parameters: with two consecutive operations on the same resources don't share the same design values on different settings  
 def c25(model: cp_model.CpModel, i: Instance, s: Solution):
-    for r in range(i.nb_resources):
-        if i.finite_capacity[r]:
-            for p1 in i.loop_projects():
-                for o1 in i.loop_operations(p1): 
-                    if i.require(p1,o1,r):
-                        for p2 in i.loop_projects():
-                            for o2 in i.loop_operations(p2): 
-                                if i.require(p2,o2,r) and not i.is_same(p1,p2,o1,o2):
-                                    for c in range(i.nb_settings):
-                                        v: int = abs(i.design_value[p1][o1][c]-i.design_value[p2][o2][c])
-                                        sub: int = i.design_value[p1][o1][c]+i.design_value[p2][o2][c]
-                                        model.Add(v*s.precedes[p1][p2][o1][o2][r] + (-sub)*s.D_setup[p1][o1][r][c] <= 0)
+    for r in i.get_finie_capacity_resources():
+        for p1, o1 in i.operations_by_resource(r):
+            for p2, o2 in i.operations_by_resource(r):
+                if not i.is_same(p1,p2,o1,o2):
+                    for c in range(i.nb_settings):
+                        if i.design_value[p1][o1][c] != i.design_value[p2][o2][c]:
+                            model.Add(s.precedes[p2][p1][o2][o1][r] + (-1)*s.D_setup[p1][o1][r][c] <= 0)
     return model, s
 
-# Validation of an element
+# Validation of an element: after the end of its last design operations
 def c26(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for e in i.loop_items(p):
@@ -365,7 +323,7 @@ def c26(model: cp_model.CpModel, i: Instance, s: Solution):
                         model.Add(s.E_validated[p][e] + (-i.M)*s.O_executed[p][o][r] + (-i.real_time_scale(p,o))*s.O_end[p][o][r] >= (-1) * i.M)
     return model, s
 
-# No double execution on the same type of resources (by operation)
+# No double execution on the same type of resources (by operation): only choose one the available resources
 def c27(model: cp_model.CpModel, i: Instance, s: Solution):
     for p in i.loop_projects():
         for o in i.loop_operations(p):

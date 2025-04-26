@@ -643,6 +643,7 @@ def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_numbe
         Solve the target instance (size, id) only using inference
     """
     target_instance: Instance = load_instance(path+directory.instances+'/test/'+size+'/instance_'+id+'.pkl')
+    print(target_instance.display())
     start_time = systime.time()
     best_cmax = -1.0
     best_cost = -1.0
@@ -665,6 +666,7 @@ def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_numbe
         'device_used': [device]
     })
     solution: HeuristicSolution = translate_solution(graph, target_instance)
+    print(solution.json_display())
     print(final_metrics)
     final_metrics.to_csv(path+directory.instances+'/test/'+size+'/solution_gns_'+id+'.csv', index=False)
     with open(directory.solutions+'/'+size+'/gns_'+str(run_number)+'_graph_'+id+'.pkl', 'wb') as f:

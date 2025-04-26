@@ -58,10 +58,10 @@ class Operation():
         return {
             "id": self.id,
             "operation_family": self.operation_family,
-            "simultaneous": self.simultaneous,
-            "in_hours": self.in_hours,
-            "in_days": self.in_days,
-            "is_design": self.is_design,
+            "simultaneous": str(self.simultaneous).lower(),
+            "in_hours": str(self.in_hours).lower(),
+            "in_days": str(self.in_days).lower(),
+            "is_design": str(self.is_design).lower(),
             "item_id": self.item.id,
             "design_value": self.design_value,
             "machine_usage": [r.json_display() for r in self.machine_usage],
@@ -75,7 +75,7 @@ class Item():
         self.start: int = 0
         self.end: int = 0 
         self.outsourced: bool = False
-        self.outsourcing_time: bool = False
+        self.outsourcing_time: int = 0
         self.external_cost: int = 0
         self.children: list[Item] = []
         self.parent: Item = None
@@ -86,8 +86,8 @@ class Item():
     def json_display(self):
         return {
             "id": self.id,
-            "external": self.external,
-            "outsourced": self.outsourced,
+            "external": str(self.external).lower(),
+            "outsourced": str(self.outsourced).lower(),
             "start": self.start,
             "end": self.end,
             "outsourcing_time": self.outsourcing_time,
@@ -113,7 +113,7 @@ class Project():
     
 class RT():
     def __init__(self):
-        self.id: int = 0,
+        self.id: int = 0
         self.finite_capacity: bool = False
         self.machines: list[Machine] = []
         self.sequence: list[Execution] = []
@@ -121,7 +121,7 @@ class RT():
     def json_display(self):
         return {
             "id": self.id,
-            "finite_capacity": self.finite_capacity,
+            "finite_capacity": str(self.finite_capacity).lower(),
             "machines": [r.json_display() for r in self.machines]
         }
 
@@ -134,7 +134,7 @@ class Execution(Use):
     def __init__(self):
         Use.__init__(self)
         self.start: int = 0
-        self.end: int = 0,
+        self.end: int = 0
         self.selected_machine: Machine = 0
         self.machine_type: RT = None
 
@@ -181,7 +181,7 @@ class Machine(Resource):
             "id": self.id,
             "operation_setup": self.operation_setup,
             "design_setup": self.design_setup,
-            "sequence": [(e.operation.item.project.id, e.operation.item.id, e.operation.id, e.start, e.end) for e in self.type.sequence if e.selected_machine.id == self.id]
+            "sequence": [[f"p{e.operation.item.project.id}", f"e{e.operation.item.id}", f"o{e.operation.id}", f"start = {e.start}", f"start = {e.end}"] for e in self.type.sequence if e.selected_machine.id == self.id]
         }
 
 class Material(Resource):
@@ -197,7 +197,7 @@ class Material(Resource):
             "id": self.id,
             "init_quantity": self.init_quantity,
             "purchase_time": self.purchase_time,
-            "sequence": [(e.operation.item.project.id, e.operation.item.id, e.operation.id, e.execution_time) for e in self.sequence]
+            "sequence": [[f"p{e.operation.item.project.id}", f"e{e.operation.item.id}", f"o{e.operation.id}", f"execution time = {e.execution_time}"] for e in self.sequence]
         }
 
 class HeuristicSolution():
@@ -213,7 +213,7 @@ class HeuristicSolution():
         self.flat_resources: list[Resource] = []
         self.total_cost = 0
         self.Cmax = -1
-        self.feasible = False
+        self.feasible: bool = False
 
     @staticmethod
     def geneget(obj_list, obj_id):
@@ -231,7 +231,7 @@ class HeuristicSolution():
             "nb_settings": self.nb_settings,
             "total_cost": self.total_cost,
             "Cmax": self.Cmax,
-            "feasible": self.feasible,
+            "feasible": str(self.feasible).lower(),
             "projects": [p.json_display() for p in self.projects],
             "machine_types": [r.json_display() for r in self.machine_types],
             "materials": [m.json_display() for m in self.materials]
