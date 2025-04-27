@@ -15,7 +15,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-problem_sizes = ['s', 'm']#, 'l', 'xl', 'xxl']
+problem_sizes = ['s']#, 'm', 'l', 'xl', 'xxl']
 index_column = 'index'
  
 def combine_results_by_size_and_type(path:str, type: str):

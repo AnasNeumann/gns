@@ -27,7 +27,6 @@ __license__ = "Apache 2.0 License"
 
 YES = 1
 NO = 0 
-NOT_YET = -1
 
 class Operation():
     def __init__(self):

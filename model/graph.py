@@ -14,22 +14,22 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-NOT_YET = 0
-YES = 1
-NO = -1
+YES = 1.0
+NO = 0.0
 
 class FeatureConfiguration:
     def __init__(self):
         self.operation = {
-            'sync': 0,
-            'large_timescale': 1,
-            'successors': 2,
-            'remaining_time': 3,
-            'remaining_resources': 4,
-            'remaining_materials': 5,
-            'available_time': 6,
-            'end_time': 7,
-            'lb': 8
+            'started': 0,
+            'sync': 1,
+            'large_timescale': 2,
+            'successors': 3,
+            'remaining_time': 4,
+            'remaining_resources': 5,
+            'remaining_materials': 6,
+            'available_time': 7,
+            'end_time': 8,
+            'lb': 9
         }
         self.resource = {
             'available_time': 0,
@@ -42,22 +42,24 @@ class FeatureConfiguration:
             'remaining_demand': 2
         }
         self.item = {
-            'outsourced': 0,
-            'outsourcing_cost': 1,
-            'outsourcing_time': 2,
-            'remaining_time': 3,
-            'parents': 4,
-            'children': 5,
-            'parents_physical_time': 6,
-            'children_time': 7,
-            'start_time': 8,
-            'end_time': 9
+            'can_be_outsourced': 0,
+            'outsourced': 1,
+            'outsourcing_cost': 2,
+            'outsourcing_time': 3,
+            'remaining_time': 4,
+            'parents': 5,
+            'children': 6,
+            'parents_physical_time': 7,
+            'children_time': 8,
+            'start_time': 9,
+            'end_time': 10
         }
         self.need_for_resources = {
             'status': 0,
-            'current_processing_time': 1,
+            'processing_time': 1,
             'start_time': 2,
-            'end_time': 3
+            'end_time': 3,
+            'setup_time': 4
         }
         self.need_for_materials = {
             'status': 0,
@@ -80,7 +82,7 @@ class State:
         self.same_types: EdgeStorage = same_types
         if should_std:
             self.standardize(self.need_for_materials.edge_attr, FC.need_for_materials, ['execution_time', 'quantity_needed'])
-            self.standardize(self.need_for_resources.edge_attr, FC.need_for_resources, ['current_processing_time', 'start_time', 'end_time'])
+            self.standardize(self.need_for_resources.edge_attr, FC.need_for_resources, ['processing_time', 'start_time', 'end_time'])
             self.standardize(self.items, FC.item, ['start_time', 'end_time', 'outsourcing_cost', 'outsourcing_time', 'remaining_time', 'parents', 'children', 'parents_physical_time', 'children_time'])
             self.standardize(self.operations, FC.operation, ['successors', 'remaining_time', 'remaining_resources', 'remaining_materials', 'available_time', 'end_time'])
             self.standardize(self.materials, FC.material, ['remaining_init_quantity', 'arrival_time', 'remaining_demand'])
@@ -100,7 +102,8 @@ class State:
                 tensor[:, pos] = (data - min_val) / _d
 
 class OperationFeatures:
-    def __init__(self, sync: num_feature, large_timescale: num_feature, successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, lb: num_feature):
+    def __init__(self, started: num_feature, sync: num_feature, large_timescale: num_feature, successors: num_feature, remaining_time: num_feature, remaining_resources: num_feature, remaining_materials: num_feature, available_time: num_feature, end_time: num_feature, lb: num_feature):
+        self.started = started
         self.sync = sync
         self.large_timescale = large_timescale
         self.successors = successors
@@ -112,7 +115,7 @@ class OperationFeatures:
         self.lb = lb
     
     def to_tensor_features(self, device: str):
-        return features2tensor([self.sync, self.large_timescale, self.successors, self.remaining_time, self.remaining_resources, self.remaining_materials, self.available_time, self.end_time, self.lb], device)
+        return features2tensor([self.started, self.sync, self.large_timescale, self.successors, self.remaining_time, self.remaining_resources, self.remaining_materials, self.available_time, self.end_time, self.lb], device)
     
 class ResourceFeatures:
     def __init__(self, available_time: num_feature, remaining_operations: num_feature, similar_resources: num_feature):
@@ -133,7 +136,8 @@ class MaterialFeatures:
         return features2tensor([self.remaining_init_quantity, self.arrival_time, self.remaining_demand], device)
     
 class ItemFeatures:
-    def __init__(self, outsourced: num_feature, outsourcing_cost: num_feature, outsourcing_time: num_feature, remaining_time: num_feature, parents: num_feature, children: num_feature, parents_physical_time: num_feature, children_time: num_feature, start_time: num_feature, end_time: num_feature):
+    def __init__(self, can_be_outsourced: num_feature, outsourced: num_feature, outsourcing_cost: num_feature, outsourcing_time: num_feature, remaining_time: num_feature, parents: num_feature, children: num_feature, parents_physical_time: num_feature, children_time: num_feature, start_time: num_feature, end_time: num_feature):
+        self.can_be_outsourced = can_be_outsourced
         self.outsourced = outsourced
         self.outsourcing_cost = outsourcing_cost
         self.outsourcing_time = outsourcing_time
@@ -146,12 +150,13 @@ class ItemFeatures:
         self.end_time = end_time
 
     def to_tensor_features(self, device: str):
-        return features2tensor([self.outsourced, self.outsourcing_cost, self.outsourcing_time, self.remaining_time, self.parents, self.children, self.parents_physical_time, self.children_time, self.start_time, self.end_time], device)
+        return features2tensor([self.can_be_outsourced, self.outsourced, self.outsourcing_cost, self.outsourcing_time, self.remaining_time, self.parents, self.children, self.parents_physical_time, self.children_time, self.start_time, self.end_time], device)
 
     @staticmethod
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
         f = conf.item
         return ItemFeatures(
+            can_be_outsourced=tensor[f['can_be_outsourced']].item(),
             outsourced=tensor[f['outsourced']].item(),
             outsourcing_cost=tensor[f['outsourcing_cost']].item(),
             outsourcing_time=tensor[f['outsourcing_time']].item(),
@@ -164,23 +169,25 @@ class ItemFeatures:
             end_time=tensor[f['end_time']].item())
     
 class NeedForResourceFeatures:
-    def __init__(self, status: num_feature, current_processing_time: num_feature, start_time: num_feature, end_time: num_feature):
+    def __init__(self, status: num_feature, processing_time: num_feature, start_time: num_feature, end_time: num_feature, setup_time: num_feature):
         self.status = status
-        self.current_processing_time = current_processing_time
+        self.processing_time = processing_time
         self.start_time = start_time
         self.end_time = end_time
+        self.setup_time = setup_time
 
     def to_tensor_features(self, device: str):
-        return features2tensor([self.status, self.current_processing_time, self.start_time, self.end_time], device)
+        return features2tensor([self.status, self.processing_time, self.start_time, self.end_time, self.setup_time], device)
 
     @staticmethod
     def from_tensor(tensor: Tensor, conf: FeatureConfiguration):
         f = conf.need_for_resources
         return NeedForResourceFeatures(
             status=tensor[f['status']].item(),
-            current_processing_time=tensor[f['current_processing_time']].item(),
+            processing_time=tensor[f['processing_time']].item(),
             start_time=tensor[f['start_time']].item(),
-            end_time=tensor[f['end_time']].item())
+            end_time=tensor[f['end_time']].item(),
+            setup_time=tensor[f['setup_time']].item())
 
 class NeedForMaterialFeatures:
     def __init__(self, status: num_feature, execution_time: num_feature, quantity_needed: num_feature):
@@ -359,67 +366,66 @@ class GraphInstance():
     def del_need_for_material(self, op_idx: int, mat_idx: int):
         self.del_edge(('operation', 'needs_mat', 'material'), op_idx, mat_idx)
 
-    def update_operation(self, id: int, updates: list[(str, int)], maxx: bool = False):
+    def update_operation(self, id: int, updates: list[(str, float)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['operation'].x[id][FC.operation[feature]] = value if not maxx else max(value, self.operation(id, feature))
+            self.graph['operation'].x[id][FC.operation[feature]] = float(value) if not maxx else max(float(value), self.operation(id, feature))
         
-    def update_resource(self, id: int, updates: list[(str, int)], maxx: bool = False):
+    def update_resource(self, id: int, updates: list[(str, float)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['resource'].x[id][FC.resource[feature]] = value if not maxx else max(value, self.resource(id, feature))
+            self.graph['resource'].x[id][FC.resource[feature]] = float(value) if not maxx else max(float(value), self.resource(id, feature))
 
-    def inc_resource(self, id: int, updates: list[(str, int)]):
+    def inc_resource(self, id: int, updates: list[(str, float)]):
         for feature, value in updates:
-            self.graph['resource'].x[id][FC.resource[feature]] += value
+            self.graph['resource'].x[id][FC.resource[feature]] += float(value)
     
-    def update_material(self, id: int, updates: list[(str, int)], maxx: bool = False):
+    def update_material(self, id: int, updates: list[(str, float)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['material'].x[id][FC.material[feature]] = value if not maxx else max(value, self.material(id, feature))
+            self.graph['material'].x[id][FC.material[feature]] = float(value) if not maxx else max(float(value), self.material(id, feature))
 
-    def inc_material(self, id: int, updates: list[(str, int)]):
+    def inc_material(self, id: int, updates: list[(str, float)]):
         for feature, value in updates:
-            self.graph['material'].x[id][FC.material[feature]] += value
+            self.graph['material'].x[id][FC.material[feature]] += float(value)
     
-    def update_item(self, id: int, updates: list[(str, int)], maxx: bool = False, minn: bool = False):
+    def update_item(self, id: int, updates: list[(str, float)], maxx: bool = False, minn: bool = False):
         for feature, value in updates:
-            self.graph['item'].x[id][FC.item[feature]] = value if not maxx else max(value, self.item(id, feature)) if not minn else min(value, self.item(id, feature))
+            self.graph['item'].x[id][FC.item[feature]] = float(value) if not maxx else max(value, self.item(id, feature)) if not minn else min(float(value), self.item(id, feature))
 
-    def inc_item(self, id: int, updates: list[(str, int)]):
+    def inc_item(self, id: int, updates: list[(str, float)]):
         for feature, value in updates:
-            self.graph['item'].x[id][FC.item[feature]] += value
+            self.graph['item'].x[id][FC.item[feature]] += float(value)
     
-    def inc_operation(self, id: int, updates: list[(str, int)]):
+    def inc_operation(self, id: int, updates: list[(str, float)]):
         for feature, value in updates:
-            self.graph['operation'].x[id][FC.operation[feature]] += value
+            self.graph['operation'].x[id][FC.operation[feature]] += float(value)
 
-    def update_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, int)], maxx: bool = False):
+    def update_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, float)], maxx: bool = False):
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
         for feature, value in updates:
-            self.graph[key].edge_attr[idx, FC.need_for_materials[feature]] = value if not maxx else max(value, self.need_for_material(operation_id, material_id, feature))
+            self.graph[key].edge_attr[idx, FC.need_for_materials[feature]] = float(value) if not maxx else max(value, self.need_for_material(operation_id, material_id, float(feature)))
 
-    def update_need_for_resource(self, operation_id: int, resource_id: int, updates: list[(str, int)], maxx: bool = False):
+    def update_need_for_resource(self, operation_id: int, resource_id: int, updates: list[(str, float)], maxx: bool = False):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
         for feature, value in updates:
-            self.graph[key].edge_attr[idx, FC.need_for_resources[feature]] = value if not maxx else max(value, self.need_for_resource(operation_id, resource_id, feature))
+            self.graph[key].edge_attr[idx, FC.need_for_resources[feature]] = float(value) if not maxx else max(value, self.need_for_resource(operation_id, resource_id, float(feature)))
 
-    def inc_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, int)]):
+    def inc_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, float)]):
         key = ('operation', 'needs_mat', 'material')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == material_id)
         for feature, value in updates:
-            self.graph[key].edge_attr[idx, FC.need_for_materials[feature]] += value
+            self.graph[key].edge_attr[idx, FC.need_for_materials[feature]] += float(value)
 
-    def inc_need_for_resource(self, operation_id: int, resource_id: int, updates: list[(str, int)]):
+    def inc_need_for_resource(self, operation_id: int, resource_id: int, updates: list[(str, float)]):
         key = ('operation', 'needs_res', 'resource')
         idx = (self.graph[key].edge_index[0] == operation_id) & (self.graph[key].edge_index[1] == resource_id)
         for feature, value in updates:
-            self.graph[key].edge_attr[idx, FC.need_for_resources[feature]] += value
+            self.graph[key].edge_attr[idx, FC.need_for_resources[feature]] += float(value)
 
     def is_item_complete(self, item_id: int):
         if self.item(item_id, 'remaining_physical_time')>0 \
             or self.item(item_id, 'remaining_design_time')>0 \
-            or self.item(item_id, 'outsourced')==NOT_YET \
-            or self.item(item_id, 'is_possible')==NOT_YET:
+            or (self.item(item_id, 'outsourced')==NO and self.item(item_id, 'can_be_outsourced')==YES):
             return False
         return True
 
