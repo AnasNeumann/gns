@@ -234,8 +234,8 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
         Schedule an operation on a resource
     """
     processing_time = graph.need_for_resource(operation_id, resource_id, 'processing_time')
-    operation_end = current_time + processing_time
     p, o = graph.operations_g2i[operation_id]
+    operation_end = next_possible_time(instance, current_time + processing_time, p, o)
     e = graph.item_of_operations[p][o]
     r = graph.resources_g2i[resource_id]
     rt = graph.resource_family[r]
