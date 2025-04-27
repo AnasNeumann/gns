@@ -333,13 +333,13 @@ class GraphInstance():
         return self.graph['material'].x
 
     def operation(self, id: int, feature: str):
-        return self.graph['operation'].x[id][FC.operation[feature]].item()
+        return self.graph['operation'].x[id, FC.operation[feature]].item()
 
     def material(self, id: int, feature: str):
-        return self.graph['material'].x[id][FC.material[feature]].item()
+        return self.graph['material'].x[id, FC.material[feature]].item()
     
     def resource(self, id: int, feature: str):
-        return self.graph['resource'].x[id][FC.resource[feature]].item()
+        return self.graph['resource'].x[id, FC.resource[feature]].item()
     
     def need_for_material(self, operation_id: int, material_id: int, feature: str):
         key = ('operation', 'needs_mat', 'material')
@@ -368,35 +368,35 @@ class GraphInstance():
 
     def update_operation(self, id: int, updates: list[(str, float)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['operation'].x[id][FC.operation[feature]] = float(value) if not maxx else max(float(value), self.operation(id, feature))
+            self.graph['operation'].x[id, FC.operation[feature]] = float(value) if not maxx else max(float(value), self.operation(id, feature))
         
     def update_resource(self, id: int, updates: list[(str, float)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['resource'].x[id][FC.resource[feature]] = float(value) if not maxx else max(float(value), self.resource(id, feature))
+            self.graph['resource'].x[id, FC.resource[feature]] = float(value) if not maxx else max(float(value), self.resource(id, feature))
 
     def inc_resource(self, id: int, updates: list[(str, float)]):
         for feature, value in updates:
-            self.graph['resource'].x[id][FC.resource[feature]] += float(value)
+            self.graph['resource'].x[id, FC.resource[feature]] += float(value)
     
     def update_material(self, id: int, updates: list[(str, float)], maxx: bool = False):
         for feature, value in updates:
-            self.graph['material'].x[id][FC.material[feature]] = float(value) if not maxx else max(float(value), self.material(id, feature))
+            self.graph['material'].x[id, FC.material[feature]] = float(value) if not maxx else max(float(value), self.material(id, feature))
 
     def inc_material(self, id: int, updates: list[(str, float)]):
         for feature, value in updates:
-            self.graph['material'].x[id][FC.material[feature]] += float(value)
+            self.graph['material'].x[id, FC.material[feature]] += float(value)
     
     def update_item(self, id: int, updates: list[(str, float)], maxx: bool = False, minn: bool = False):
         for feature, value in updates:
-            self.graph['item'].x[id][FC.item[feature]] = float(value) if not maxx else max(value, self.item(id, feature)) if not minn else min(float(value), self.item(id, feature))
+            self.graph['item'].x[id, FC.item[feature]] = float(value) if not maxx else max(value, self.item(id, feature)) if not minn else min(float(value), self.item(id, feature))
 
     def inc_item(self, id: int, updates: list[(str, float)]):
         for feature, value in updates:
-            self.graph['item'].x[id][FC.item[feature]] += float(value)
+            self.graph['item'].x[id, FC.item[feature]] += float(value)
     
     def inc_operation(self, id: int, updates: list[(str, float)]):
         for feature, value in updates:
-            self.graph['operation'].x[id][FC.operation[feature]] += float(value)
+            self.graph['operation'].x[id, FC.operation[feature]] += float(value)
 
     def update_need_for_material(self, operation_id: int, material_id: int, updates: list[(str, float)], maxx: bool = False):
         key = ('operation', 'needs_mat', 'material')

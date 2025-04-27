@@ -22,7 +22,7 @@ def features2tensor(features: list, device: str):
     for f in features:
         if isinstance(f, bool):
             f = to_binary(f)
-    return torch.tensor([[f for f in features]], dtype=torch.float, device=device)
+    return torch.tensor([[f for f in features]], dtype=torch.float32, device=device)
 
 def id2tensor(id1: int, id2: int, device: str):
     return torch.tensor([[id1], [id2]], dtype=torch.long, device=device)
