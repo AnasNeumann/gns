@@ -412,7 +412,7 @@ def CHECK_FEASIBILITY(model: cp_model.CpModel, i: Instance, s: Solution, sol: He
 
 # =====================================================
 
-def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_path: str, GNN_solution: HeuristicSolution=None):
+def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_path: str):
     start_time = systime.time()
     model = cp_model.CpModel()
     solver = cp_model.CpSolver()
@@ -431,8 +431,6 @@ def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_pa
     model, solution = init_objective_function(model, instance, solution)
     for constraint in [c1,c2,c3,c4,c5,c6,c7,c8,c9,c10,c11,c12,c13,c14,c15,c16,c17,c18,c19,c20,c21,c22,c23,c24,c25,c26,c27]:
         model, solution = constraint(model, instance, solution)
-    if GNN_solution is not None:
-        CHECK_FEASIBILITY(model, instance, solution, GNN_solution)
     status = solver.Solve(model)
     computing_time = systime.time()-start_time
     if status == cp_model.OPTIMAL:
