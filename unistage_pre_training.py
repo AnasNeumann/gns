@@ -81,7 +81,7 @@ def train_or_validate_batch(reward_MEMORIES: Memories, agents: list[(Module, str
     for instance in batch:
         reward_MEMORY: Memory = reward_MEMORIES.add_instance_if_new(instance_id=instance.size + "_" + str(instance.id))
         print(f"\t start solving instance: {instance.id}...")
-        transitions,_,_,_,_ = solve_function(instance=instance, agents=agents, device=device, train=True, trainable=[1,1,1], reward_MEMORY=reward_MEMORY)
+        transitions,_,_,_,_ = solve_function(instance=instance, agents=agents, device=device, train=True, reward_MEMORY=reward_MEMORY)
         _batch_replay_memory.append(transitions)
     batch_result: MultiAgents_Batch = MultiAgents_Batch(
         batch=_batch_replay_memory, 

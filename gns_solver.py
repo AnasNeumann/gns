@@ -406,29 +406,15 @@ def next_possible_time(instance: Instance, current_time: int, p: int, o: int):
     else:
         return ((current_time // scale) + 1) * scale
 
-def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, train: bool, device: str, greedy: bool = False, fixed_alpha: float = -1, reward_MEMORY: Memory = None):
+def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, device: str, greedy: bool = False, fixed_alpha: float = -1, reward_MEMORY: Memory = None):
     graph, lb_cmax, lb_cost, previous_operations, next_operations, related_items, parent_items = translate(i=instance, device=device)
     required_types_of_resources, required_types_of_materials, graph.res_by_types = build_required_resources(instance, graph)
     t: int = 0
-    _agents_names: list[str] = []
-    outsourcing_training_stage: bool = False
-    scheduling_training_stage: bool = False
-    material_use_training_stage: bool = False
     alpha: Tensor = torch.tensor([instance.w_makespan], device=device) if fixed_alpha < 0 else torch.tensor([fixed_alpha], device=device)
     if train:
-        if trainable[OUTSOURCING]:
-            _agents_names.append(ACTIONS_NAMES[OUTSOURCING])
-            outsourcing_training_stage = True
-        if trainable[SCHEDULING]:
-            _agents_names.append(ACTIONS_NAMES[SCHEDULING])
-            scheduling_training_stage = True
-        if trainable[MATERIAL_USE]:
-            _agents_names.append(ACTIONS_NAMES[MATERIAL_USE])
-            material_use_training_stage = True
-        alpha = alpha if outsourcing_training_stage else torch.tensor([1.0], device=device)
         _local_decisions: list[Transition] = []
         training_results: MultiAgent_OneInstance = MultiAgent_OneInstance(
-            agent_names=_agents_names, 
+            agent_names=ACTIONS_NAMES, 
             instance_id=instance.id,
             related_items=related_items,
             parent_items=parent_items,
@@ -445,16 +431,10 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
         if poss_actions:
             DEBUG_PRINT(f"Current possible {ACTIONS_NAMES[actions_type]} actions: {poss_actions} at times: {execution_times}...")
             if train:
-                if (actions_type == OUTSOURCING) and not outsourcing_training_stage and len(poss_actions) > 1:
-                    poss_actions = [ax for ax in poss_actions if ax[1] == NO]
-                if (actions_type == MATERIAL_USE) and not material_use_training_stage and len(poss_actions) > 1: 
-                    poss_actions = poss_actions[:1]
                 state: State = graph.to_state(device=device)
                 probs, state_value = agents[actions_type][AGENT](state, poss_actions, related_items, parent_items, alpha)
                 idx = policy(probs, greedy=False)
-                if (actions_type==SCHEDULING and scheduling_training_stage) \
-                        or (actions_type==OUTSOURCING and outsourcing_training_stage) \
-                        or (actions_type== MATERIAL_USE and material_use_training_stage and graph.material(poss_actions[idx][1],'remaining_init_quantity')>0):
+                if actions_type != MATERIAL_USE or graph.material(poss_actions[idx][1],'remaining_init_quantity')>0:
                     need_reward = True
                     training_results.add_step(
                         agent_name=ACTIONS_NAMES[actions_type], 
@@ -484,7 +464,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                     Q.remove_item(item_id)
                     graph.update_item(item_id, [('outsourced', NO), ('can_be_outsourced', NO)])
                     DEBUG_PRINT(f"Producing item {item_id} -> ({p},{e}) locally...")
-                if outsourcing_training_stage:
+                if train:
                     _local_decisions.append(Transition(agent_name=ACTIONS_NAMES[OUTSOURCING],
                                                     action= Action(type=actions_type, target=item_id, value=outsourcing_choice),
                                                     end_old=old_cmax, 
@@ -507,7 +487,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                     try_to_open_next_operations(Q, graph, instance, previous_operations, next_operations, operation_id, _operation_end)
                 DEBUG_PRINT(f"End of scheduling at time {_operation_end}...")
                 current_cmax = max(current_cmax, _operation_end)
-                if scheduling_training_stage:
+                if train:
                     _local_decisions.append(Transition(agent_name=ACTIONS_NAMES[SCHEDULING],
                                                     action= Action(type=actions_type, target=operation_id, value=resource_id),
                                                     end_old=old_cmax, 
@@ -524,7 +504,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                     Q.remove_operation(operation_id)
                     try_to_open_next_operations(Q, graph, instance, previous_operations, next_operations, operation_id, execution_times[idx])
                 current_cmax = max(current_cmax, execution_times[idx])
-                if material_use_training_stage and need_reward:
+                if train and need_reward:
                     _local_decisions.append(Transition(agent_name=ACTIONS_NAMES[MATERIAL_USE],
                                                     action= Action(type=actions_type, target=operation_id, value=material_id),
                                                     end_old=old_cmax,
@@ -541,10 +521,9 @@ def solve_one(instance: Instance, agents: list[(Module, str)], trainable: list, 
                 break
             DEBUG_PRINT(f"New current time: {t}...")
     if train:
-        if _local_decisions:
-            reward_MEMORY.add_or_update_decision(_local_decisions[0], a=alpha, final_cost=current_cost, final_makespan=current_cmax, init_cmax=lb_cmax, init_cost=lb_cost)
-            for decision in _local_decisions:
-                training_results.add_reward(agent_name=decision.agent_name, reward=decision.reward)  
+        reward_MEMORY.add_or_update_decision(_local_decisions[0], a=alpha, final_cost=current_cost, final_makespan=current_cmax, init_cmax=lb_cmax, init_cost=lb_cost)
+        for decision in _local_decisions:
+            training_results.add_reward(agent_name=decision.agent_name, reward=decision.reward)  
         return training_results, reward_MEMORY, graph, current_cmax, current_cost
     else:
         return graph, current_cmax, current_cost
@@ -640,7 +619,6 @@ def pre_train_on_all_instances(run_number: int, device: str, path: str):
     previous_run = run_number - 1
     agents, shared_embbeding_stack, shared_critic, optimizer, memory = init_new_models(device=device) if first else load_trained_models(model_path=path+directory.models, run_number=previous_run, device=device)
     print("Pre-training models with MAPPO (on several instances)...")
-    # multi_stage_pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, run_number=run_number, interactive=interactive, debug_mode=debug_mode)
     pre_train(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, optimizer=optimizer, memory=memory, path=path, solve_function=solve_one, device=device, run_number=run_number)
 
 def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, debug_mode: bool, device: str, use_pre_train: bool = False, interactive: bool = True):
@@ -666,7 +644,7 @@ def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_numbe
     best_obj = -1.0
     for rep in range(repetitions):
         print(f"SOLVING INSTANCE {size}_{id} (repetition {rep+1}/{repetitions})...")
-        graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, trainable=[False for _ in agents], device=device, greedy=(rep==0))
+        graph, current_cmax, current_cost = solve_one(target_instance, agents, train=False, device=device, greedy=(rep==0))
         _obj = objective_value(current_cmax, current_cost, target_instance.w_makespan)/100
         if best_obj < 0 or _obj < best_obj:
             best_obj = _obj
