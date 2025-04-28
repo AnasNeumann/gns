@@ -251,7 +251,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
         ('end_time', operation_end)])
     graph.current_operation_type[resource_id] = instance.get_operation_type(p, o)
     for d in range(instance.nb_settings):
-        graph.current_design_value[resource_id][d] == instance.design_value[p][o][d]
+        graph.current_design_value[resource_id][d] = instance.design_value[p][o][d]
     required_types_of_resources[p][o].remove(rt)
     for similar in graph.res_by_types[rt]:
         if similar != r:
