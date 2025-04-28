@@ -290,12 +290,13 @@ def schedule_other_resources_if_simultaneous(instance: Instance, graph: GraphIns
                     break
     return operation_end
 
-def try_to_open_next_operations(Q: Queue, graph: GraphInstance, instance: Instance, previous_operations: list[list[list[int]]], next_operations: list[list[list[int]]], operation_id: int, available_time: int): 
+def try_to_open_next_operations(Q: Queue, graph: GraphInstance, instance: Instance, previous_operations: list[list[list[int]]], next_operations: list[list[list[int]]], operation_id: int): 
     """
         Try to open next operations after finishing using a resource or material
     """
     p, o = graph.operations_g2i[operation_id]
     e = graph.item_of_operations[p][o]
+    op_end_time = graph.operation(operation_id, 'end_time')
     for _next in next_operations[p][o]:
         next_good_to_go = True
         next_id = graph.operations_i2g[p][_next]
@@ -303,18 +304,18 @@ def try_to_open_next_operations(Q: Queue, graph: GraphInstance, instance: Instan
             if not graph.is_operation_complete(graph.operations_i2g[p][previous]):
                 next_good_to_go = False
                 break
-        next_time = next_possible_time(instance, available_time, p, _next)
+        next_time = next_possible_time(instance, op_end_time, p, _next)
         graph.update_operation(next_id, [('available_time', next_time)], maxx=True)
         if next_good_to_go:
-            DEBUG_PRINT(f'Enabling operation ({p},{_next}) at time {available_time} -> {next_time} in its own timescale...')
+            DEBUG_PRINT(f'Enabling operation ({p},{_next}) at time {op_end_time} -> {next_time} in its own timescale...')
             Q.add_operation(next_id)
     if o in graph.last_design_operations[p][e]:
         for child in graph.direct_children[p][e]:
             child_id = graph.items_i2g[p][child]
             if instance.external[p][child]:
-                DEBUG_PRINT(f'Enabling item {child_id} -> ({p},{child}) for outsourcing (decision yet to make)...')
+                DEBUG_PRINT(f'Enabling item {child_id} -> ({p},{child}) for outsourcing at (decision yet to make)...')
                 Q.add_item(child_id)
-            graph.update_item(child_id, [('start_time', available_time)], maxx=True)
+            graph.update_item(child_id, [('start_time', op_end_time)], maxx=True)
 
 # ====================================================
 # =*= III. AUXILIARY FUNCTIONS: BUILD INIT OBJECTS =*=
@@ -464,7 +465,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
                 _operation_end = schedule_other_resources_if_simultaneous(instance, graph, required_types_of_resources, required_types_of_materials, operation_id, resource_id, p, o, execution_times[idx], _operation_end)
             if graph.is_operation_complete(operation_id):
                 Q.remove_operation(operation_id)
-                try_to_open_next_operations(Q, graph, instance, previous_operations, next_operations, operation_id, _operation_end)
+                try_to_open_next_operations(Q, graph, instance, previous_operations, next_operations, operation_id)
             DEBUG_PRINT(f"End of scheduling at time {_operation_end}...")
             current_cmax = max(current_cmax, _operation_end)
             if train:
@@ -481,7 +482,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
             apply_use_material(graph, operation_id, material_id, required_types_of_materials, execution_times[idx])
             if graph.is_operation_complete(operation_id):
                 Q.remove_operation(operation_id)
-                try_to_open_next_operations(Q, graph, instance, previous_operations, next_operations, operation_id, execution_times[idx])
+                try_to_open_next_operations(Q, graph, instance, previous_operations, next_operations, operation_id)
             current_cmax = max(current_cmax, execution_times[idx])
             if train and need_reward:
                 _local_decisions.append(Transition(agent_name=ACTIONS_NAMES[MATERIAL_USE],
