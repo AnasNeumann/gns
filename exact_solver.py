@@ -6,9 +6,9 @@ import pandas as pd
 from ortools.sat.python import cp_model
 import time as systime
 
-# =====================================================
+# ###############################################
 # =*= EXACT CP Solver (Using Google OR-Tools) =*=
-# =====================================================
+# ###############################################
 __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
@@ -334,9 +334,9 @@ def c27(model: cp_model.CpModel, i: Instance, s: Solution):
                         model.Add(s.O_executed[p][o][r1] + s.O_executed[p][o][r2] <= 1)
     return model, s
 
-# =====================================================
+# ##############################
 # =*= FEASIBILITY CHECK ONLY =*=
-# =====================================================
+# ##############################
 
 def derive_production_start(item: Item) -> int:
     phys = [exe.start for op in item.production_ops for exe in op.machine_usage]
@@ -410,7 +410,7 @@ def CHECK_FEASIBILITY(model: cp_model.CpModel, i: Instance, s: Solution, sol: He
     fix_operation_vars(model, i, s, sol)
     fix_precedes_and_setups(model, i, s, sol)
 
-# =====================================================
+# ###############################################
 
 def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_path: str):
     start_time = systime.time()

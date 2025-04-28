@@ -22,9 +22,9 @@ from model.reward_memory import Memory, Transition, Action, Memories
 from model.queue import Queue
 from torch.optim import Adam
 
-# =====================================================
+# ################################################
 # =*= 1st MAIN FILE OF THE PROJECT: GNS SOLVER =*=
-# =====================================================
+# ################################################
 __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
@@ -36,7 +36,7 @@ SCHEDULING = 1
 MATERIAL_USE = 2
 ACTIONS_NAMES = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
-SOLVING_REPETITIONS = 25
+SOLVING_REPETITIONS = 50
 GNN_CONF = {
     'resource_and_material_embedding_size': 8,
     'operation_and_item_embedding_size': 16,
@@ -45,9 +45,9 @@ GNN_CONF = {
     'value_hidden_channels': 128,
     'actor_hidden_channels': 128}
 
-# =====================================================
+# ######################################
 # =*= I. SEARCH FOR FEASIBLE ACTIONS =*=
-# =====================================================
+# ######################################
 
 def can_or_must_outsource_item(instance: Instance, graph: GraphInstance, item_id: int):
     """
@@ -146,9 +146,9 @@ def get_feasible_actions(Q: Queue, instance: Instance, graph: GraphInstance, req
         actions, execution_times, type = get_scheduling_and_material_use_actions(Q, instance, graph, required_types_of_resources, required_types_of_materials)
     return actions, type, execution_times
 
-# =====================================================
+# #################################
 # =*= II. APPLY A DECISION MADE =*=
-# =====================================================
+# #################################
 
 def outsource_item(Q: Queue, graph: GraphInstance, instance: Instance, item_id: int, required_types_of_resources: list[list[list[int]]], required_types_of_materials: list[list[list[int]]], enforce_time: bool=False, outsourcing_time: int=-1):
     """
@@ -317,9 +317,9 @@ def try_to_open_next_operations(Q: Queue, graph: GraphInstance, instance: Instan
                 Q.add_item(child_id)
             graph.update_item(child_id, [('start_time', op_end_time)], maxx=True)
 
-# ====================================================
+# ####################################################
 # =*= III. AUXILIARY FUNCTIONS: BUILD INIT OBJECTS =*=
-# ====================================================
+# ####################################################
 
 def build_required_resources(i: Instance, graph: GraphInstance):
     """
@@ -352,9 +352,9 @@ def init_queue(i: Instance, graph: GraphInstance):
             Q.add_operation(graph.operations_i2g[p][o])
     return Q
 
-# =====================================================
+# ################################
 # =*= IV. EXECUTE ONE INSTANCE =*=
-# =====================================================
+# ################################
 
 def objective_value(cmax: int, cost: int, cmax_weight: float):
     """
@@ -501,9 +501,9 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
     else:
         return graph, current_cmax, current_cost
 
-# ====================
+# ####################
 # =*= V. MAIN CODE =*=
-# ====================
+# ####################
 
 SOLVING_SIZES: list[str] = ['s']
 def load_dataset(path: str, train: bool = True):
