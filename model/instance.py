@@ -361,19 +361,16 @@ class Instance:
                     finite = self.finite_capacity[resources[0]]
                     if finite:
                         r = resources[0]
-                        resource_types.append({"RT": rt, "nb_resources": len(resources), "execution_time": self.execution_time[r][p][o]})
+                        resource_types.append({"RT": rt, "execution_time": self.execution_time[r][p][o]})
                     else:
                         m = resources[0]
-                        material_types.append({
-                            "RT": rt,
-                            "init_quantity": self.init_quantity[m],
-                            "quantity_needed": self.quantity_needed[m][p][o]
-                        })
+                        material_types.append({"RT": rt, "quantity_needed": self.quantity_needed[m][p][o]})
                 else:
-                    resource_types.append({"RT": rt, "nb_resources": 0, "execution_time": -1})
+                    resource_types.append({"RT": rt, "execution_time": -1})
             if material_types:
                 operations.append({
                     "operation_id": o,
+                    "type_for_setups": self.get_operation_type(p, o),
                     "simultaneous": self.simultaneous[p][o],
                     "is_design": self.is_design[p][o],
                     "resource_types": resource_types,
@@ -382,6 +379,7 @@ class Instance:
             else:
                 operations.append({
                     "operation_id": o,
+                    "type_for_setups": self.get_operation_type(p, o),
                     "simultaneous": self.simultaneous[p][o],
                     "is_design": self.is_design[p][o],
                     "resource_types": resource_types,

@@ -95,11 +95,11 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
         first_possible_execution_time = next_possible_time(instance, available_time, p, o)
         scheduling_sync_actions = []
         material_sync_actions = []
-        _op_has_scheduling: bool = False
+        _op_has_no_scheduling: bool = True
         if graph.operation(operation_id, 'remaining_resources')>0: # 1. Try for scheduling (and check for sync)
             for rt in required_types_of_resources[p][o]:
                 for r in graph.res_by_types[rt]:
-                    _op_has_scheduling            = True
+                    _op_has_no_scheduling         = False
                     res_id                        = graph.resources_i2g[r]
                     setup_time                    = compute_setup_time(instance, graph, operation_id, res_id)
                     res_ready_time                = graph.resource(res_id, 'available_time') + setup_time
@@ -111,7 +111,7 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
                         scheduling_execution_times.append(first_possible_execution_time)
                     else:
                         scheduling_sync_actions.append((operation_id, res_id))
-        elif graph.operation(operation_id, 'remaining_materials')>0: # 2. Try for material use
+        if graph.operation(operation_id, 'remaining_materials')>0: # 2. Try for material use
             for rt in required_types_of_materials[p][o]:
                 for m in graph.res_by_types[rt]:
                     mat_id = graph.materials_i2g[m]
@@ -119,11 +119,11 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
                     scaled_mat_possible_time      = next_possible_time(instance, mat_possible_time, p, o)
                     first_possible_execution_time = max(first_possible_execution_time, scaled_mat_possible_time)
                     if not instance.simultaneous[p][o]:
+                        if _op_has_no_scheduling:
+                            should_start_with_scheduling = False
                         material_use_actions.append((operation_id, mat_id))
                         material_execution_times.append(first_possible_execution_time)
                     else:
-                        if not _op_has_scheduling:
-                            should_start_with_scheduling = False
                         material_sync_actions.append((operation_id, mat_id))
         if scheduling_sync_actions:
                 scheduling_actions.extend(scheduling_sync_actions)
@@ -131,9 +131,9 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
         if material_sync_actions:
                 material_use_actions.extend(material_sync_actions)
                 material_execution_times.extend([first_possible_execution_time]*len(scheduling_sync_actions))
-    if not material_sync_actions or should_start_with_scheduling:
-        return scheduling_actions, scheduling_execution_times, True
-    return material_use_actions, material_execution_times, False
+    if (scheduling_actions and should_start_with_scheduling) or not material_use_actions:
+        return scheduling_actions, scheduling_execution_times, SCHEDULING
+    return material_use_actions, material_execution_times, MATERIAL_USE
 
 def get_feasible_actions(Q: Queue, instance: Instance, graph: GraphInstance, required_types_of_resources: list[list[list[int]]], required_types_of_materials: list[list[list[int]]]):
     """
@@ -143,8 +143,7 @@ def get_feasible_actions(Q: Queue, instance: Instance, graph: GraphInstance, req
     type = OUTSOURCING
     execution_times: list[int] = []
     if not actions:
-        actions, execution_times, should_start_with_scheduling = get_scheduling_and_material_use_actions(Q, instance, graph, required_types_of_resources, required_types_of_materials)
-        type = SCHEDULING if should_start_with_scheduling else MATERIAL_USE
+        actions, execution_times, type = get_scheduling_and_material_use_actions(Q, instance, graph, required_types_of_resources, required_types_of_materials)
     return actions, type, execution_times
 
 # =====================================================
@@ -690,7 +689,7 @@ if __name__ == '__main__':
         if to_bool(args.target):
             # SOLVE ACTUAL INSTANCE: python gns_solver.py --target=true --size=xxl --id=151 --train=false --mode=test --path=./ --number=1
             # TRY ON DEBUG INSTANCE: python gns_solver.py --target=true --size=d --id=debug --train=false --mode=test --path=./ --number=1
-            i, s = solve_only_target(id=args.id, size=args.size,agents=agents, run_number=args.number, device=_device, path=args.path)
+            i, s = solve_only_target(id=args.id, size=args.size,agents=agents, run_number=args.number, device=_device, path=args.path, repetitions=1)
         else:
             # python gns_solver.py --train=false --target=false --mode=prod --path=./ --number=1
             solve_all_instances(run_number=args.number, agents=agents, device=_device, path=args.path)
