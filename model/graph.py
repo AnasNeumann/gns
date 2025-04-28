@@ -352,7 +352,7 @@ class GraphInstance():
         return self.graph[key].edge_attr[idx, FC.need_for_resources[feature]].item()
 
     def item(self, id: int, feature: str):
-        return self.graph['item'].x[id][FC.item[feature]].item()
+        return self.graph['item'].x[id, FC.item[feature]].item()
     
     def del_edge(self, edge_type: str, id_1: int, id_2: int):
         edges_idx = self.graph[edge_type].edge_index
