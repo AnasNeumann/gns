@@ -394,6 +394,7 @@ class Instance:
                     "outsourcing_time": self.outsourcing_time[p][e],
                     "external_cost": self.external_cost[p][e],
                     "operations": operations, 
+                    "nb_children": len(children),
                     "children": children
                 }
             else:
@@ -409,9 +410,19 @@ class Instance:
                 return {"item_id": e, "parent": parent, "nb_children": len(children), "operations": operations, "children": children}
             else:
                 return {"item_id": e, "parent": parent, "operations": operations}
+            
+    def display_resource(self, r: int) -> dict:
+        rt: int = self.get_resource_familly(r)
+        _nb_rs: int = len(self.resources_by_type(rt)) -1
+        if self.finite_capacity[r]:
+            return {"r_id": r, "finit_capacity": True, "type": rt, "other_similar": _nb_rs, "operation_setup": self.operation_setup[r], "design_setups": self.design_setup[r]}
+        return {"r_id": r, "finit_capacity": False, "type": rt, "other_similar": _nb_rs, "init_quantity": self.init_quantity[r], "purchase_time": self.purchase_time[r]}
 
     def display(self):
-        projects = []
+        _resources = []
+        for r in self.loop_resources():
+            _resources.append(self.display_resource(r))
+        _projects = []
         for p in self.loop_projects():
-            projects.append({"project_id:": p, "head": self.recursive_display_item(p, self.project_head(p), -1)})
-        return json.dumps({"nb_projects": len(projects), "projects": projects}, indent=4)  
+            _projects.append({"project_id:": p, "head": self.recursive_display_item(p, self.project_head(p), -1)})
+        return json.dumps({"nb_projects": len(_projects), "nb_resources": len(_resources), "resources": _resources, "projects": _projects}, indent=4)  

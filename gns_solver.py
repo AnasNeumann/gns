@@ -49,7 +49,7 @@ GNN_CONF = {
 # =*= I. SEARCH FOR FEASIBLE ACTIONS =*=
 # =====================================================
 
-def can_or_must_outsource_item(Q: Queue, instance: Instance, graph: GraphInstance, item_id: int, required_types_of_resources: list[list[list[int]]]):
+def can_or_must_outsource_item(instance: Instance, graph: GraphInstance, item_id: int):
     """
         Check if an item can or must be outsourced
     """
@@ -58,8 +58,9 @@ def can_or_must_outsource_item(Q: Queue, instance: Instance, graph: GraphInstanc
     if graph.item(item_id, 'can_be_outsourced')==YES:
         need_to_be_outsourced = False
         for o in instance.loop_item_operations(p,e):
-            for rt in required_types_of_resources[p][o]:
-                if not graph.res_by_types[rt]:
+            for rt in instance.required_rt(p, o):
+                if not instance.resources_by_type(rt):
+                    DEBUG_PRINT(f"Unavailable resourced {rt} found, Item {item_id} must be outsourced!")
                     need_to_be_outsourced = True
                     break
             if need_to_be_outsourced:
@@ -70,13 +71,13 @@ def can_or_must_outsource_item(Q: Queue, instance: Instance, graph: GraphInstanc
             actions.extend([(item_id, YES), (item_id, NO)])
     return actions
 
-def get_outourcing_actions(Q: Queue, instance: Instance, graph: GraphInstance, required_types_of_resources: list[list[list[int]]]):
+def get_outourcing_actions(Q: Queue, instance: Instance, graph: GraphInstance):
     """
         Search possible outsourcing actions
     """
     actions = []
     for item_id in Q.item_queue:
-        actions.extend(can_or_must_outsource_item(Q, instance, graph, item_id, required_types_of_resources))
+        actions.extend(can_or_must_outsource_item(instance, graph, item_id))
     return actions
 
 def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph: GraphInstance, required_types_of_resources: list[list[list[int]]], required_types_of_materials: list[list[list[int]]]):
@@ -133,7 +134,7 @@ def get_feasible_actions(Q: Queue, instance: Instance, graph: GraphInstance, req
     """
         Search next possible actions with priority between decision spaces (outsourcing >> scheduling >> material use)
     """
-    actions = [] if not Q.item_queue else get_outourcing_actions(Q, instance, graph, required_types_of_resources)
+    actions = [] if not Q.item_queue else get_outourcing_actions(Q, instance, graph)
     type = OUTSOURCING
     execution_times: list[int] = []
     if not actions:
@@ -303,7 +304,7 @@ def try_to_open_next_operations(Q: Queue, graph: GraphInstance, instance: Instan
         if next_good_to_go:
             DEBUG_PRINT(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time} in its own timescale...')
             if graph.is_operation_complete(next_id):
-                print("ERRROR SOMETHING IS NOT RIGHT HERE!")
+                DEBUG_PRINT("ERRROR: opening a already finished operation!")
             Q.add_operation(next_id)
     if o in graph.last_design_operations[p][e]:
         for child in graph.direct_children[p][e]:
@@ -607,6 +608,7 @@ def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_numbe
         Solve the target instance (size, id) only using inference
     """
     target_instance: Instance = load_instance(path+directory.instances+'/test/'+size+'/instance_'+id+'.pkl')
+    DEBUG_PRINT(target_instance.display())
     start_time = systime.time()
     best_cmax = -1.0
     best_cost = -1.0
