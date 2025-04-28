@@ -36,7 +36,7 @@ SCHEDULING = 1
 MATERIAL_USE = 2
 ACTIONS_NAMES = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
-SOLVING_REPETITIONS = 10
+SOLVING_REPETITIONS = 25
 GNN_CONF = {
     'resource_and_material_embedding_size': 8,
     'operation_and_item_embedding_size': 16,
@@ -88,15 +88,18 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
     material_use_actions = []
     scheduling_execution_times: list[int] = []
     material_execution_times: list[int] = []
+    should_start_with_scheduling: bool = True
     for operation_id in Q.operation_queue:
         p, o = graph.operations_g2i[operation_id]
         available_time = graph.operation(operation_id, 'available_time')
         first_possible_execution_time = next_possible_time(instance, available_time, p, o)
         scheduling_sync_actions = []
         material_sync_actions = []
+        _op_has_scheduling: bool = False
         if graph.operation(operation_id, 'remaining_resources')>0: # 1. Try for scheduling (and check for sync)
             for rt in required_types_of_resources[p][o]:
                 for r in graph.res_by_types[rt]:
+                    _op_has_scheduling            = True
                     res_id                        = graph.resources_i2g[r]
                     setup_time                    = compute_setup_time(instance, graph, operation_id, res_id)
                     res_ready_time                = graph.resource(res_id, 'available_time') + setup_time
@@ -119,6 +122,8 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
                         material_use_actions.append((operation_id, mat_id))
                         material_execution_times.append(first_possible_execution_time)
                     else:
+                        if not _op_has_scheduling:
+                            should_start_with_scheduling = False
                         material_sync_actions.append((operation_id, mat_id))
         if scheduling_sync_actions:
                 scheduling_actions.extend(scheduling_sync_actions)
@@ -126,7 +131,7 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
         if material_sync_actions:
                 material_use_actions.extend(material_sync_actions)
                 material_execution_times.extend([first_possible_execution_time]*len(scheduling_sync_actions))
-    if scheduling_actions:
+    if not material_sync_actions or should_start_with_scheduling:
         return scheduling_actions, scheduling_execution_times, True
     return material_use_actions, material_execution_times, False
 
@@ -138,8 +143,8 @@ def get_feasible_actions(Q: Queue, instance: Instance, graph: GraphInstance, req
     type = OUTSOURCING
     execution_times: list[int] = []
     if not actions:
-        actions, execution_times, found_scheduling = get_scheduling_and_material_use_actions(Q, instance, graph, required_types_of_resources, required_types_of_materials)
-        type = SCHEDULING if found_scheduling else MATERIAL_USE
+        actions, execution_times, should_start_with_scheduling = get_scheduling_and_material_use_actions(Q, instance, graph, required_types_of_resources, required_types_of_materials)
+        type = SCHEDULING if should_start_with_scheduling else MATERIAL_USE
     return actions, type, execution_times
 
 # =====================================================
@@ -601,7 +606,7 @@ def fine_tune_on_target(id: str, size: str, pre_trained_number: int, path: str, 
     print("Fine-tuning models with MAPPO (on target instance)...")
     multi_stage_fine_tuning(agents=agents, embedding_stack=shared_embbeding_stack, shared_critic=shared_critic, path=path, solve_function=solve_one, device=device, id=id, size=size, interactive=interactive, debug_mode=debug_mode)
 
-def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_number: int, device: str, path: str, repetitions: int=1):
+def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_number: int, device: str, path: str, repetitions: int=SOLVING_REPETITIONS):
     """
         Solve the target instance (size, id) only using inference
     """
