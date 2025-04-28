@@ -90,7 +90,6 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
     for operation_id in Q.operation_queue:
         p, o = graph.operations_g2i[operation_id]
         available_time = graph.operation(operation_id, 'available_time')
-        can_search_for_material_use   = True
         first_possible_execution_time = next_possible_time(instance, available_time, p, o)
         scheduling_sync_actions = []
         material_sync_actions = []
@@ -106,10 +105,9 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
                     if not instance.simultaneous[p][o]:
                         scheduling_actions.append((operation_id, res_id))
                         scheduling_execution_times.append(first_possible_execution_time)
-                        can_search_for_material_use = False
                     else:
                         scheduling_sync_actions.append((operation_id, res_id))
-        elif can_search_for_material_use and graph.operation(operation_id, 'remaining_materials')>0: # 2. Try for material use
+        elif graph.operation(operation_id, 'remaining_materials')>0: # 2. Try for material use
             for rt in required_types_of_materials[p][o]:
                 for m in graph.res_by_types[rt]:
                     mat_id = graph.materials_i2g[m]
@@ -268,7 +266,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
             graph.inc_item(graph.items_i2g[p][child], [('parents_physical_time', -estimated_processing_time)])
     return operation_end
 
-def schedule_other_resources_if_simultaneous(Q: Queue, instance: Instance, graph: GraphInstance, required_types_of_resources: list[list[list[int]]], required_types_of_materials:list[list[list[int]]], operation_id: int, resource_id: int, p: int, o: int, sync_time: int, operation_end: int):
+def schedule_other_resources_if_simultaneous(instance: Instance, graph: GraphInstance, required_types_of_resources: list[list[list[int]]], required_types_of_materials:list[list[list[int]]], operation_id: int, resource_id: int, p: int, o: int, sync_time: int, operation_end: int):
     """
         Also schedule other resources if the operation is simultaneous
     """
@@ -304,6 +302,8 @@ def try_to_open_next_operations(Q: Queue, graph: GraphInstance, instance: Instan
         graph.update_operation(next_id, [('available_time', next_time)], maxx=True)
         if next_good_to_go:
             DEBUG_PRINT(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time} in its own timescale...')
+            if graph.is_operation_complete(next_id):
+                print("ERRROR SOMETHING IS NOT RIGHT HERE!")
             Q.add_operation(next_id)
     if o in graph.last_design_operations[p][e]:
         for child in graph.direct_children[p][e]:
@@ -408,7 +408,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
     Q = init_queue(instance, graph)
     while not Q.done():
         poss_actions, actions_type, execution_times = get_feasible_actions(Q, instance, graph, required_types_of_resources, required_types_of_materials)
-        print(f"Current possible {ACTIONS_NAMES[actions_type]} actions: {poss_actions} at times: {execution_times}...")
+        DEBUG_PRINT(f"Current possible {ACTIONS_NAMES[actions_type]} actions: {poss_actions} at times: {execution_times}...")
         if train:
             state: State = graph.to_state(device=device)
             probs, state_value = agents[actions_type][AGENT](state, poss_actions, related_items, parent_items, alpha)
@@ -458,7 +458,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
             _operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, execution_times[idx])
             if instance.simultaneous[p][o]:
                 DEBUG_PRINT("\t >> Simulatenous...")
-                _operation_end = schedule_other_resources_if_simultaneous(Q, instance, graph, required_types_of_resources, required_types_of_materials, operation_id, resource_id, p, o, execution_times[idx], _operation_end)
+                _operation_end = schedule_other_resources_if_simultaneous(instance, graph, required_types_of_resources, required_types_of_materials, operation_id, resource_id, p, o, execution_times[idx], _operation_end)
             if graph.is_operation_complete(operation_id):
                 Q.remove_operation(operation_id)
                 try_to_open_next_operations(Q, graph, instance, previous_operations, next_operations, operation_id, _operation_end)

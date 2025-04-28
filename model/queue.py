@@ -30,4 +30,4 @@ class Queue:
         self.operation_queue.remove(operation)  
     
     def remove_item(self, item: int):
-        self.item_queue.remove(item)
+        self.item_queue.remove(item) 
