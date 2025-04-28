@@ -14,21 +14,21 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
     design_mean_time, physical_mean_time = i.item_processing_time(p, e, total_load=False)
     childrens = graph.descendants[p][e]
     children_time = 0
-    childrens_physical_operations = 0
-    childrens_design_operations = 0
+    childrens_ops = 0
     for children in childrens:
         cdt = graph.approximate_design_load[p][children]
         cpt = graph.approximate_physical_load[p][children]
         children_time += (cdt+cpt)
         for child_op in i.loop_item_operations(p, e=children):
-            if not i.is_design[p][child_op]:
-                childrens_physical_operations += 1
-            else:
-                childrens_design_operations +=1
+            childrens_ops += 1
     parents_physical_time = 0
+    parent_physical_ops = 0
     for ancestor in graph.ancesors[p][e]:
         apt = graph.approximate_physical_load[p][ancestor]
         parents_physical_time += apt
+        for parent_op in i.loop_item_operations(p, e=ancestor):
+            if not i.is_design[p][parent_op]:
+                parent_physical_ops += 1
     item_id = graph.add_item(p, e, ItemFeatures(
         can_be_outsourced = YES if i.external[p][e] else NO,
         outsourced = NO,
@@ -63,7 +63,7 @@ def build_item(i: Instance, graph: GraphInstance, p: int, e: int, head: bool, es
             started = NO,
             sync = float(i.simultaneous[p][o]),
             large_timescale =float(i.in_days[p][o]),
-            successors = float(childrens_physical_operations + succs + (childrens_design_operations if i.is_design[p][o] else 0.0)),
+            successors = float(parent_physical_ops + succs + (childrens_ops if i.is_design[p][o] else 0.0)),
             remaining_time = float(operation_load),
             remaining_resources = float(required_res),
             remaining_materials = float(required_mat),

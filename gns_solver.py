@@ -292,19 +292,17 @@ def try_to_open_next_operations(Q: Queue, graph: GraphInstance, instance: Instan
     """
     p, o = graph.operations_g2i[operation_id]
     e = graph.item_of_operations[p][o]
-    for next in next_operations[p][o]:
+    for _next in next_operations[p][o]:
         next_good_to_go = True
-        next_id = graph.operations_i2g[p][next]
-        for previous in previous_operations[p][next]:
-            if previous != operation_id and not graph.is_operation_complete(graph.operations_i2g[p][previous]):
+        next_id = graph.operations_i2g[p][_next]
+        for previous in previous_operations[p][_next]:
+            if not graph.is_operation_complete(graph.operations_i2g[p][previous]):
                 next_good_to_go = False
                 break
-        next_time = next_possible_time(instance, available_time, p, next)
+        next_time = next_possible_time(instance, available_time, p, _next)
         graph.update_operation(next_id, [('available_time', next_time)], maxx=True)
         if next_good_to_go:
-            DEBUG_PRINT(f'Enabling operation ({p},{next}) at time {available_time} -> {next_time} in its own timescale...')
-            if graph.is_operation_complete(next_id):
-                DEBUG_PRINT("ERRROR: opening a already finished operation!")
+            DEBUG_PRINT(f'Enabling operation ({p},{_next}) at time {available_time} -> {next_time} in its own timescale...')
             Q.add_operation(next_id)
     if o in graph.last_design_operations[p][e]:
         for child in graph.direct_children[p][e]:

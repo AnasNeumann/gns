@@ -430,9 +430,9 @@ class GraphInstance():
         return True
 
     def is_operation_complete(self, operation_id: int):
-        if self.operation(operation_id, 'remaining_resources')>0 \
-            or self.operation(operation_id, 'remaining_materials')>0 \
-            or self.operation(operation_id, 'remaining_time')>0:
+        if self.operation(operation_id, 'remaining_resources')>0.0 \
+            or self.operation(operation_id, 'remaining_materials')>0.0 \
+            or self.operation(operation_id, 'remaining_time')>0.0:
             return False
         return True
 
@@ -505,4 +505,5 @@ class GraphInstance():
                      item_assembly = self.item_assembly(),
                      precedences = self.precedences(),
                      same_types = self.same_types(),
-                     device = device)
+                     device = device,
+                     should_std=False)
