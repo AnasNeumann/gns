@@ -347,11 +347,11 @@ class Instance:
                     previous[p][successor].append(o)
         return previous, next
 
-    def recursive_display_item(self, p: int, e: int, parent: int):
+    def recursive_display_item(self, p: int, e: int, parent: int, level: int=1):
         operations = []
         children = []
         for child in self.get_children(p, e, True):
-            children.append(self.recursive_display_item(p, child, e))
+            children.append(self.recursive_display_item(p, child, e, level=level+1))
         for o in self.loop_item_operations(p,e):
             resource_types = []
             material_types = []
@@ -374,6 +374,7 @@ class Instance:
                     "design_values_for_setups": self.design_value[p][o],
                     "simultaneous": self.simultaneous[p][o],
                     "is_design": self.is_design[p][o],
+                    "total_resources": len(resource_types) + len(material_types),
                     "resource_types": resource_types,
                     "material_types": material_types
                 })
@@ -384,15 +385,18 @@ class Instance:
                     "design_values_for_setups": self.design_value[p][o],
                     "simultaneous": self.simultaneous[p][o],
                     "is_design": self.is_design[p][o],
+                    "total_resources": len(resource_types) + len(material_types),
                     "resource_types": resource_types,
                 })
         if self.external[p][e]:
             if children:
                 return {
                     "item_id": e, 
+                    "EBOM_level": level,
                     "parent": parent,
                     "outsourcing_time": self.outsourcing_time[p][e],
                     "external_cost": self.external_cost[p][e],
+                    "nb_operations": len(operations),
                     "operations": operations, 
                     "nb_children": len(children),
                     "children": children
@@ -425,4 +429,4 @@ class Instance:
         _projects = []
         for p in self.loop_projects():
             _projects.append({"project_id:": p, "head": self.recursive_display_item(p, self.project_head(p), -1)})
-        return json.dumps({"nb_projects": len(_projects), "nb_resources": len(_resources), "resources": _resources, "projects": _projects}, indent=4)  
+        return json.dumps({"alpha_for_makespan": self.w_makespan, "design_scale": 60*self.H, "assembly_scale": 60, "production_scale": 1, "nb_projects": len(_projects), "nb_resources": len(_resources), "resources": _resources, "projects": _projects}, indent=4)  
