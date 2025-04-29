@@ -371,6 +371,7 @@ class Instance:
                 operations.append({
                     "operation_id": o,
                     "type_for_setups": self.get_operation_type(p, o),
+                    "design_values_for_setups": self.design_value[p][o],
                     "simultaneous": self.simultaneous[p][o],
                     "is_design": self.is_design[p][o],
                     "resource_types": resource_types,
@@ -380,6 +381,7 @@ class Instance:
                 operations.append({
                     "operation_id": o,
                     "type_for_setups": self.get_operation_type(p, o),
+                    "design_values_for_setups": self.design_value[p][o],
                     "simultaneous": self.simultaneous[p][o],
                     "is_design": self.is_design[p][o],
                     "resource_types": resource_types,

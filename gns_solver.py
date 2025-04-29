@@ -91,40 +91,44 @@ def get_scheduling_and_material_use_actions(Q: Queue, instance: Instance, graph:
     should_start_with_scheduling: bool = True
     for operation_id in Q.operation_queue:
         p, o = graph.operations_g2i[operation_id]
-        available_time = graph.operation(operation_id, 'available_time')
-        first_possible_execution_time = next_possible_time(instance, available_time, p, o)
+        available_time = next_possible_time(instance, graph.operation(operation_id, 'available_time'), p, o) 
+        first_possible_execution_time = available_time
         scheduling_sync_actions = []
         material_sync_actions = []
         _op_has_no_scheduling: bool = True
         if graph.operation(operation_id, 'remaining_resources')>0: # 1. Try for scheduling (and check for sync)
             for rt in required_types_of_resources[p][o]:
+                _earliest_possible_for_this_RT = -1
                 for r in graph.res_by_types[rt]:
-                    _op_has_no_scheduling         = False
-                    res_id                        = graph.resources_i2g[r]
-                    setup_time                    = compute_setup_time(instance, graph, operation_id, res_id)
-                    res_ready_time                = graph.resource(res_id, 'available_time') + setup_time
-                    scaled_res_ready_time         = next_possible_time(instance, res_ready_time, p, o)
-                    first_possible_execution_time = max(first_possible_execution_time, scaled_res_ready_time)
+                    _op_has_no_scheduling          = False
+                    res_id                         = graph.resources_i2g[r]
+                    setup_time                     = compute_setup_time(instance, graph, operation_id, res_id)
+                    res_ready_time                 = graph.resource(res_id, 'available_time') + setup_time
+                    scaled_res_ready_time          = next_possible_time(instance, res_ready_time, p, o)
+                    _earliest_possible_for_this_RT = scaled_res_ready_time if _earliest_possible_for_this_RT<0 else min(scaled_res_ready_time, _earliest_possible_for_this_RT)
                     graph.update_need_for_resource(operation_id, res_id, [('setup_time', setup_time)])
                     if not instance.simultaneous[p][o]:
                         scheduling_actions.append((operation_id, res_id))
-                        scheduling_execution_times.append(first_possible_execution_time)
+                        scheduling_execution_times.append(max(scaled_res_ready_time, available_time))
                     else:
                         scheduling_sync_actions.append((operation_id, res_id))
+                first_possible_execution_time = max(first_possible_execution_time, _earliest_possible_for_this_RT) # for sync ops only
         if graph.operation(operation_id, 'remaining_materials')>0: # 2. Try for material use
             for rt in required_types_of_materials[p][o]:
+                _earliest_possible_for_this_M = -1
                 for m in graph.res_by_types[rt]:
                     mat_id = graph.materials_i2g[m]
-                    mat_possible_time             = available_time if graph.material(mat_id, 'remaining_init_quantity') >= instance.quantity_needed[m][p][o] else max(instance.purchase_time[m], available_time)
-                    scaled_mat_possible_time      = next_possible_time(instance, mat_possible_time, p, o)
-                    first_possible_execution_time = max(first_possible_execution_time, scaled_mat_possible_time)
+                    mat_possible_time              = available_time if graph.material(mat_id, 'remaining_init_quantity') >= instance.quantity_needed[m][p][o] else max(instance.purchase_time[m], available_time)
+                    scaled_mat_possible_time       = next_possible_time(instance, mat_possible_time, p, o)
+                    _earliest_possible_for_this_M  = scaled_mat_possible_time if _earliest_possible_for_this_M<0 else min(scaled_mat_possible_time, _earliest_possible_for_this_M)
                     if not instance.simultaneous[p][o]:
                         if _op_has_no_scheduling:
                             should_start_with_scheduling = False
                         material_use_actions.append((operation_id, mat_id))
-                        material_execution_times.append(first_possible_execution_time)
+                        material_execution_times.append(max(scaled_mat_possible_time, available_time))
                     else:
                         material_sync_actions.append((operation_id, mat_id))
+                    first_possible_execution_time = max(first_possible_execution_time, _earliest_possible_for_this_M) # for sync ops only
         if scheduling_sync_actions:
                 scheduling_actions.extend(scheduling_sync_actions)
                 scheduling_execution_times.extend([first_possible_execution_time]*len(scheduling_sync_actions))
@@ -212,15 +216,16 @@ def apply_outsourcing_to_direct_parent(Q: Queue, instance: Instance, graph: Grap
             DEBUG_PRINT(f"\t >> Opening first physical operation ({p},{o}) of parent {_parent} at {_t}!")
             Q.add_operation(graph.operations_i2g[p][o])
 
-def apply_use_material(graph: GraphInstance, operation_id: int, material_id: int, required_types_of_materials:list[list[list[int]]], use_material_time: int):
+def apply_use_material(graph: GraphInstance, instance: Instance, operation_id: int, material_id: int, required_types_of_materials:list[list[list[int]]], use_material_time: int):
     """
         Apply use material to an operation
     """
-    p, o             = graph.operations_g2i[operation_id]
-    rt               = graph.resource_family[graph.materials_g2i[material_id]]
-    quantity_needed  = graph.need_for_material(operation_id, material_id, 'quantity_needed')
-    current_quantity = graph.material(material_id, 'remaining_init_quantity')
-    waiting_demand   = graph.material(material_id, 'remaining_demand') 
+    p, o              = graph.operations_g2i[operation_id]
+    use_material_time = next_possible_time(instance, use_material_time, p, o)
+    rt                = graph.resource_family[graph.materials_g2i[material_id]]
+    quantity_needed   = graph.need_for_material(operation_id, material_id, 'quantity_needed')
+    current_quantity  = graph.material(material_id, 'remaining_init_quantity')
+    waiting_demand    = graph.material(material_id, 'remaining_demand') 
     graph.update_need_for_material(operation_id, material_id, [('status', YES), ('execution_time', use_material_time)])
     graph.update_material(material_id, [
         ('remaining_init_quantity', max(0, current_quantity - quantity_needed)),
@@ -237,7 +242,10 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     """
     processing_time = graph.need_for_resource(operation_id, resource_id, 'processing_time')
     p, o = graph.operations_g2i[operation_id]
-    operation_end = next_possible_time(instance, scheduling_time + processing_time, p, o)
+    res_ready_time        = graph.resource(resource_id, 'available_time') + graph.need_for_resource(operation_id, resource_id, 'setup_time')
+    scaled_res_ready_time = next_possible_time(instance, res_ready_time, p, o)
+    scheduling_time       = max(scheduling_time, scaled_res_ready_time)
+    operation_end         = next_possible_time(instance, scheduling_time + processing_time, p, o)
     e = graph.item_of_operations[p][o]
     r = graph.resources_g2i[resource_id]
     rt = graph.resource_family[r]
@@ -269,7 +277,7 @@ def schedule_operation(graph: GraphInstance, instance: Instance, operation_id: i
     if not instance.is_design[p][o]:
         for child in graph.descendants[p][e]:
             graph.inc_item(graph.items_i2g[p][child], [('parents_physical_time', -estimated_processing_time)])
-    return operation_end
+    return operation_end, scheduling_time
 
 def schedule_other_resources_if_simultaneous(instance: Instance, graph: GraphInstance, required_types_of_resources: list[list[list[int]]], required_types_of_materials:list[list[list[int]]], operation_id: int, resource_id: int, p: int, o: int, sync_time: int, operation_end: int):
     """
@@ -278,16 +286,25 @@ def schedule_other_resources_if_simultaneous(instance: Instance, graph: GraphIns
     not_RT: int = graph.resource_family[graph.resources_g2i[resource_id]]
     for rt in required_types_of_resources[p][o] + required_types_of_materials[p][o]:
         if rt != not_RT:
+            found_suitable_r: bool = True 
             for r in graph.res_by_types[rt]:
                 if instance.finite_capacity[r]:
-                    other_resource_id = graph.resources_i2g[r]
-                    if graph.resource(other_resource_id, 'available_time') <= sync_time:
-                        op_end = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, sync_time)
-                        operation_end = max(operation_end, op_end)
+                    other_resource_id     = graph.resources_i2g[r]
+                    res_ready_time        = graph.resource(other_resource_id, 'available_time') + graph.need_for_resource(operation_id, other_resource_id, 'setup_time')
+                    scaled_res_ready_time = next_possible_time(instance, res_ready_time, p, o)
+                    if scaled_res_ready_time <= sync_time:
+                        found_suitable_r = True
+                        op_end, _        = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, sync_time)
+                        operation_end    = max(operation_end, op_end)
                         break
+                    else:
+                        print("this may be it....")
                 else:
-                    apply_use_material(graph, operation_id, graph.materials_i2g[r], required_types_of_materials, sync_time)
+                    found_suitable_r = True
+                    apply_use_material(graph, instance, operation_id, graph.materials_i2g[r], required_types_of_materials, sync_time)
                     break
+            if not found_suitable_r:
+                print("ERROR!")
     return operation_end
 
 def try_to_open_next_operations(Q: Queue, graph: GraphInstance, instance: Instance, previous_operations: list[list[list[int]]], next_operations: list[list[list[int]]], operation_id: int): 
@@ -459,10 +476,10 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
             operation_id, resource_id = poss_actions[idx]
             p, o = graph.operations_g2i[operation_id]
             DEBUG_PRINT(f"Scheduling: operation {operation_id} -> ({p},{o}) on resource {graph.resources_g2i[resource_id]} at time {execution_times[idx]}...")     
-            _operation_end = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, execution_times[idx])
+            _operation_end, _actual_scheduling_time = schedule_operation(graph, instance, operation_id, resource_id, required_types_of_resources, execution_times[idx])
             if instance.simultaneous[p][o]:
                 DEBUG_PRINT("\t >> Simulatenous...")
-                _operation_end = schedule_other_resources_if_simultaneous(instance, graph, required_types_of_resources, required_types_of_materials, operation_id, resource_id, p, o, execution_times[idx], _operation_end)
+                _operation_end = schedule_other_resources_if_simultaneous(instance, graph, required_types_of_resources, required_types_of_materials, operation_id, resource_id, p, o, _actual_scheduling_time, _operation_end)
             if graph.is_operation_complete(operation_id):
                 Q.remove_operation(operation_id)
                 try_to_open_next_operations(Q, graph, instance, previous_operations, next_operations, operation_id)
@@ -479,7 +496,7 @@ def solve_one(instance: Instance, agents: list[(Module, str)], train: bool, devi
             operation_id, material_id = poss_actions[idx]
             p, o = graph.operations_g2i[operation_id]
             DEBUG_PRINT(f"Material use: operation {operation_id} -> ({p},{o}) on material {graph.materials_g2i[material_id]} at time {execution_times[idx]}...")  
-            apply_use_material(graph, operation_id, material_id, required_types_of_materials, execution_times[idx])
+            apply_use_material(graph, instance, operation_id, material_id, required_types_of_materials, execution_times[idx])
             if graph.is_operation_complete(operation_id):
                 Q.remove_operation(operation_id)
                 try_to_open_next_operations(Q, graph, instance, previous_operations, next_operations, operation_id)
