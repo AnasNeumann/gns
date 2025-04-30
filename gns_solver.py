@@ -297,8 +297,6 @@ def schedule_other_resources_if_simultaneous(instance: Instance, graph: GraphIns
                         op_end, _        = schedule_operation(graph, instance, operation_id, other_resource_id, required_types_of_resources, sync_time)
                         operation_end    = max(operation_end, op_end)
                         break
-                    else:
-                        print("this may be it....")
                 else:
                     found_suitable_r = True
                     apply_use_material(graph, instance, operation_id, graph.materials_i2g[r], required_types_of_materials, sync_time)

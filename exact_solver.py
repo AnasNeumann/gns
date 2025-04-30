@@ -5,6 +5,8 @@ from model.solution import Solution, HeuristicSolution, Item, Operation
 import pandas as pd
 from ortools.sat.python import cp_model
 import time as systime
+import json
+from pprint import pprint
 
 # ###############################################
 # =*= EXACT CP Solver (Using Google OR-Tools) =*=
@@ -334,83 +336,72 @@ def c27(model: cp_model.CpModel, i: Instance, s: Solution):
                         model.Add(s.O_executed[p][o][r1] + s.O_executed[p][o][r2] <= 1)
     return model, s
 
-# ##############################
-# =*= FEASIBILITY CHECK ONLY =*=
-# ##############################
+# #######################
+# =*= DISPLAY RESULTS =*=
+# #######################
 
-def derive_production_start(item: Item) -> int:
-    phys = [exe.start for op in item.production_ops for exe in op.machine_usage]
-    result = min(phys) if phys else int(item.start)
-    return int(result[0]) if isinstance(result, tuple) else int(result)
+def display_solution(i: Instance, s: Solution, solver: cp_model.CpSolver, show_precedence: bool = False, max_depth: int = 10) -> dict:
+    res = {"Cmax": solver.Value(s.Cmax), "projects": []}
+    for p in instance.loop_projects():
+        proj = {"project_id": p, "elements": []}
+        for e in instance.loop_items(p):
+            elem = {
+                "item_id": e,
+                "outsourced": bool(solver.Value(s.E_outsourced[p][e])),
+                "design_validation": solver.Value(s.E_validated[p][e]),
+                "prod_start": solver.Value(s.E_prod_start[p][e]),
+                "start": solver.Value(s.E_start[p][e]),
+                "end": solver.Value(s.E_end[p][e]),
+                "operations": [],
+            }
+            # iterate over operations that belong to element e
+            op_start, op_end = instance.get_operations_idx(p, e)
+            for o in range(op_start, op_end):
+                op_dict = {
+                    "op_id": o,
+                    "is_design": instance.is_design[p][o],
+                    "resources": [],
+                }
+                for r in instance.required_resources(p, o):
+                    executed = bool(solver.Value(s.O_executed[p][o][r]))
+                    r_dict = {
+                        "r_id": r,
+                        "executed": executed,
+                        "use_init_qty": bool(solver.Value(s.O_uses_init_quantity[p][o][r])),
+                    }
+                    if executed:
+                        r_dict.update(
+                            {
+                                "start": solver.Value(s.O_start[p][o][r]),
+                                "end": solver.Value(s.O_end[p][o][r]),
+                                "setup_change": bool(solver.Value(s.O_setup[p][o][r])),
+                                "design_setups": [bool(solver.Value(s.D_setup[p][o][r][c])) for c in range(instance.nb_settings)],
+                            }
+                        )
+                    op_dict["resources"].append(r_dict)
+                elem["operations"].append(op_dict)
+            proj["elements"].append(elem)
+        res["projects"].append(proj)
 
-def derive_validation(item: Item) -> int:
-    des = [exe.end for op in item.design_ops for exe in op.machine_usage]
-    result = max(des) if des else int(item.start)
-    return int(result[0]) if isinstance(result, tuple) else int(result)
+    # -------- optional precedence display ----------
+    if show_precedence:
+        prec = {}
+        for r in instance.get_finie_capacity_resources():
+            r_prec = {}
+            for p1, o1 in instance.operations_by_resource(r):
+                succ = [(p2, o2) for p2, o2 in instance.operations_by_resource(r) if solver.Value(s.precedes[p1][p2][o1][o2][r])]
+                if succ:
+                    r_prec[(p1, o1)] = succ
+            if r_prec:
+                prec[r] = r_prec
+        res["precedence_by_resource"] = prec
+    # Pretty-print to console
+    pprint(res, depth=max_depth, compact=False, sort_dicts=False)
+    return res
 
-# Fixing the variables according to the solution (for checking only)
-def fix_item_vars(model: cp_model.CpModel, s: Solution, sol: HeuristicSolution):
-    for proj in sol.projects:
-        p = proj.id
-        for item in proj.flat_items:
-            e = item.id
-            model.Add(s.E_prod_start[p][e] == derive_production_start(item))
-            model.Add(s.E_validated [p][e] == derive_validation(item))
-            model.Add(s.E_outsourced[p][e] == int(item.outsourced))
-            model.Add(s.E_start[p][e]      == int(item.start))
-            model.Add(s.E_end[p][e]        == int(item.end))
-
-# Fixing operation variables according to the solution (for checking only)
-def fix_operation_vars(model: cp_model.CpModel, i: Instance, s: Solution, sol: HeuristicSolution):
-    for proj in sol.projects:
-        p = proj.id
-        for op in proj.flat_operations:
-            o = op.id
-            scale = i.real_time_scale(p,o)
-            # --- finite‑capacity resources --------------------------------
-            for exe in op.machine_usage:
-                r  = exe.selected_machine.id
-                _start = exe.start[0] if isinstance(exe.start, tuple) else exe.start
-                _end = exe.end[0] if isinstance(exe.end, tuple) else exe.end
-                model.Add(s.O_executed[p][o][r] == 1)
-                model.Add(s.O_start   [p][o][r] == int(_start // scale))
-                model.Add(s.O_end     [p][o][r] == int(_end // scale))
-            for r in i.required_resources(p,o):
-                if i.finite_capacity[r] and \
-                   op.get_machine_usage(i.get_resource_type(r)) is None:
-                    model.Add(s.O_executed[p][o][r] == 0)
-            # --- consumables ---------------------------------------------
-            for use in op.material_use:
-                m = use.material.id
-                model.Add(s.O_uses_init_quantity[p][o][m] == int(use.execution_time < i.purchase_time[m]))
-
-# fixing the setup variables according to the solution (for checking only)
-def fix_precedes_and_setups(model: cp_model.CpModel, i: Instance, s: Solution, sol: HeuristicSolution):
-    for rt in sol.machine_types:
-        for seq in [rt.sequence]:
-            for idxA in range(len(seq)-1):
-                a = seq[idxA];  b = seq[idxA+1]
-                pA,oA = a.operation.item.project.id, a.operation.id
-                pB,oB = b.operation.item.project.id, b.operation.id
-                r     = a.selected_machine.id
-                model.Add(s.precedes[pA][pB][oA][oB][r] == 1)
-                model.Add(s.O_setup [pB][oB][r] == int(a.operation.operation_family != b.operation.operation_family))
-                for d,val in enumerate(i.design_value[pB][oB]):
-                    diff = int(val != a.operation.design_value[d])
-                    model.Add(s.D_setup[pB][oB][r][d] == diff)
-            if seq:
-                first = seq[0]
-                p,o = first.operation.item.project.id, first.operation.id
-                r   = first.selected_machine.id
-                model.Add(sum(s.precedes[p1][p][o1][o][r] for p1 in i.loop_projects() for o1 in i.loop_operations(p1) if i.require(p1,o1,r) and not (p1==p and o1==o)) == 0)
-
-def CHECK_FEASIBILITY(model: cp_model.CpModel, i: Instance, s: Solution, sol: HeuristicSolution):
-    model.Add(s.Cmax == int(sol.Cmax))
-    fix_item_vars(model, s, sol)
-    fix_operation_vars(model, i, s, sol)
-    fix_precedes_and_setups(model, i, s, sol)
-
-# ###############################################
+# #################
+# =*= MAIN CODE =*=
+# #################
 
 def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_path: str):
     start_time = systime.time()
@@ -443,6 +434,8 @@ def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_pa
     else:
         solutions_df = pd.DataFrame({'index': [instance.id], 'value': [-1], 'status': ['failure'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
     print(solutions_df)
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        display_solution(instance, solution, solver, show_precedence=True)
     solutions_df.to_csv(solution_path, index=False)
 
 '''
