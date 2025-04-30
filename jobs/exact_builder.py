@@ -12,8 +12,8 @@ START_IDX: int = 151
 END_IDX: int = 200
 SIZES: list[str] = ['s', 'm', 'l', 'xl', 'xxl', 'xxxl']
 MINUTES: list[int] = [10, 10, 10, 10, 10, 10]
-HOURS: list[int] = [1, 4, 6, 8, 12, 16]
-MEMORY: list[int] = [120, 120, 120, 120, 200, 200]
+HOURS: list[int] = [2, 6, 9, 12, 20, 30]
+MEMORY: list[int] = [30, 90, 135, 180, 300, 450]
 
 '''
     TEST WITH

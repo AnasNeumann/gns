@@ -40,6 +40,6 @@ if __name__ == '__main__':
     f.write("source $SLURM_TMPDIR/env/bin/activate\n")
     f.write("pip install --upgrade pip --no-index\n")
     f.write("pip install --no-index -r "+BASIC_PATH+"requirements.txt\n")
-    f.write(f"python {BASIC_PATH}gns_solver.py --train=true --target=false --interactive=false --mode=prod --number={args.number} --path="+BASIC_PATH+" \n")
+    f.write(f"python {BASIC_PATH}gns_solver.py --train=true --mode=prod --number={args.number} --path="+BASIC_PATH+" \n")
     f.write("deactivate\n")
     f.close()

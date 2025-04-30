@@ -613,7 +613,6 @@ def solve_only_target(id: str, size: str, agents: list[(str, Module)], run_numbe
         Solve the target instance (size, id) only using inference
     """
     target_instance: Instance = load_instance(path+directory.instances+'/test/'+size+'/instance_'+id+'.pkl')
-    DEBUG_PRINT(target_instance.display())
     start_time = systime.time()
     best_cmax = -1.0
     best_cost = -1.0

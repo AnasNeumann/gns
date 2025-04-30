@@ -36,8 +36,8 @@ MAX_PROCESSING_TIMES_DESIGN = 5
 MAX_PROCESSING_TIMES_ASSEMBLY = 10
 MAX_PROCESSING_TIMES_PROD = 40
 MIN_OUTSOURCING_PRICE_SHARE = 0.3
-MAX_OUTSOURCING_PRICE_SHARE = 1.5
-MIN_OUTSOURCING_TIME_SHARE = 0.8
+MAX_OUTSOURCING_PRICE_SHARE = 1.8
+MIN_OUTSOURCING_TIME_SHARE = 0.6
 MAX_OUTSOURCING_TIME_SHARE = 1.2
 
 # Current Projects, Elements and Operations
@@ -252,7 +252,7 @@ if __name__ == '__main__':
                 SIZE = size
                 print("Start size "+size_folder+"("+str(SIZE)+")...")
                 for i in range(1, nb_train+nb_test+1):
-                    instance = build_one(size_folder, i, random.uniform(0.01, 0.99))
+                    instance = build_one(size_folder, i, round(random.uniform(0.01, 0.99), 2))
                     folder = "train" if i<=nb_train else "test"
                     with open(directory.instances+'/'+folder+'/'+size_folder+'/instance_'+str(i)+'.pkl', 'wb') as f:
                         pickle.dump(instance, f)
