@@ -342,9 +342,12 @@ def c27(model: cp_model.CpModel, i: Instance, s: Solution):
 
 def display_solution(i: Instance, s: Solution, solver: cp_model.CpSolver, show_precedence: bool = False, max_depth: int = 10) -> dict:
     res = {"Cmax": solver.Value(s.Cmax), "projects": []}
+    total_cost = 0
     for p in instance.loop_projects():
         proj = {"project_id": p, "elements": []}
         for e in instance.loop_items(p):
+            if i.external[p][e] and bool(solver.Value(s.E_outsourced[p][e])):
+                total_cost += i.external_cost[p][e]
             elem = {
                 "item_id": e,
                 "outsourced": bool(solver.Value(s.E_outsourced[p][e])),
@@ -397,7 +400,7 @@ def display_solution(i: Instance, s: Solution, solver: cp_model.CpSolver, show_p
         res["precedence_by_resource"] = prec
     # Pretty-print to console
     pprint(res, depth=max_depth, compact=False, sort_dicts=False)
-    return res
+    return res, solver.Value(s.Cmax), total_cost
 
 # #################
 # =*= MAIN CODE =*=
@@ -424,18 +427,21 @@ def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_pa
         model, solution = constraint(model, instance, solution)
     status = solver.Solve(model)
     computing_time = systime.time()-start_time
+    cmax = -1
+    cost = -1
+    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
+        _, cmax, cost = display_solution(instance, solution, solver, show_precedence=True)
     if status == cp_model.OPTIMAL:
-        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [solver.ObjectiveValue()/100], 'gap': [0], 'status': ['optimal'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [solver.ObjectiveValue()/100], 'gap': [0], 'makespan': [cmax], 'total_cost': [cost], 'status': ['optimal'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
     elif status == cp_model.FEASIBLE:
         best_objective = solver.ObjectiveValue()
         lower_bound = solver.BestObjectiveBound()
         gap = abs(best_objective - lower_bound) / abs(best_objective) if best_objective != 0 else -1
-        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [best_objective/100], 'gap': [gap], 'status': ['feasible'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [best_objective/100], 'gap': [gap], 'makespan': [cmax], 'total_cost': [cost], 'status': ['feasible'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
     else:
-        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [-1], 'status': ['failure'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
+        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [-1], 'makespan': [-1], 'total_cost': [-1],  'status': ['failure'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
     print(solutions_df)
-    if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
-        display_solution(instance, solution, solver, show_precedence=True)
+    
     solutions_df.to_csv(solution_path, index=False)
 
 '''
