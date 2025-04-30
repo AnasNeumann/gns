@@ -44,14 +44,13 @@ OUTSOURCING = 0
 SCHEDULING = 1
 MATERIAL_USE = 2
 
-def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Optimizer, memory: Memories, run_number:int, complete_path: str):
-    index = str(run_number)
-    torch.save(embedding_stack.state_dict(), complete_path+'/gnn_weights_'+index+'.pth')
-    torch.save(shared_critic.state_dict(), complete_path+'/critic_weights_'+index+'.pth')
-    torch.save(optimizer.state_dict(), complete_path+'/adam_weights_'+index+'.pth')
+def save_models(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Optimizer, memory: Memories, run_number:int, iteration: int, complete_path: str):
+    torch.save(embedding_stack.state_dict(), f"{complete_path}/gnn_weights_{run_number}_{iteration}.pth")
+    torch.save(shared_critic.state_dict(), f"{complete_path}/critic_weights_{run_number}_{iteration}.pth")
+    torch.save(optimizer.state_dict(), f"{complete_path}/adam_weights_{run_number}_{iteration}.pth")
     for agent, name in agents:
-        torch.save(agent.state_dict(), complete_path+'/'+name+'_weights_'+index+'.pth')
-    with open(complete_path+'/memory_'+index+'.pth', 'wb') as f:
+        torch.save(agent.state_dict(), f"{complete_path}/{name}_weights_{run_number}_{iteration}.pth")
+    with open(f"{complete_path}/memory_{run_number}_{iteration}.pth", 'wb') as f:
             pickle.dump(memory, f)
 
 def search_instance(instances: list[Instance], id: int) -> Instance:
@@ -109,6 +108,7 @@ def multi_agent_stage(train_data: list[Instance], val_data: list[Instance], agen
     """
         Last (4th) optimization stage: all three agents together
     """
+    complete_path = path + directory.models
     vlosses = MAPPO_Losses(agent_names=[name for _,name in agents])
     for iteration in range(iterations):
         print(f"PPO iteration: {iteration+1}/{iterations}:")
@@ -126,10 +126,10 @@ def multi_agent_stage(train_data: list[Instance], val_data: list[Instance], agen
                 vlosses.add(current_vloss)
             for agent,_ in agents:
                 agent.train()
-    complete_path = path + directory.models
-    with open(complete_path+'/validation_'+str(run_number)+'.pkl', 'wb') as f:
-        pickle.dump(vlosses, f)
-    save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=optimizer, memory=reward_MEMORIES, run_number=run_number, complete_path=complete_path)
+        if  iteration % 100 == 0:
+            with open(f'{complete_path}/validation_{run_number}_{iteration}.pkl', 'wb') as f:
+                pickle.dump(vlosses, f)
+            save_models(agents=agents, embedding_stack=embedding_stack, shared_critic=shared_critic, optimizer=optimizer, memory=reward_MEMORIES, run_number=run_number, iteration=iteration, complete_path=complete_path)
 
 def train(agents: list[(Module, str)], embedding_stack: Module, shared_critic: Module, optimizer: Adam, memory: Memories, path: str, solve_function: Callable, device: str, run_number:int):
     """
