@@ -408,18 +408,18 @@ def display_solution(i: Instance, s: Solution, solver: cp_model.CpSolver, show_p
 
 def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_path: str):
     start_time = systime.time()
-    model = cp_model.CpModel()
-    solver = cp_model.CpSolver()
-    solver.parameters.max_time_in_seconds = time * 60.0 * 60.0
-    solver.parameters.relative_gap_limit = 0.01
-    solver.parameters.num_search_workers = cpus
-    solver.parameters.max_memory_in_mb = memory
-    solver.parameters.absolute_gap_limit = 5.0 
-    solver.parameters.use_implied_bounds = True
-    solver.parameters.use_probing_search = True
-    solver.parameters.cp_model_presolve = True
-    solver.parameters.optimize_with_core = True
-    solver.parameters.log_search_progress = True
+    model      = cp_model.CpModel()
+    solver     = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds     = time * 60.0 * 60.0
+    solver.parameters.relative_gap_limit      = 0.0001
+    solver.parameters.num_search_workers      = cpus
+    solver.parameters.max_memory_in_mb        = memory
+    solver.parameters.absolute_gap_limit      = 0.0001
+    solver.parameters.use_implied_bounds      = True
+    solver.parameters.use_probing_search      = True
+    solver.parameters.cp_model_presolve       = True
+    solver.parameters.optimize_with_core      = True
+    solver.parameters.log_search_progress     = True
     solver.parameters.enumerate_all_solutions = False
     model, solution = init_vars(model, instance)
     model, solution = init_objective_function(model, instance, solution)
@@ -435,13 +435,12 @@ def solve_one(instance: Instance, cpus: int, memory: int, time: int, solution_pa
         solutions_df = pd.DataFrame({'index': [instance.id], 'value': [solver.ObjectiveValue()/100], 'gap': [0], 'makespan': [cmax], 'total_cost': [cost], 'status': ['optimal'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
     elif status == cp_model.FEASIBLE:
         best_objective = solver.ObjectiveValue()
-        lower_bound = solver.BestObjectiveBound()
-        gap = abs(best_objective - lower_bound) / abs(best_objective) if best_objective != 0 else -1
-        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [best_objective/100], 'gap': [gap], 'makespan': [cmax], 'total_cost': [cost], 'status': ['feasible'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
+        lower_bound    = solver.BestObjectiveBound()
+        gap            = abs(best_objective - lower_bound) / abs(best_objective) if best_objective != 0 else -1
+        solutions_df   = pd.DataFrame({'index': [instance.id], 'value': [best_objective/100], 'gap': [gap], 'makespan': [cmax], 'total_cost': [cost], 'status': ['feasible'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
     else:
-        solutions_df = pd.DataFrame({'index': [instance.id], 'value': [-1], 'makespan': [-1], 'total_cost': [-1],  'status': ['failure'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
+        solutions_df   = pd.DataFrame({'index': [instance.id], 'value': [-1], 'makespan': [-1], 'total_cost': [-1],  'status': ['failure'], 'computing_time': [computing_time], 'max_time': [time], 'cpu': [cpus], 'max_memory': [memory]})
     print(solutions_df)
-    
     solutions_df.to_csv(solution_path, index=False)
 
 '''

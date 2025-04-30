@@ -5,7 +5,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
-w_final: float = 0.7
+w_final: float = 0.75
 standardization: float = 0.1
 
 class Action: 

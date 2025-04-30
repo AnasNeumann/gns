@@ -52,12 +52,7 @@ python gns_solver.py --train=false --target=true --size=s --id=151 --mode=test -
 ```
 3. Solve all test instances (inference mode only) 
 ```bash
-python python gns_solver.py --train=false --target=false --mode=test --path=./ --number=1
-```
-4. Fine-tune on target instance (using MAPPO) 
-```bash
-python gns_solver.py --train=true --target=true --size=s --id=151 --mode=prod --use_pretrain=true --interactive=false --path=./ --number=1
-python gns_solver.py --train=true --target=true --size=s --id=151 --mode=prod --use_pretrain=false --interactive=true --path=./ --number=1
+python python gns_solver.py --train=false --mode=test --path=./ --number=1
 ```
 
 ## Generate exact jobs for DRAC production
