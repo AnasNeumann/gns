@@ -1,6 +1,4 @@
 from model.instance import Instance
-from tools.common import init_several_1D, init_2D, init_several_2D, init_3D
-import random
 
 # ====================================================================
 # =*= EXACT (Google OR-Tool) SOLUTION DATA STRUCTURE =*=

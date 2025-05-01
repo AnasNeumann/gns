@@ -1,11 +1,10 @@
 import argparse
 from tools.common import init_several_1D, init_2D, init_several_2D, init_3D, load_instance, directory
 from model.instance import Instance
-from model.solution import Solution, HeuristicSolution, Item, Operation
+from model.solution import Solution
 import pandas as pd
 from ortools.sat.python import cp_model
 import time as systime
-import json
 from pprint import pprint
 
 # ###############################################
