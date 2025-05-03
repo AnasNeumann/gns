@@ -33,7 +33,7 @@ PPO_CONF = {
     'validation': 10,
     "value_loss": 0.1,
     "entropy": 0.1,
-    "discount_factor": 1.0,
+    "discount_factor": 0.99,
     "bias_variance_tradeoff": 0.95
 }
 AGENTS = ["outsourcing", "scheduling", "material_use"]
