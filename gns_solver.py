@@ -28,6 +28,7 @@ __author__ = "Anas Neumann - anas.neumann@polymtl.ca"
 __version__ = "1.0.0"
 __license__ = "Apache 2.0 License"
 
+LAST_SUCCESS: int = 900
 DEBUG_PRINT: callable = None
 LEARNING_RATE = 1e-3
 OUTSOURCING = 0
@@ -535,6 +536,7 @@ def load_dataset(path: str, train: bool = True):
 
 def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: bool = False, size: str = "", id: str = "", training_stage: bool=True):
     index = str(run_number)
+    last_itr: str = str(LAST_SUCCESS)
     base_name = f"{size}_{id}_" if fine_tuned else ""
     _rm_size = GNN_CONF['resource_and_material_embedding_size']
     _io_size = GNN_CONF['operation_and_item_embedding_size']
@@ -542,15 +544,15 @@ def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: 
     _ac_size = GNN_CONF['actor_hidden_channels']
     _value_size= GNN_CONF['value_hidden_channels']
     shared_GNN: L1_EmbbedingGNN = L1_EmbbedingGNN(_rm_size, _io_size, _hidden_size, GNN_CONF['nb_layers'])
-    shared_GNN.load_state_dict(torch.load(model_path+'/'+base_name+'gnn_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
+    shared_GNN.load_state_dict(torch.load(model_path+'/'+base_name+'gnn_weights_'+index+'_'+last_itr+'.pth', map_location=torch.device(device), weights_only=True))
     shared_critic: L1_CommonCritic = L1_CommonCritic(_rm_size, _io_size, _value_size)
     shared_critic.load_state_dict(torch.load(model_path+'/'+base_name+'critic_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
     outsourcing_actor: L1_OutousrcingActor = L1_OutousrcingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     scheduling_actor: L1_SchedulingActor = L1_SchedulingActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
     material_actor: L1_MaterialActor = L1_MaterialActor(shared_GNN, shared_critic, _rm_size, _io_size, _ac_size)
-    outsourcing_actor.load_state_dict(torch.load(model_path+'/'+base_name+'outsourcing_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
-    scheduling_actor.load_state_dict(torch.load(model_path+'/'+base_name+'scheduling_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
-    material_actor.load_state_dict(torch.load(model_path+'/'+base_name+'material_use_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
+    outsourcing_actor.load_state_dict(torch.load(model_path+'/'+base_name+'outsourcing_weights_'+index+'_'+last_itr+'.pth', map_location=torch.device(device), weights_only=True))
+    scheduling_actor.load_state_dict(torch.load(model_path+'/'+base_name+'scheduling_weights_'+index+'_'+last_itr+'.pth', map_location=torch.device(device), weights_only=True))
+    material_actor.load_state_dict(torch.load(model_path+'/'+base_name+'material_use_weights_'+index+'_'+last_itr+'.pth', map_location=torch.device(device), weights_only=True))
     shared_GNN = shared_GNN.to(device)
     shared_critic = shared_critic.to(device)
     outsourcing_actor = outsourcing_actor.to(device)
@@ -564,8 +566,8 @@ def load_trained_models(model_path:str, run_number:int, device:str, fine_tuned: 
     torch.compile(material_actor)
     if training_stage:
         optimizer = Adam(list(scheduling_actor.parameters()) + list(material_actor.parameters()) + list(outsourcing_actor.parameters()), lr=LEARNING_RATE)
-        optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'.pth', map_location=torch.device(device), weights_only=True))
-        with open(model_path+'/'+base_name+'memory_'+index+'.pth', 'rb') as file:
+        optimizer.load_state_dict(torch.load(model_path+'/'+base_name+'adam_weights_'+index+'_'+last_itr+'.pth', map_location=torch.device(device), weights_only=True))
+        with open(model_path+'/'+base_name+'memory_'+index+'_'+last_itr+'.pth', 'rb') as file:
             memory: Memories = pickle.load(file)
         return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])], shared_GNN, shared_critic, optimizer, memory
     return [(outsourcing_actor, ACTIONS_NAMES[OUTSOURCING]), (scheduling_actor, ACTIONS_NAMES[SCHEDULING]), (material_actor, ACTIONS_NAMES[MATERIAL_USE])]

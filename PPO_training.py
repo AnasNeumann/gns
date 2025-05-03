@@ -28,13 +28,13 @@ PPO_CONF = {
     "train_iterations": 1000,
     "opt_epochs": 3,
     "batch_size": 20,
-    "clip_ratio": 0.1,
+    "clip_ratio": 0.2,
     "policy_loss": 1.0,
     'validation': 10,
     "value_loss": 0.1,
     "entropy": 0.1,
     "discount_factor": 1.0,
-    "bias_variance_tradeoff": 1.0
+    "bias_variance_tradeoff": 0.95
 }
 AGENTS = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
@@ -70,7 +70,7 @@ def load_training_dataset(run_time: int, path: str, train: bool = True):
     print(f"End of loading {len(instances)} instances!")
     return instances
 
-def train_or_validate_batch(reward_MEMORIES: Memories, agents: list[(Module, str)], batch: list[Instance], agent_names: list[str], train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str):
+def train_or_validate_batch(reward_MEMORIES: Memories, agents: list[(Module, str)], shared_critic: Module, batch: list[Instance], agent_names: list[str], train: bool, epochs: int, optimizer: Optimizer, solve_function: Callable, device: str):
     """
         Train or validate on a batch of instances
     """
@@ -96,6 +96,7 @@ def train_or_validate_batch(reward_MEMORIES: Memories, agents: list[(Module, str
             training_loss: Tensor = batch_result.compute_losses(agents, return_details=False)
             print(f"\t Multi-agent batch loss: {training_loss} - Differentiable computation graph = {training_loss.requires_grad}!")
             training_loss.backward(retain_graph=False)
+            torch.nn.utils.clip_grad_norm_(shared_critic.parameters(), max_norm=1.0)
             optimizer.step()
     else:
         current_vloss, current_details = batch_result.compute_losses(agents, return_details=True)
@@ -114,13 +115,13 @@ def multi_agent_stage(train_data: list[Instance], val_data: list[Instance], agen
             print(f"\t New training batch of size {batch_size}...")
             current_batch: list[Instance] = random.sample(train_data, batch_size)
         random.shuffle(current_batch)
-        train_or_validate_batch(reward_MEMORIES=reward_MEMORIES, agents=agents, batch=current_batch, train=True, epochs=epochs, optimizer=optimizer, agent_names=[name for _,name in agents], solve_function=solve_function, device=device)
+        train_or_validate_batch(reward_MEMORIES=reward_MEMORIES, agents=agents, shared_critic=shared_critic, batch=current_batch, train=True, epochs=epochs, optimizer=optimizer, agent_names=[name for _,name in agents], solve_function=solve_function, device=device)
         if iteration % validation_rate == 0:
             print("\t Validation stage...")
             for agent,_ in agents:
                 agent.eval()
             with torch.no_grad():
-                current_vloss: MAPPO_Loss = train_or_validate_batch(reward_MEMORIES=reward_MEMORIES, agents=agents, batch=val_data, train=False, epochs=-1, agent_names=[name for _,name in agents], optimizer=None, solve_function=solve_function, device=device)
+                current_vloss: MAPPO_Loss = train_or_validate_batch(reward_MEMORIES=reward_MEMORIES, agents=agents, shared_critic=shared_critic, batch=val_data, train=False, epochs=-1, agent_names=[name for _,name in agents], optimizer=None, solve_function=solve_function, device=device)
                 vlosses.add(current_vloss)
             for agent,_ in agents:
                 agent.train()

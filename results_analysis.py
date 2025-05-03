@@ -17,7 +17,8 @@ __license__ = "Apache 2.0 License"
 
 problem_sizes = ['s']#, 'm', 'l', 'xl', 'xxl']
 index_column = 'index'
- 
+last_itr: list[int] = [900]
+
 def combine_results_by_size_and_type(path:str, type: str):
     """
         Combine the solutions of all instances by size and by type of solver
@@ -80,7 +81,8 @@ def display_losses(model_path: str, result_path: str, last: int):
     scheduling_losses: list[float] = []
     material_losses: list[float] = []
     for model_id in range(1, last + 1):
-        with open(model_path+'/validation_'+str(model_id)+'.pkl', 'rb') as file:
+        itr_for_this_run: int = last_itr[model_id-1]
+        with open(model_path+'/validation_'+str(model_id)+'_'+str(itr_for_this_run)+'.pkl', 'rb') as file:
             l: MAPPO_Losses = pickle.load(file)
             value_losses.extend(l.value_loss)
             for agent in l.agents:
@@ -108,5 +110,5 @@ if __name__ == '__main__':
     _model_path = args.path+directory.models
     _result_path = args.path+directory.results
     _solution_types = ['exact', 'gns']
-    combine_all_results(basic_path=_instances_path, solution_types=_solution_types, result_path=_result_path)
+    # combine_all_results(basic_path=_instances_path, solution_types=_solution_types, result_path=_result_path)
     display_losses(model_path=_model_path, result_path=_result_path, last=int(args.last))

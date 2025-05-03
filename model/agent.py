@@ -5,6 +5,7 @@ from typing import Tuple
 import numpy as np
 from torch.nn import Module
 from tools.tensors import add_into_tensor
+import torch.nn.functional as F
 
 # ===========================================================
 # =*= DATA MODEL FOR PPO AGENT CONFIGURATION AND RESULTS =*=
@@ -82,10 +83,11 @@ class Value_OneInstance:
             R = agent.rewards[agent_step] + self.gamma * R
             self.cumulative_returns[t] = R
 
-    # Value Loss = E_t[(values_t - cumulative_returns_t)^2]
+    # Value Loss (MSE version) = E_t[(values_t - cumulative_returns_t)^2]
     # Mean over all steps so value has a similar importance than agents (regardless of their use rate)
+    # Huber loss in new version: L(pred values 'v', cumulative returns 'r') = 1/2 (r-v)^2 for small errors (|r-v| ≤ δ) else δ|r-v| - 1/2 x δ^2
     def compute_value_loss(self) -> Tensor:
-        return torch.mean((self.values - self.cumulative_returns) ** 2)
+        return F.smooth_l1_loss(self.values, self.cumulative_returns)
 
 class Agent_OneInstance:
     def __init__(self, name: str, related_items: Tensor, parent_items: Tensor, w_makespan: Tensor, device: str):
@@ -223,6 +225,19 @@ class Agent_Batch:
         return total_loss, total_policy_loss, total_entropy_bonus
         
 class MultiAgents_Batch:
+    def standardize_return_over_batch(self):
+        all_returns = torch.cat([instance.cumulative_returns for instance in self.value_results.instances])
+        mu_r, std_r = all_returns.mean(), all_returns.std().clamp_min(1e-8)
+        for instance in self.value_results.instances: 
+            instance.cumulative_returns = (instance.cumulative_returns - mu_r) / std_r
+    
+    def standardize_advantage_over_batch(self, agent: Agent_Batch):
+        all_adv = torch.cat([instance.advantages for instance in agent.instances])
+        mu_a, std_a = all_adv.mean(), all_adv.std().clamp_min(1e-8)
+        for instance in agent.instances:
+            instance.advantages = (instance.advantages - mu_a) / std_a
+        return agent
+
     # Init alreay compile interdiate metrics: "cumulative returns" by instance (for value losses) and "generalized advantage estimates" of each agent by instance (for policy loss)
     def __init__(self, batch: list[MultiAgent_OneInstance], agent_names: list[str], gamma: float, lam: float, weight_policy_loss: float, weight_value_loss: float, weight_entropy_bonus: float, clipping_ratio: float):
         self.agents_results: list[Agent_Batch] = []
@@ -231,6 +246,7 @@ class MultiAgents_Batch:
             instance.value.gamma = gamma
             instance.value.compute_cumulative_returns(agents=instance.agents)
             self.value_results.instances.append(instance.value)
+        batch = self.standardize_return_over_batch(batch)
         for agent_name in agent_names:
             agent = Agent_Batch(name=agent_name)
             agent.weight_policy_loss = weight_policy_loss
@@ -242,6 +258,7 @@ class MultiAgents_Batch:
                 agent_one_instance.clipping_ratio = clipping_ratio
                 agent_one_instance.compute_generalized_advantage_estimates(all_values=instance.value)
                 agent.instances.append(agent_one_instance)
+            agent = self.standardize_advantage_over_batch(agent)
             self.agents_results.append(agent)
 
     # Formula for multi agents L = scheduling_losses_over_batch (w1*policy + w2*value + w3*entropy) + outsourcing_losses_over_batch + material_losses_over_batch
