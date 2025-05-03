@@ -169,3 +169,4 @@ gns_env/
 data/out/
 gns_env/**
 __pycache__/
+data/models/memory_*
