@@ -1,0 +1,2 @@
+index,value,gap,makespan,total_cost,status,computing_time,max_time,cpu,max_memory
+193,11020.1,0.47012822025208484,10346,15161,feasible,21601.028866291046,6,32,88
