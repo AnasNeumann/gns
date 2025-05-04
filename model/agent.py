@@ -246,7 +246,7 @@ class MultiAgents_Batch:
             instance.value.gamma = gamma
             instance.value.compute_cumulative_returns(agents=instance.agents)
             self.value_results.instances.append(instance.value)
-        batch = self.standardize_return_over_batch(batch)
+        batch = self.standardize_return_over_batch()
         for agent_name in agent_names:
             agent = Agent_Batch(name=agent_name)
             agent.weight_policy_loss = weight_policy_loss
