@@ -36,7 +36,7 @@ SCHEDULING = 1
 MATERIAL_USE = 2
 ACTIONS_NAMES = ["outsourcing", "scheduling", "material_use"]
 AGENT = 0
-SOLVING_REPETITIONS = 50
+SOLVING_REPETITIONS = 10
 GNN_CONF = {
     'resource_and_material_embedding_size': 8,
     'operation_and_item_embedding_size': 16,
@@ -651,7 +651,7 @@ def solve_all_instances(agents: list[(str, Module)], run_number: int, device: st
     """
     instances: list[Instance] = load_dataset(path=path, train=False)
     for i in instances:
-        if (i.size, i.id) not in [('s', 172)]:
+        if (i.size, i.id):
             solve_only_target(id=str(i.id), size=str(i.size), agents=agents, run_number=run_number, device=device, path=path, repetitions=SOLVING_REPETITIONS)
 
 def agents_ready(device: str, run_number: int, path: str):

@@ -35,7 +35,7 @@ def combine_results_by_size_and_type(path:str, type: str):
         print(f"No files at path={path} for solution type={type}")
         return None
 
-def combine_all_results(basic_path: str, solution_types: str, result_path: str):
+def combine_all_results(basic_path: str, solution_types: list[str], result_path: str):
     """
         Combine all solution in a single object
     """
@@ -110,5 +110,5 @@ if __name__ == '__main__':
     _model_path = args.path+directory.models
     _result_path = args.path+directory.results
     _solution_types = ['exact', 'gns']
-    # combine_all_results(basic_path=_instances_path, solution_types=_solution_types, result_path=_result_path)
+    combine_all_results(basic_path=_instances_path, solution_types=_solution_types, result_path=_result_path)
     display_losses(model_path=_model_path, result_path=_result_path, last=int(args.last))
